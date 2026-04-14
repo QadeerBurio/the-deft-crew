@@ -47,51 +47,136 @@ app.use("/api/resume", require("./routes/resume.routes"));
 app.use("/api/courses", require("./routes/courses.routes"));
 
 // ---------------- AI CHAT (Gemini) ----------------
+// ---------------- AI CHAT (Gemini) ----------------
 app.post("/api/chat", async (req, res) => {
   const { message, history } = req.body;
 
+  // Check if message is provided
+  if (!message) {
+    return res.status(400).json({ 
+      success: false, 
+      error: "Message is required" 
+    });
+  }
+
+  // Check for API key
   if (!process.env.GEMINI_API_KEY) {
-    return res.json({ success: true, reply: "AI key missing" });
+    return res.status(503).json({ 
+      success: false, 
+      error: "AI service is not configured. Please contact support." 
+    });
   }
 
   try {
     let conversationHistory = "";
     if (history?.length) {
-      history.slice(-6).forEach((m) => {
+      // Limit to last 10 messages for better context
+      history.slice(-10).forEach((m) => {
         conversationHistory += `${m.role}: ${m.content}\n`;
       });
     }
 
     const prompt = `
-You are TDC Assistant.
+You are TDC Assistant, a helpful AI assistant for a university platform. 
+Your role is to assist students with:
+- University admissions and applications
+- Course information and recommendations
+- Scholarship opportunities
+- Campus facilities and services
+- Event information
+- General academic guidance
+
+Be friendly, professional, and concise. Keep responses under 3-4 sentences when possible.
 
 ${conversationHistory}
 User: ${message}
-Assistant:
-`;
+Assistant:`;
 
     const response = await axios.post(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
       {
-        contents: [{ parts: [{ text: prompt }] }],
+        contents: [{ 
+          parts: [{ 
+            text: prompt 
+          }] 
+        }],
         generationConfig: {
           temperature: 0.7,
-          maxOutputTokens: 500
-        }
+          maxOutputTokens: 500,
+          topP: 0.95,
+          topK: 40
+        },
+        safetySettings: [
+          {
+            category: "HARM_CATEGORY_HARASSMENT",
+            threshold: "BLOCK_MEDIUM_AND_ABOVE"
+          },
+          {
+            category: "HARM_CATEGORY_HATE_SPEECH",
+            threshold: "BLOCK_MEDIUM_AND_ABOVE"
+          }
+        ]
+      },
+      {
+        timeout: 15000 // 15 second timeout
       }
     );
 
-    const reply =
-      response.data.candidates?.[0]?.content?.parts?.[0]?.text ||
-      "No response";
+    const reply = response.data.candidates?.[0]?.content?.parts?.[0]?.text || null;
+    
+    if (!reply) {
+      return res.status(500).json({
+        success: false,
+        error: "AI service returned an empty response. Please try again."
+      });
+    }
 
-    res.json({ success: true, reply });
+    // Clean up the response
+    const cleanedReply = reply.trim().replace(/^Assistant:\s*/i, '');
+    
+    res.json({ 
+      success: true, 
+      reply: cleanedReply,
+      timestamp: new Date().toISOString()
+    });
+    
   } catch (err) {
-    console.log("AI error:", err.message);
-    res.json({ success: true, reply: "Fallback response" });
+    console.error("AI Chat Error:", {
+      message: err.message,
+      code: err.code,
+      response: err.response?.data
+    });
+
+    // Handle specific error types
+    if (err.code === 'ECONNABORTED') {
+      return res.status(504).json({
+        success: false,
+        error: "Request timeout. Please try again."
+      });
+    }
+    
+    if (err.response?.status === 429) {
+      return res.status(429).json({
+        success: false,
+        error: "AI service is busy. Please wait a moment and try again."
+      });
+    }
+    
+    if (err.response?.status === 403) {
+      return res.status(503).json({
+        success: false,
+        error: "AI service authentication failed. Please contact support."
+      });
+    }
+
+    // Default error response
+    res.status(500).json({
+      success: false,
+      error: "Unable to process your request. Please try again in a moment.",
+      details: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
   }
 });
-
 // ---------------- SOCKET.IO CHAT & CALL HANDLER ----------------
 const { Message, Conversation } = require('./models/Chat');
 
