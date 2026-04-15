@@ -182,38 +182,119 @@ router.post("/login", async (req, res) => {
 });
 
 // -------------------- FORGOT PASSWORD (SEND OTP) --------------------
+// router.post("/forgot-password", async (req, res) => {
+//   const { emailOrPhone } = req.body;
+//   if (!emailOrPhone)
+//     return res.status(400).json({ message: "Email or phone required" });
+
+//   try {
+//     const user = await User.findOne({
+//       $or: [{ email: emailOrPhone.toLowerCase() }, { phone: emailOrPhone }],
+//     });
+
+//     if (!user) return res.status(404).json({ message: "User not found" });
+
+//     const otp = Math.floor(100000 + Math.random() * 900000).toString();
+//     otpStore[user._id] = { otp, expires: Date.now() + 5 * 60 * 1000 };
+
+//     // Use a separate try-catch for the email so the API still responds
+//     try {
+//       await transporter.sendMail({
+//         from: `"The Deft Crew" <${process.env.EMAIL_USER}>`,
+//         to: user.email,
+//         subject: "OTP for Password Reset",
+//         html: `<p>Your OTP is <b>${otp}</b>. It will expire in 5 minutes.</p>`,
+//       });
+
+//       return res.json({ message: "OTP sent successfully", userId: user._id });
+//     } catch (mailError) {
+//       console.error("MAIL_SYSTEM_ERROR:", mailError);
+//       return res.status(503).json({
+//         message: "Email service temporarily unavailable",
+//         error: mailError.message,
+//       });
+//     }
+//   } catch (err) {
+//     console.error("SERVER_ERROR:", err);
+//     return res.status(500).json({ error: err.message });
+//   }
+// });
+// In your auth.js backend file, update the forgot-password route:
+
 router.post("/forgot-password", async (req, res) => {
   const { emailOrPhone } = req.body;
-  if (!emailOrPhone)
+  
+  console.log("Received request for:", emailOrPhone); // Debug log
+  
+  if (!emailOrPhone) {
     return res.status(400).json({ message: "Email or phone required" });
+  }
 
   try {
+    // FIX: Better search with case-insensitive email
     const user = await User.findOne({
-      $or: [{ email: emailOrPhone.toLowerCase() }, { phone: emailOrPhone }],
+      $or: [
+        { email: { $regex: new RegExp(`^${emailOrPhone.toLowerCase()}$`, 'i') } },
+        { phone: emailOrPhone }
+      ],
     });
 
-    if (!user) return res.status(404).json({ message: "User not found" });
+    if (!user) {
+      return res.status(404).json({ message: "User not found with this email/phone" });
+    }
 
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     otpStore[user._id] = { otp, expires: Date.now() + 5 * 60 * 1000 };
 
-    // Use a separate try-catch for the email so the API still responds
+    console.log(`OTP for ${user.email}: ${otp}`); // Debug log
+
+    // Send email with better error handling
     try {
       await transporter.sendMail({
         from: `"The Deft Crew" <${process.env.EMAIL_USER}>`,
         to: user.email,
-        subject: "OTP for Password Reset",
-        html: `<p>Your OTP is <b>${otp}</b>. It will expire in 5 minutes.</p>`,
+        subject: "OTP for Password Reset - The Deft Crew",
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #08634f;">Password Reset Request</h2>
+            <p>Hello ${user.name || 'User'},</p>
+            <p>You requested to reset your password. Here is your OTP:</p>
+            <div style="background-color: #f4f4f4; padding: 15px; text-align: center; font-size: 24px; font-weight: bold; letter-spacing: 5px;">
+              ${otp}
+            </div>
+            <p>This OTP will expire in <strong>5 minutes</strong>.</p>
+            <p>If you didn't request this, please ignore this email.</p>
+            <hr>
+            <p style="color: #666; font-size: 12px;">The Deft Crew - Student Discount Platform</p>
+          </div>
+        `,
       });
 
-      return res.json({ message: "OTP sent successfully", userId: user._id });
+      console.log("Email sent successfully to:", user.email);
+      
+      return res.json({ 
+        message: "OTP sent successfully to your email", 
+        userId: user._id 
+      });
+      
     } catch (mailError) {
       console.error("MAIL_SYSTEM_ERROR:", mailError);
+      
+      // For development, return OTP in response (remove in production)
+      if (process.env.NODE_ENV === 'development') {
+        return res.json({ 
+          message: `OTP: ${otp} (Email failed - Development mode)`, 
+          userId: user._id,
+          devOtp: otp 
+        });
+      }
+      
       return res.status(503).json({
-        message: "Email service temporarily unavailable",
-        error: mailError.message,
+        message: "Unable to send email. Please try again later.",
+        error: mailError.message
       });
     }
+    
   } catch (err) {
     console.error("SERVER_ERROR:", err);
     return res.status(500).json({ error: err.message });
