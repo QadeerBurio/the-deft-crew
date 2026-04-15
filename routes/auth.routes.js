@@ -182,144 +182,44 @@ router.post("/login", async (req, res) => {
 });
 
 // -------------------- FORGOT PASSWORD (SEND OTP) --------------------
-// router.post("/forgot-password", async (req, res) => {
-//   const { emailOrPhone } = req.body;
-//   if (!emailOrPhone)
-//     return res.status(400).json({ message: "Email or phone required" });
-
-//   try {
-//     const user = await User.findOne({
-//       $or: [{ email: emailOrPhone.toLowerCase() }, { phone: emailOrPhone }],
-//     });
-
-//     if (!user) return res.status(404).json({ message: "User not found" });
-
-//     const otp = Math.floor(100000 + Math.random() * 900000).toString();
-//     otpStore[user._id] = { otp, expires: Date.now() + 5 * 60 * 1000 };
-
-//     // Use a separate try-catch for the email so the API still responds
-//     try {
-//       await transporter.sendMail({
-//         from: `"The Deft Crew" <${process.env.EMAIL_USER}>`,
-//         to: user.email,
-//         subject: "OTP for Password Reset",
-//         html: `<p>Your OTP is <b>${otp}</b>. It will expire in 5 minutes.</p>`,
-//       });
-
-//       return res.json({ message: "OTP sent successfully", userId: user._id });
-//     } catch (mailError) {
-//       console.error("MAIL_SYSTEM_ERROR:", mailError);
-//       return res.status(503).json({
-//         message: "Email service temporarily unavailable",
-//         error: mailError.message,
-//       });
-//     }
-//   } catch (err) {
-//     console.error("SERVER_ERROR:", err);
-//     return res.status(500).json({ error: err.message });
-//   }
-// });
-// In your auth.js backend file, update the forgot-password route:
-
-// In auth.js - Modified forgot-password route for Railway
 router.post("/forgot-password", async (req, res) => {
   const { emailOrPhone } = req.body;
-  
-  console.log("Received request for:", emailOrPhone);
-  
-  if (!emailOrPhone) {
+  if (!emailOrPhone)
     return res.status(400).json({ message: "Email or phone required" });
-  }
 
   try {
     const user = await User.findOne({
-      $or: [
-        { email: { $regex: new RegExp(`^${emailOrPhone.toLowerCase()}$`, 'i') } },
-        { phone: emailOrPhone }
-      ],
+      $or: [{ email: emailOrPhone.toLowerCase() }, { phone: emailOrPhone }],
     });
 
-    if (!user) {
-      return res.status(404).json({ message: "User not found with this email/phone" });
-    }
+    if (!user) return res.status(404).json({ message: "User not found" });
 
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     otpStore[user._id] = { otp, expires: Date.now() + 5 * 60 * 1000 };
 
-    console.log(`=================================`);
-    console.log(`🔐 PASSWORD RESET OTP FOR ${user.email}`);
-    console.log(`📧 Email: ${user.email}`);
-    console.log(`🔢 OTP Code: ${otp}`);
-    console.log(`🆔 User ID: ${user._id}`);
-    console.log(`=================================`);
-
-    // Try to send email but don't fail on Railway
-    let emailSent = false;
-    let emailError = null;
-    
+    // Use a separate try-catch for the email so the API still responds
     try {
-      // Test if transporter is configured correctly
-      await transporter.verify();
-      
       await transporter.sendMail({
         from: `"The Deft Crew" <${process.env.EMAIL_USER}>`,
         to: user.email,
-        subject: "OTP for Password Reset - The Deft Crew",
-        html: `
-          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-            <h2 style="color: #08634f;">Password Reset Request</h2>
-            <p>Hello ${user.name || 'User'},</p>
-            <p>You requested to reset your password. Here is your OTP:</p>
-            <div style="background-color: #f4f4f4; padding: 15px; text-align: center; font-size: 24px; font-weight: bold; letter-spacing: 5px;">
-              ${otp}
-            </div>
-            <p>This OTP will expire in <strong>5 minutes</strong>.</p>
-            <p>If you didn't request this, please ignore this email.</p>
-            <hr>
-            <p style="color: #666; font-size: 12px;">The Deft Crew - Student Discount Platform</p>
-          </div>
-        `,
+        subject: "OTP for Password Reset",
+        html: `<p>Your OTP is <b>${otp}</b>. It will expire in 5 minutes.</p>`,
       });
-      emailSent = true;
-      console.log("✅ Email sent successfully to:", user.email);
-      
+
+      return res.json({ message: "OTP sent successfully", userId: user._id });
     } catch (mailError) {
-      console.error("❌ MAIL_SYSTEM_ERROR:", mailError.message);
-      emailError = mailError.message;
+      console.error("MAIL_SYSTEM_ERROR:", mailError);
+      return res.status(503).json({
+        message: "Email service temporarily unavailable",
+        error: mailError.message,
+      });
     }
-    
-    // Return success with OTP in console for debugging
-    // In production, you should still return success even if email fails
-    // Users can contact support if they don't receive email
-    return res.json({ 
-      message: emailSent ? "OTP sent successfully to your email" : "OTP generated. If you don't receive email, please check spam folder or contact support.",
-      userId: user._id,
-      // Only include OTP in response for development/testing
-      ...(process.env.NODE_ENV === 'development' && { devOtp: otp })
-    });
-    
   } catch (err) {
     console.error("SERVER_ERROR:", err);
     return res.status(500).json({ error: err.message });
   }
 });
 
-// Add this to your auth.js backend file
-router.get("/me", authMiddleware, async (req, res) => {
-  try {
-    const user = await User.findById(req.userId)
-      .select("-password")
-      .populate("university");
-    
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
-    
-    res.json(user);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
 // -------------------- VERIFY OTP --------------------
 router.post("/verify-otp", async (req, res) => {
   const { userId, otp } = req.body;
