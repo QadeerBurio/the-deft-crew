@@ -221,17 +221,17 @@ router.post("/login", async (req, res) => {
 // });
 // In your auth.js backend file, update the forgot-password route:
 
+// In auth.js - Modified forgot-password route for Railway
 router.post("/forgot-password", async (req, res) => {
   const { emailOrPhone } = req.body;
   
-  console.log("Received request for:", emailOrPhone); // Debug log
+  console.log("Received request for:", emailOrPhone);
   
   if (!emailOrPhone) {
     return res.status(400).json({ message: "Email or phone required" });
   }
 
   try {
-    // FIX: Better search with case-insensitive email
     const user = await User.findOne({
       $or: [
         { email: { $regex: new RegExp(`^${emailOrPhone.toLowerCase()}$`, 'i') } },
@@ -246,10 +246,21 @@ router.post("/forgot-password", async (req, res) => {
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     otpStore[user._id] = { otp, expires: Date.now() + 5 * 60 * 1000 };
 
-    console.log(`OTP for ${user.email}: ${otp}`); // Debug log
+    console.log(`=================================`);
+    console.log(`🔐 PASSWORD RESET OTP FOR ${user.email}`);
+    console.log(`📧 Email: ${user.email}`);
+    console.log(`🔢 OTP Code: ${otp}`);
+    console.log(`🆔 User ID: ${user._id}`);
+    console.log(`=================================`);
 
-    // Send email with better error handling
+    // Try to send email but don't fail on Railway
+    let emailSent = false;
+    let emailError = null;
+    
     try {
+      // Test if transporter is configured correctly
+      await transporter.verify();
+      
       await transporter.sendMail({
         from: `"The Deft Crew" <${process.env.EMAIL_USER}>`,
         to: user.email,
@@ -269,31 +280,23 @@ router.post("/forgot-password", async (req, res) => {
           </div>
         `,
       });
-
-      console.log("Email sent successfully to:", user.email);
-      
-      return res.json({ 
-        message: "OTP sent successfully to your email", 
-        userId: user._id 
-      });
+      emailSent = true;
+      console.log("✅ Email sent successfully to:", user.email);
       
     } catch (mailError) {
-      console.error("MAIL_SYSTEM_ERROR:", mailError);
-      
-      // For development, return OTP in response (remove in production)
-      if (process.env.NODE_ENV === 'development') {
-        return res.json({ 
-          message: `OTP: ${otp} (Email failed - Development mode)`, 
-          userId: user._id,
-          devOtp: otp 
-        });
-      }
-      
-      return res.status(503).json({
-        message: "Unable to send email. Please try again later.",
-        error: mailError.message
-      });
+      console.error("❌ MAIL_SYSTEM_ERROR:", mailError.message);
+      emailError = mailError.message;
     }
+    
+    // Return success with OTP in console for debugging
+    // In production, you should still return success even if email fails
+    // Users can contact support if they don't receive email
+    return res.json({ 
+      message: emailSent ? "OTP sent successfully to your email" : "OTP generated. If you don't receive email, please check spam folder or contact support.",
+      userId: user._id,
+      // Only include OTP in response for development/testing
+      ...(process.env.NODE_ENV === 'development' && { devOtp: otp })
+    });
     
   } catch (err) {
     console.error("SERVER_ERROR:", err);
@@ -301,6 +304,22 @@ router.post("/forgot-password", async (req, res) => {
   }
 });
 
+// Add this to your auth.js backend file
+router.get("/me", authMiddleware, async (req, res) => {
+  try {
+    const user = await User.findById(req.userId)
+      .select("-password")
+      .populate("university");
+    
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    
+    res.json(user);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 // -------------------- VERIFY OTP --------------------
 router.post("/verify-otp", async (req, res) => {
   const { userId, otp } = req.body;
