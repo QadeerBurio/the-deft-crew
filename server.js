@@ -31,55 +31,6 @@ app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 // ---------------- DATABASE ----------------
 connectDB();
 
-// ==========================================
-// 🚀 DATABASE INDEXES (ADD THIS SECTION)
-// ==========================================
-const createIndexes = async () => {
-  try {
-    console.log('🔄 Creating database indexes for performance...');
-    
-    // Users collection indexes (Brands are stored in Users collection)
-    await mongoose.connection.collection('users').createIndex({ role: 1 });
-    console.log('  ✅ Index: users.role');
-    
-    await mongoose.connection.collection('users').createIndex({ name: 'text' });
-    console.log('  ✅ Index: users.name (text)');
-    
-    // Offers collection indexes (CRITICAL for brands performance)
-    await mongoose.connection.collection('offers').createIndex({ brand: 1 });
-    console.log('  ✅ Index: offers.brand');
-    
-    await mongoose.connection.collection('offers').createIndex({ category: 1 });
-    console.log('  ✅ Index: offers.category');
-    
-    await mongoose.connection.collection('offers').createIndex({ discountPercentage: -1 });
-    console.log('  ✅ Index: offers.discountPercentage');
-    
-    await mongoose.connection.collection('offers').createIndex({ isOnline: 1 });
-    console.log('  ✅ Index: offers.isOnline');
-    
-    // Compound index for fast filtered queries
-    await mongoose.connection.collection('offers').createIndex({ 
-      brand: 1, 
-      discountPercentage: -1, 
-      category: 1 
-    });
-    console.log('  ✅ Index: offers (compound: brand + discount + category)');
-    
-    // Additional useful indexes
-    await mongoose.connection.collection('offers').createIndex({ claimedBy: 1 });
-    console.log('  ✅ Index: offers.claimedBy');
-    
-    await mongoose.connection.collection('offers').createIndex({ createdAt: -1 });
-    console.log('  ✅ Index: offers.createdAt');
-    
-    console.log('✅ All database indexes created successfully!\n');
-  } catch (error) {
-    console.error('❌ Error creating indexes:', error.message);
-    // Don't crash the server if index creation fails
-  }
-};
-
 // ---------------- ROUTES ----------------
 app.use("/api/auth", require("./routes/auth.routes"));
 app.use("/api/universities", require("./routes/university.routes"));
@@ -95,6 +46,7 @@ app.use("/api/events", require("./routes/event.routes"));
 app.use("/api/resume", require("./routes/resume.routes"));
 app.use("/api/courses", require("./routes/courses.routes"));
 
+// ---------------- AI CHAT (Gemini) ----------------
 // ---------------- AI CHAT (Gemini) ----------------
 app.post("/api/chat", async (req, res) => {
   const { message, history } = req.body;
@@ -225,7 +177,6 @@ Assistant:`;
     });
   }
 });
-
 // ---------------- SOCKET.IO CHAT & CALL HANDLER ----------------
 const { Message, Conversation } = require('./models/Chat');
 
@@ -449,41 +400,9 @@ io.on('connection', (socket) => {
   });
 });
 
-// ==========================================
-// 🚀 START SERVER WITH INDEXES (UPDATED)
-// ==========================================
+// ---------------- START SERVER ----------------
 const PORT = process.env.PORT || 5000;
-
-// Connect to MongoDB and create indexes before starting server
-const startServer = async () => {
-  try {
-    // Wait for MongoDB connection
-    const mongoose = require('mongoose');
-    
-    // Make sure mongoose is connected (connectDB should handle this)
-    if (mongoose.connection.readyState !== 1) {
-      console.log('⏳ Waiting for database connection...');
-      await new Promise((resolve, reject) => {
-        mongoose.connection.once('connected', resolve);
-        mongoose.connection.once('error', reject);
-      });
-    }
-    
-    console.log('✅ Database connected');
-    
-    // Create indexes
-    await createIndexes();
-    
-    // Start the server
-    server.listen(PORT, () => {
-      console.log(`🚀 Server running on port ${PORT}`);
-      console.log(`📡 Socket.IO ready for connections`);
-    });
-  } catch (error) {
-    console.error('❌ Failed to start server:', error);
-    process.exit(1);
-  }
-};
-
-// Start everything
-startServer();
+server.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`📡 Socket.IO ready for connections`);
+});
