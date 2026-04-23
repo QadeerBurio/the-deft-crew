@@ -9,18 +9,7 @@ const router = express.Router();
 const { storage } = require("../config/cloudinary"); 
 const upload = multer({ storage });
 
-// MULTER SETUP: For handling image uploads
-// const storage = multer.diskStorage({
-//   destination: "uploads/offers",
 
-//   filename: (req, file, cb) => {
-//     cb(null, Date.now() + "-" + file.originalname);
-//   },
-// });
-
-// const upload = multer({ storage });
-
-// 1-Brand Management Routes
 
 // CREATE: Create new offer (and delete old ones for that brand)
 router.post("/", auth, upload.single("image"), async (req, res) => {
