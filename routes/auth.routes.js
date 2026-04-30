@@ -16,6 +16,9 @@ const mongoose = require("mongoose");
 const Package = require("../models/Package");
 const router = express.Router();
 
+
+// --- ADD THIS LINE ---
+const otpStore = {};
 const transporter = nodemailer.createTransport({
   service: "gmail",
   auth: {
@@ -187,6 +190,7 @@ router.post("/login", async (req, res) => {
 });
 
 // -------------------- FORGOT PASSWORD (SEND OTP) - FIXED --------------------
+// -------------------- FORGOT PASSWORD (SEND OTP) --------------------
 router.post("/forgot-password", async (req, res) => {
   const { emailOrPhone } = req.body;
 
@@ -195,7 +199,6 @@ router.post("/forgot-password", async (req, res) => {
   }
 
   try {
-    // Find user by email OR phone
     const user = await User.findOne({
       $or: [
         { email: emailOrPhone.toLowerCase().trim() },
@@ -207,10 +210,9 @@ router.post("/forgot-password", async (req, res) => {
       return res.status(404).json({ message: "No account found with this email or phone" });
     }
 
-    // Generate 6-digit OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
-    // Store OTP with 5-minute expiry
+    // ✅ Now otpStore is defined
     otpStore[user._id] = {
       otp,
       expires: Date.now() + 5 * 60 * 1000,
@@ -218,7 +220,6 @@ router.post("/forgot-password", async (req, res) => {
 
     console.log(`🔑 OTP for ${user.email}: ${otp}`);
 
-    // Send email
     try {
       await transporter.sendMail({
         from: `"The Deft Crew" <abdulqadeerburiro110@gmail.com>`,
@@ -228,20 +229,17 @@ router.post("/forgot-password", async (req, res) => {
           <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 20px;">
             <h2 style="color: #1a1a1a;">Password Reset Request</h2>
             <p>Hello ${user.name || 'User'},</p>
-            <p>You requested a password reset. Use the following OTP code:</p>
+            <p>Use the following OTP code:</p>
             <div style="background: #f9c349; padding: 20px; text-align: center; border-radius: 10px; margin: 20px 0;">
               <h1 style="color: #1a1a1a; font-size: 36px; letter-spacing: 5px; margin: 0;">${otp}</h1>
             </div>
-            <p style="color: #666;">This OTP will expire in <strong>5 minutes</strong>.</p>
-            <p style="color: #999; font-size: 12px;">If you didn't request this, please ignore this email.</p>
+            <p style="color: #666;">This OTP expires in <strong>5 minutes</strong>.</p>
           </div>
         `,
       });
-
       console.log(`✅ OTP email sent to ${user.email}`);
     } catch (mailError) {
       console.log("⚠️ Email failed but OTP generated:", otp);
-      // Still return success with OTP for development
     }
 
     return res.json({
