@@ -19,13 +19,27 @@ const router = express.Router();
 // --- In-memory OTP store (replace with Redis for production) ---
 const otpStore = {};
 
-// --- Nodemailer setup ---
+// --- Nodemailer setup with better error handling ---
 const transporter = nodemailer.createTransport({
   service: "gmail",
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS,
   },
+  // Add timeout settings
+  connectionTimeout: 10000,
+  greetingTimeout: 10000,
+  socketTimeout: 15000,
+});
+
+// Verify transporter on startup
+transporter.verify(function (error, success) {
+  if (error) {
+    console.log("⚠️ Email transporter verification failed:", error.message);
+    console.log("Email notifications will not work until fixed.");
+  } else {
+    console.log("✅ Email server is ready to send messages");
+  }
 });
 
 router.post("/signup", async (req, res) => {
@@ -181,89 +195,198 @@ router.post("/login", async (req, res) => {
   }
 });
 
-// -------------------- FORGOT PASSWORD (SEND OTP) --------------------
+// -------------------- FORGOT PASSWORD (SEND OTP) - FIXED --------------------
 router.post("/forgot-password", async (req, res) => {
   const { emailOrPhone } = req.body;
-  if (!emailOrPhone)
+  
+  if (!emailOrPhone) {
     return res.status(400).json({ message: "Email or phone required" });
+  }
 
   try {
+    // Find user by email OR phone
     const user = await User.findOne({
-      $or: [{ email: emailOrPhone.toLowerCase() }, { phone: emailOrPhone }],
+      $or: [
+        { email: emailOrPhone.toLowerCase().trim() }, 
+        { phone: emailOrPhone.trim() }
+      ],
     });
 
-    if (!user) return res.status(404).json({ message: "User not found" });
+    if (!user) {
+      return res.status(404).json({ message: "No account found with this email or phone" });
+    }
 
+    // Generate 6-digit OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    otpStore[user._id] = { otp, expires: Date.now() + 5 * 60 * 1000 };
+    
+    // Store OTP with 5-minute expiry
+    otpStore[user._id] = { 
+      otp, 
+      expires: Date.now() + 5 * 60 * 1000 
+    };
 
-    // Use a separate try-catch for the email so the API still responds
+    console.log(`🔑 OTP for ${user.email}: ${otp}`); // For debugging
+
+    // Try to send email
+    try {
+      const mailOptions = {
+        from: `"The Deft Crew" <${process.env.EMAIL_USER}>`,
+        to: user.email,
+        subject: "Password Reset OTP - The Deft Crew",
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 20px;">
+            <h2 style="color: #1a1a1a;">Password Reset Request</h2>
+            <p>Hello ${user.name || 'User'},</p>
+            <p>You requested a password reset. Use the following OTP code:</p>
+            <div style="background: #f9c349; padding: 20px; text-align: center; border-radius: 10px; margin: 20px 0;">
+              <h1 style="color: #1a1a1a; font-size: 36px; letter-spacing: 5px; margin: 0;">${otp}</h1>
+            </div>
+            <p style="color: #666;">This OTP will expire in <strong>5 minutes</strong>.</p>
+            <p style="color: #999; font-size: 12px;">If you didn't request this, please ignore this email.</p>
+            <hr style="border: 1px solid #eee; margin: 20px 0;">
+            <p style="color: #999; font-size: 11px; text-align: center;">The Deft Crew • Karachi • 2026</p>
+          </div>
+        `,
+      };
+
+      await transporter.sendMail(mailOptions);
+      console.log(`✅ OTP email sent to ${user.email}`);
+
+      return res.json({ 
+        message: "OTP sent successfully to your email", 
+        userId: user._id,
+        email: user.email.replace(/(.{3}).*(@.*)/, "$1***$2") // Mask email for security
+      });
+
+    } catch (mailError) {
+      console.error("❌ Email sending failed:", mailError.message);
+      
+      // If email fails, still allow OTP for development/testing
+      // In production, you might want to return an error
+      console.log(`🔧 Development mode: OTP is ${otp}`);
+      
+      return res.json({ 
+        message: "OTP generated. Email delivery delayed. Please try again or contact support.",
+        userId: user._id,
+        email: user.email.replace(/(.{3}).*(@.*)/, "$1***$2"),
+        // Remove this in production:
+        devOtp: process.env.NODE_ENV === 'production' ? undefined : otp
+      });
+    }
+
+  } catch (err) {
+    console.error("❌ Forgot password error:", err);
+    return res.status(500).json({ 
+      message: "Server error. Please try again later.",
+      error: process.env.NODE_ENV === 'production' ? undefined : err.message
+    });
+  }
+});
+
+// -------------------- VERIFY OTP - FIXED --------------------
+router.post("/verify-otp", async (req, res) => {
+  const { userId, otp } = req.body;
+
+  if (!userId || !otp) {
+    return res.status(400).json({ message: "User ID and OTP are required" });
+  }
+
+  try {
+    const record = otpStore[userId];
+
+    if (!record) {
+      return res.status(400).json({ message: "No OTP request found. Please request a new OTP." });
+    }
+
+    if (record.expires < Date.now()) {
+      delete otpStore[userId]; // Clean up expired OTP
+      return res.status(400).json({ message: "OTP has expired. Please request a new one." });
+    }
+
+    if (record.otp !== otp.trim()) {
+      return res.status(400).json({ message: "Invalid OTP. Please check and try again." });
+    }
+
+    // Generate temporary token for password reset
+    const tempToken = jwt.sign(
+      { id: userId, purpose: 'password-reset' }, 
+      process.env.JWT_SECRET, 
+      { expiresIn: "10m" }
+    );
+
+    // Clean up used OTP
+    delete otpStore[userId];
+
+    console.log(`✅ OTP verified for user ${userId}`);
+
+    res.json({ 
+      message: "OTP verified successfully", 
+      resetToken: tempToken 
+    });
+
+  } catch (err) {
+    console.error("❌ OTP verification error:", err);
+    res.status(500).json({ message: "Server error during verification" });
+  }
+});
+
+// -------------------- RESET PASSWORD - FIXED --------------------
+router.post("/reset-password", async (req, res) => {
+  const { resetToken, newPassword } = req.body;
+
+  if (!resetToken || !newPassword) {
+    return res.status(400).json({ message: "Reset token and new password are required" });
+  }
+
+  if (newPassword.length < 6) {
+    return res.status(400).json({ message: "Password must be at least 6 characters" });
+  }
+
+  try {
+    const decoded = jwt.verify(resetToken, process.env.JWT_SECRET);
+    
+    if (decoded.purpose !== 'password-reset') {
+      return res.status(400).json({ message: "Invalid reset token" });
+    }
+
+    const user = await User.findById(decoded.id);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // Hash new password
+    user.password = await bcrypt.hash(newPassword, 10);
+    await user.save();
+
+    console.log(`✅ Password reset successful for user ${user._id}`);
+
+    // Send confirmation email
     try {
       await transporter.sendMail({
         from: `"The Deft Crew" <${process.env.EMAIL_USER}>`,
         to: user.email,
-        subject: "OTP for Password Reset",
-        html: `<p>Your OTP is <b>${otp}</b>. It will expire in 5 minutes.</p>`,
+        subject: "Password Reset Successful",
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 20px;">
+            <h2 style="color: #1a1a1a;">Password Reset Successful</h2>
+            <p>Hello ${user.name || 'User'},</p>
+            <p>Your password has been successfully reset.</p>
+            <p style="color: #666;">If you didn't make this change, please contact support immediately.</p>
+          </div>
+        `,
       });
-
-      return res.json({ message: "OTP sent successfully", userId: user._id });
-    } catch (mailError) {
-      console.error("MAIL_SYSTEM_ERROR:", mailError);
-      return res.status(503).json({
-        message: "Email service temporarily unavailable",
-        error: mailError.message,
-      });
+    } catch (emailErr) {
+      console.log("Confirmation email failed:", emailErr.message);
     }
+
+    res.json({ message: "Password reset successfully. You can now login with your new password." });
+
   } catch (err) {
-    console.error("SERVER_ERROR:", err);
-    return res.status(500).json({ error: err.message });
-  }
-});
-
-// -------------------- VERIFY OTP --------------------
-router.post("/verify-otp", async (req, res) => {
-  const { userId, otp } = req.body;
-
-  const record = otpStore[userId];
-
-  if (!record) return res.status(400).json({ message: "No OTP sent" });
-  if (record.expires < Date.now())
-    return res.status(400).json({ message: "OTP expired" });
-  if (record.otp !== otp)
-    return res.status(400).json({ message: "Invalid OTP" });
-
-  const tempToken = jwt.sign({ id: userId }, process.env.JWT_SECRET, {
-    expiresIn: "10m",
-  });
-
-  delete otpStore[userId];
-
-  res.json({ message: "OTP verified", resetToken: tempToken });
-});
-
-// -------------------- RESET PASSWORD --------------------
-router.post("/reset-password", async (req, res) => {
-  const { resetToken, newPassword } = req.body;
-
-  if (!resetToken || !newPassword)
-    return res.status(400).json({ message: "Token and new password required" });
-
-  try {
-    const decoded = jwt.verify(resetToken, process.env.JWT_SECRET);
-
-    const user = await User.findById(decoded.id);
-    if (!user) return res.status(404).json({ message: "User not found" });
-
-    user.password = await bcrypt.hash(newPassword, 10);
-    await user.save();
-
-    delete otpStore[decoded.id];
-
-    res.json({ message: "Password reset successfully" });
-  } catch (err) {
-    res
-      .status(400)
-      .json({ message: "Session expired. Please request a new OTP." });
+    if (err.name === "TokenExpiredError") {
+      return res.status(400).json({ message: "Reset session expired. Please request a new OTP." });
+    }
+    console.error("❌ Password reset error:", err);
+    res.status(400).json({ message: "Invalid or expired reset token" });
   }
 });
 
