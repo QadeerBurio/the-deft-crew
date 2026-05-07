@@ -20,10 +20,10 @@ const userSchema = new mongoose.Schema(
       required: [true, "Password is required"],
     },
     role: {
-      type: String,
-      enum: ["student", "brand", "admin"],
-      default: "student",
-    },
+  type: String,
+  enum: ["student", "brand", "admin", "traveler", "employee"],
+  default: "student",
+},
 
     // --- VERIFICATION & STATUS ---
     isAlumni: { type: Boolean, default: false },

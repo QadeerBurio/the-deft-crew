@@ -204,57 +204,57 @@ router.patch("/verify-user/:targetUserId", auth, async (req, res) => {
 
 // Jobs Portal API's
 
-// Create a new Job
-router.post("/jobs/add", auth, isAdmin, async (req, res) => {
-  try {
-    const newJob = new Job(req.body);
-    await newJob.save();
-    res.status(201).json({ message: "Job posted successfully", data: newJob });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-// Get all jobs (Admin view)
-router.get("/jobs/all", auth, isAdmin, async (req, res) => {
-  try {
-    const jobs = await Job.find().sort({ createdAt: -1 });
-    res.json(jobs);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+// // Create a new Job
+// router.post("/jobs/add", auth, isAdmin, async (req, res) => {
+//   try {
+//     const newJob = new Job(req.body);
+//     await newJob.save();
+//     res.status(201).json({ message: "Job posted successfully", data: newJob });
+//   } catch (err) {
+//     res.status(500).json({ error: err.message });
+//   }
+// });
+// // Get all jobs (Admin view)
+// router.get("/jobs/all", auth, isAdmin, async (req, res) => {
+//   try {
+//     const jobs = await Job.find().sort({ createdAt: -1 });
+//     res.json(jobs);
+//   } catch (err) {
+//     res.status(500).json({ error: err.message });
+//   }
+// });
 
-// Get only active jobs for the mobile app
-router.get("/jobs/public", async (req, res) => {
-  try {
-    const jobs = await Job.find({ active: true }).sort({ createdAt: -1 });
-    res.json(jobs);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+// // Get only active jobs for the mobile app
+// router.get("/jobs/public", async (req, res) => {
+//   try {
+//     const jobs = await Job.find({ active: true }).sort({ createdAt: -1 });
+//     res.json(jobs);
+//   } catch (err) {
+//     res.status(500).json({ error: err.message });
+//   }
+// });
 
-// --- ADMIN MANAGEMENT ---
-// Toggle job status (Active/Inactive)
-router.patch("/jobs/toggle/:id", auth, isAdmin, async (req, res) => {
-  try {
-    const job = await Job.findById(req.params.id);
-    job.active = !job.active;
-    await job.save();
-    res.json({ message: "Status updated", active: job.active });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+// // --- ADMIN MANAGEMENT ---
+// // Toggle job status (Active/Inactive)
+// router.patch("/jobs/toggle/:id", auth, isAdmin, async (req, res) => {
+//   try {
+//     const job = await Job.findById(req.params.id);
+//     job.active = !job.active;
+//     await job.save();
+//     res.json({ message: "Status updated", active: job.active });
+//   } catch (err) {
+//     res.status(500).json({ error: err.message });
+//   }
+// });
 
-router.delete("/jobs/delete/:id", auth, isAdmin, async (req, res) => {
-  try {
-    await Job.findByIdAndDelete(req.params.id);
-    res.json({ message: "Job deleted successfully" });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+// router.delete("/jobs/delete/:id", auth, isAdmin, async (req, res) => {
+//   try {
+//     await Job.findByIdAndDelete(req.params.id);
+//     res.json({ message: "Job deleted successfully" });
+//   } catch (err) {
+//     res.status(500).json({ error: err.message });
+//   }
+// });
 
 /// @route   POST /admin/exchange/add
 // @desc    Create a new program & notify students
@@ -410,7 +410,7 @@ router.get("/exchange/applications/:programId", async (req, res) => {
 router.post(
   "/packages/create",
   auth,
-  isAdmin,
+  
   upload.single("image"),
   async (req, res) => {
     try {
@@ -451,7 +451,7 @@ router.post(
 );
 
 // GET all packages for Admin list (Shows even inactive ones if you add an active field)
-router.get("/packages/all", auth, isAdmin, async (req, res) => {
+router.get("/packages/all", auth,  async (req, res) => {
   try {
     const packages = await Package.find().sort({ createdAt: -1 });
     res.json(packages);
@@ -461,7 +461,7 @@ router.get("/packages/all", auth, isAdmin, async (req, res) => {
 });
 
 // DELETE Package
-router.delete("/packages/delete/:id", auth, isAdmin, async (req, res) => {
+router.delete("/packages/delete/:id", auth,  async (req, res) => {
   try {
     const deletedPackage = await Package.findByIdAndDelete(req.params.id);
     if (!deletedPackage)
@@ -475,7 +475,7 @@ router.delete("/packages/delete/:id", auth, isAdmin, async (req, res) => {
 router.put(
   "/packages/update/:id",
   auth,
-  isAdmin,
+ 
   upload.single("image"),
   async (req, res) => {
     try {
@@ -649,7 +649,7 @@ router.post("/reject-payment/:id", auth, isAdmin, async (req, res) => {
 });
 
 // Get all bookings (admin only)
-router.get("/bookings/all", auth, isAdmin, async (req, res) => {
+router.get("/bookings/all", auth,  async (req, res) => {
   try {
     const bookings = await Booking.find()
       .sort({ createdAt: -1 })
@@ -663,7 +663,7 @@ router.get("/bookings/all", auth, isAdmin, async (req, res) => {
 });
 
 // --- 3. NOTIFY ON BOOKING STATUS (The "Response" Step) ---
-router.put("/bookings/:id", auth, isAdmin, async (req, res) => {
+router.put("/bookings/:id", auth,  async (req, res) => {
     try {
         const { status, adminNotes } = req.body;
         const booking = await Booking.findByIdAndUpdate(
@@ -696,7 +696,7 @@ router.put("/bookings/:id", auth, isAdmin, async (req, res) => {
 });
 
 // Get booking statistics (admin only)
-router.get("/bookings/stats", auth, isAdmin, async (req, res) => {
+router.get("/bookings/stats", auth,  async (req, res) => {
   try {
     const totalBookings = await Booking.countDocuments();
     const pendingBookings = await Booking.countDocuments({ status: "pending" });

@@ -84,6 +84,19 @@ router.post("/signup", async (req, res) => {
         return res.status(400).json({ error: "Brand name required" });
       }
       name = brandName;
+      } else if (role === "traveler") {
+  if (!fullName) {
+    return res.status(400).json({ error: "Full name required" });
+  }
+  name = fullName;
+
+} else if (role === "employee") {
+  if (!fullName) {
+    return res.status(400).json({ error: "Employee name required" });
+  }
+  name = fullName;
+
+
     } else if (role === "admin") {
       name = fullName || "Admin";
     }
@@ -190,7 +203,6 @@ router.post("/login", async (req, res) => {
 });
 
 // -------------------- FORGOT PASSWORD (SEND OTP) - FIXED --------------------
-// -------------------- FORGOT PASSWORD (SEND OTP) --------------------
 router.post("/forgot-password", async (req, res) => {
   const { emailOrPhone } = req.body;
 

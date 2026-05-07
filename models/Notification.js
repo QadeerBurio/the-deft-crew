@@ -20,10 +20,10 @@ const NotificationSchema = new mongoose.Schema({
   },
 
   type: {
-    type: String,
-    enum: ["All", "Offers", "System"],
-    default: "System"
-  },
+        type: String,
+        enum: ["System", "Job Application", "Job Posting", "Application Status", "Message", "Event", "Offer", "Alert", "Reminder", "Welcome", "Interview"],
+        default: "System"
+    },
   icon: String,
   link: String,
 
