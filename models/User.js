@@ -20,10 +20,10 @@ const userSchema = new mongoose.Schema(
       required: [true, "Password is required"],
     },
     role: {
-  type: String,
-  enum: ["student", "brand", "admin", "traveler", "employee"],
-  default: "student",
-},
+      type: String,
+      enum: ["student", "brand", "admin", "traveler", "employee"],
+      default: "student",
+    },
 
     // --- VERIFICATION & STATUS ---
     isAlumni: { type: Boolean, default: false },
@@ -122,7 +122,7 @@ const userSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 // --- PRE-SAVE HOOK: AUTOMATIC REFERRAL CODE GENERATION ---
@@ -137,7 +137,9 @@ userSchema.pre("save", async function () {
     while (!isUnique && attempts < maxAttempts) {
       attempts++;
       newCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-      const existing = await this.constructor.findOne({ referralCode: newCode });
+      const existing = await this.constructor.findOne({
+        referralCode: newCode,
+      });
 
       if (!existing) {
         isUnique = true;

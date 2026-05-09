@@ -467,4 +467,63 @@ router.get("/:id", authMiddleware, async (req, res) => {
   }
 });
 
+
+// ==================== DELETE ACCOUNT (Apple Required) ====================
+// DELETE /api/auth/delete-account - Delete user account permanently
+router.delete("/delete-account", authMiddleware, async (req, res) => {
+  try {
+    const userId = req.userId;
+
+    // Find the user first
+    const user = await User.findById(userId);
+    
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // Delete all notifications for this user
+    await Notification.deleteMany({ recipient: userId });
+
+    // Delete all applications by this user
+    await Application.deleteMany({ userId: userId });
+
+    // Remove user from other users' connections
+    await User.updateMany(
+      { connections: userId },
+      { $pull: { connections: userId } }
+    );
+
+    // Remove user from other users' sentRequests
+    await User.updateMany(
+      { sentRequests: userId },
+      { $pull: { sentRequests: userId } }
+    );
+
+    // Remove user from other users' referredBy
+    await User.updateMany(
+      { referredBy: userId },
+      { $unset: { referredBy: "" } }
+    );
+
+    // Finally, delete the user
+    await User.findByIdAndDelete(userId);
+
+    // Clear OTP store if exists
+    if (otpStore[userId]) {
+      delete otpStore[userId];
+    }
+
+    console.log(`✅ Account deleted: ${user.email} (${userId})`);
+
+    res.status(200).json({ 
+      message: "Account deleted successfully",
+      success: true 
+    });
+  } catch (error) {
+    console.error("❌ Delete account error:", error);
+    res.status(500).json({ error: "Failed to delete account. Please try again." });
+  }
+});
+
+
 module.exports = router;
