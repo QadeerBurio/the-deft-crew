@@ -721,8 +721,6 @@ router.get("/bookings/stats", auth,  async (req, res) => {
   }
 });
 // @desc    Delete a booking permanently
-// @route   DELETE /api/admin/bookings/:id
-// @access  Private/Admin
 router.delete("/bookings/:id", auth, isAdmin, async (req, res) => {
   try {
     const booking = await Booking.findById(req.params.id);

@@ -46,6 +46,7 @@ app.use("/api/events", require("./routes/event.routes"));
 app.use("/api/resume", require("./routes/resume.routes"));
 app.use("/api/courses", require("./routes/courses.routes"));
 app.use("/api/jobs", require("./routes/jobs.routes"));
+app.use("/api/traveler", require("./routes/traveler.routes"));
 
 // ---------------- AI CHAT (Gemini) ----------------
 // ---------------- AI CHAT (Gemini) ----------------
