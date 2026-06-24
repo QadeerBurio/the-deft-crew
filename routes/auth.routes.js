@@ -15,7 +15,7 @@ const path = require("path");
 const mongoose = require("mongoose");
 const Package = require("../models/Package");
 const router = express.Router();
-
+const authMiddleware =require('../middleware/adminMiddleware')
 
 // --- ADD THIS LINE ---
 const otpStore = {};
@@ -522,6 +522,85 @@ router.delete("/delete-account", authMiddleware, async (req, res) => {
   } catch (error) {
     console.error("❌ Delete account error:", error);
     res.status(500).json({ error: "Failed to delete account. Please try again." });
+  }
+});
+
+// ==================== UPDATE USER (Admin only) ====================
+router.put("/update/:id", authMiddleware, async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // Check if user is admin
+    const requestingUser = await User.findById(req.userId);
+    if (requestingUser.role !== 'admin') {
+      return res.status(403).json({ message: "Admin access required" });
+    }
+
+    // Fields that can be updated
+    const allowedFields = [
+      'name', 'email', 'phone', 'address', 'location', 
+      'headline', 'bio', 'rollNo', 'instagram', 'skills',
+      'status', 'isAlumni', 'isVip', 'vipExpiry',
+      'cardStatus', 'paymentStatus'
+    ];
+
+    const updateData = {};
+    for (const field of allowedFields) {
+      if (req.body[field] !== undefined) {
+        updateData[field] = req.body[field];
+      }
+    }
+
+    const updatedUser = await User.findByIdAndUpdate(
+      id,
+      { $set: updateData },
+      { new: true, runValidators: true }
+    ).populate('university');
+
+    if (!updatedUser) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    res.json({ 
+      success: true, 
+      message: "User updated successfully", 
+      user: updatedUser 
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ==================== GET STUDENT WITH FULL DETAILS ====================
+router.get("/student/:id", authMiddleware, async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // Check if valid ObjectId
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: "Invalid User ID format" });
+    }
+
+    const user = await User.findById(id)
+      .populate('university')
+      .populate('referredBy', 'name email');
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // Get student's applications
+    const applications = await Application.find({ userId: id })
+      .populate('programId');
+
+    res.json({
+      user,
+      applications,
+      referralCount: user.referralCount,
+      referredBy: user.referredBy,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
