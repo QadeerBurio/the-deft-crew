@@ -15,7 +15,6 @@ const path = require("path");
 const mongoose = require("mongoose");
 const Package = require("../models/Package");
 const router = express.Router();
-const authMiddleware =require('../middleware/adminMiddleware')
 
 // --- ADD THIS LINE ---
 const otpStore = {};

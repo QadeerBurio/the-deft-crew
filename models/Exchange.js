@@ -6,16 +6,19 @@ const ExchangeSchema = new mongoose.Schema({
   location: { type: String, required: true },
   degree: { 
     type: String, 
-    enum: ['Bachelors', 'Masters', 'PhD'], 
+    enum: ['Bachelors', 'Masters', 'PhD', 'Exchange'], 
     default: 'Bachelors' 
   },
   appStart: { type: String, required: true },
   deadline: { type: String, required: true },
   duration: { type: String, required: true },
-  requirements: [{ type: String }], // <--- Added this line
-  color: { type: String, default: '#1B1B1B' },
+  requirements: [{ type: String }],
+  link: { type: String, default: '' },
   active: { type: Boolean, default: true },
-  link: { type: String },
+  scholarship: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Scholarships' // Updated to match the model name
+  }
 }, { timestamps: true });
 
 module.exports = mongoose.model('Exchange', ExchangeSchema);

@@ -13,7 +13,7 @@ const Application = require("../models/Application");
 const Package = require("../models/Package");
 const upload = multer({ storage });
 const Booking = require("../models/Booking");
-
+const Scholarships =require("../models/Scholarships")
 const Course =require('../models/Course')
 
 
@@ -214,15 +214,15 @@ router.patch("/verify-user/:targetUserId", auth, async (req, res) => {
 //     res.status(500).json({ error: err.message });
 //   }
 // });
-// // Get all jobs (Admin view)
-// router.get("/jobs/all", auth, isAdmin, async (req, res) => {
-//   try {
-//     const jobs = await Job.find().sort({ createdAt: -1 });
-//     res.json(jobs);
-//   } catch (err) {
-//     res.status(500).json({ error: err.message });
-//   }
-// });
+// Get all jobs (Admin view)
+router.get("/jobs/all", auth, isAdmin, async (req, res) => {
+  try {
+    const jobs = await Job.find().sort({ createdAt: -1 });
+    res.json(jobs);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // // Get only active jobs for the mobile app
 // router.get("/jobs/public", async (req, res) => {
@@ -256,8 +256,12 @@ router.patch("/verify-user/:targetUserId", auth, async (req, res) => {
 //   }
 // });
 
-/// @route   POST /admin/exchange/add
-// @desc    Create a new program & notify students
+// ==================== EXCHANGE PROGRAM ROUTES ====================
+
+// ==================== EXCHANGE PROGRAM ROUTES ====================
+
+// @route   POST /admin/exchange/add
+// @desc    Create a new program with scholarship support
 router.post("/exchange/add", auth, isAdmin, async (req, res) => {
   try {
     const {
@@ -270,22 +274,92 @@ router.post("/exchange/add", auth, isAdmin, async (req, res) => {
       duration,
       link,
       requirements,
+      scholarship
     } = req.body;
 
-    if (
-      !title ||
-      !university ||
-      !location ||
-      !appStart ||
-      !deadline ||
-      !duration
-    ) {
-      return res
-        .status(400)
-        .json({ message: "All required fields must be filled." });
+    if (!title || !university || !location || !appStart || !deadline || !duration) {
+      return res.status(400).json({ message: "All required fields must be filled." });
     }
 
+    // Create the exchange program
     const newProgram = new Exchange({
+      title,
+      university,
+      location,
+      degree: degree || 'Bachelors',
+      appStart,
+      deadline,
+      duration,
+      link: link || '',
+      requirements: requirements || [],
+      active: true
+    });
+
+    await newProgram.save();
+
+    // Auto-create scholarship if provided
+    if (scholarship && scholarship.name) {
+      const newScholarship = new Scholarships({
+        programId: newProgram._id,
+        name: scholarship.name,
+        amount: scholarship.amount || '',
+        currency: scholarship.currency || 'USD',
+        description: scholarship.description || '',
+        deadline: scholarship.deadline || newProgram.deadline,
+        requirements: scholarship.requirements || [],
+        active: true
+      });
+      await newScholarship.save();
+      
+      // Update program with scholarship reference
+      newProgram.scholarship = newScholarship._id;
+      await newProgram.save();
+    }
+
+    // Broadcast notification to all students - Using valid type
+    try {
+      await Notification.create({
+        recipient: null, // Public broadcast
+        title: `🌍 New Exchange Program: ${title}`,
+        description: `${university} is now accepting applications! Deadline: ${new Date(deadline).toLocaleDateString()}`,
+        type: "Exchange", // Now valid in the updated Notification model
+        icon: "globe",
+        link: newProgram._id.toString()
+      });
+    } catch (nError) {
+      console.error("Notification failed:", nError);
+    }
+
+    res.status(201).json({ 
+      message: "Program published successfully!", 
+      data: newProgram 
+    });
+  } catch (err) {
+    console.error("Error creating exchange program:", err);
+    res.status(500).json({ error: "Server Error: " + err.message });
+  }
+});
+
+// @route   GET /admin/exchange/all
+// @desc    Get all programs with scholarship data
+router.get("/exchange/all", auth, isAdmin, async (req, res) => {
+  try {
+    const programs = await Exchange.find()
+      .sort({ createdAt: -1 })
+      .populate('scholarship');
+    res.json(programs);
+  } catch (err) {
+    console.error("Error fetching programs:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// @route   PUT /admin/exchange/update/:id
+// @desc    Update an existing program
+router.put("/exchange/update/:id", auth, isAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
       title,
       university,
       location,
@@ -294,71 +368,100 @@ router.post("/exchange/add", auth, isAdmin, async (req, res) => {
       deadline,
       duration,
       link,
-      requirements: requirements || [], // <--- Save the requirements array
-      active: true,
-    });
+      requirements,
+      scholarship
+    } = req.body;
 
-    await newProgram.save();
-
-    // Notification logic...
-    res
-      .status(201)
-      .json({ message: "Program published successfully!", data: newProgram });
-  } catch (err) {
-    res.status(500).json({ error: "Server Error: " + err.message });
-  }
-});
-
-// @route   GET /admin/exchange/all
-// @desc    Get all programs for admin management
-// Example: Get all exchange programs
-router.get("/exchange/all", async (req, res) => {
-  try {
-    const programs = await Exchange.find().sort({ createdAt: -1 });
-    res.json(programs);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// / @route    PUT /api/admin/exchange/update/:id
-// @desc     Update an existing program (Complete Data Update)
-router.put("/exchange/update/:id", auth, isAdmin, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const updatedData = req.body;
-
-    const updatedProgram = await Exchange.findByIdAndUpdate(
-      id,
-      { $set: updatedData },
-      { new: true, runValidators: true },
-    );
-
-    if (!updatedProgram) {
+    const program = await Exchange.findById(id);
+    if (!program) {
       return res.status(404).json({ message: "Program not found" });
     }
 
-    res.json({ message: "Program updated successfully", data: updatedProgram });
+    // Update program fields
+    program.title = title;
+    program.university = university;
+    program.location = location;
+    program.degree = degree || 'Bachelors';
+    program.appStart = appStart;
+    program.deadline = deadline;
+    program.duration = duration;
+    program.link = link || '';
+    program.requirements = requirements || [];
+
+    await program.save();
+
+    // Update or create scholarship
+    if (scholarship && scholarship.name) {
+      let existingScholarship = await Scholarships.findOne({ programId: program._id });
+      
+      if (existingScholarship) {
+        // Update existing scholarship
+        existingScholarship.name = scholarship.name;
+        existingScholarship.amount = scholarship.amount || '';
+        existingScholarship.currency = scholarship.currency || 'USD';
+        existingScholarship.description = scholarship.description || '';
+        existingScholarship.deadline = scholarship.deadline || program.deadline;
+        existingScholarship.requirements = scholarship.requirements || [];
+        await existingScholarship.save();
+      } else {
+        // Create new scholarship
+        const newScholarship = new Scholarships({
+          programId: program._id,
+          name: scholarship.name,
+          amount: scholarship.amount || '',
+          currency: scholarship.currency || 'USD',
+          description: scholarship.description || '',
+          deadline: scholarship.deadline || program.deadline,
+          requirements: scholarship.requirements || [],
+          active: true
+        });
+        await newScholarship.save();
+        program.scholarship = newScholarship._id;
+        await program.save();
+      }
+    } else {
+      // If scholarship data is removed, delete existing scholarship
+      if (program.scholarship) {
+        await Scholarships.findByIdAndDelete(program.scholarship);
+        program.scholarship = null;
+        await program.save();
+      }
+    }
+
+    const updatedProgram = await Exchange.findById(id).populate('scholarship');
+    res.json({ 
+      message: "Program updated successfully", 
+      data: updatedProgram 
+    });
   } catch (err) {
+    console.error("Error updating program:", err);
     res.status(500).json({ error: "Update failed: " + err.message });
   }
 });
 
 // @route   PATCH /admin/exchange/toggle/:id
-// @desc    Show/Hide a program from the public
+// @desc    Show/Hide a program
 router.patch("/exchange/toggle/:id", auth, isAdmin, async (req, res) => {
   try {
     const program = await Exchange.findById(req.params.id);
-    if (!program) return res.status(404).json({ message: "Program not found" });
+    if (!program) {
+      return res.status(404).json({ message: "Program not found" });
+    }
 
     program.active = !program.active;
     await program.save();
 
+    // Also toggle associated scholarship
+    if (program.scholarship) {
+      await Scholarships.findByIdAndUpdate(program.scholarship, { active: program.active });
+    }
+
     res.json({
       message: `Program is now ${program.active ? "Visible" : "Hidden"}`,
-      active: program.active,
+      active: program.active
     });
   } catch (err) {
+    console.error("Error toggling program:", err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -367,43 +470,38 @@ router.patch("/exchange/toggle/:id", auth, isAdmin, async (req, res) => {
 // @desc    Permanently remove a program
 router.delete("/exchange/delete/:id", auth, isAdmin, async (req, res) => {
   try {
-    const deletedProgram = await Exchange.findByIdAndDelete(req.params.id);
-    if (!deletedProgram)
-      return res.status(404).json({ message: "Program already deleted." });
+    const program = await Exchange.findById(req.params.id);
+    if (!program) {
+      return res.status(404).json({ message: "Program not found" });
+    }
 
+    // Delete associated scholarship
+    if (program.scholarship) {
+      await Scholarships.findByIdAndDelete(program.scholarship);
+    }
+
+    await program.deleteOne();
     res.json({ message: "Program permanently removed." });
   } catch (err) {
+    console.error("Error deleting program:", err);
     res.status(500).json({ error: "Delete operation failed." });
   }
 });
 
-// / routes/admin.js (Add these endpoints
-router.post("/exchange/apply", async (req, res) => {
+// @route   GET /admin/exchange/applications/:programId
+// @desc    Get applications for a specific program
+router.get("/exchange/applications/:programId", auth, isAdmin, async (req, res) => {
   try {
-    const newApp = new Application({
-      programId: req.body.programId,
-      userId: req.user.id, // From your auth middleware
-      formData: req.body.formData,
-      experiences: req.body.experiences,
-    });
-    await newApp.save();
-    res.status(201).json({ message: "Application Submitted" });
+    const applications = await Application.find({
+      programId: req.params.programId
+    }).populate('userId', 'name email phone university');
+    res.json(applications);
   } catch (err) {
-    res.status(500).json(err);
+    console.error("Error fetching applications:", err);
+    res.status(500).json({ error: err.message });
   }
 });
 
-// Get applications for a specific program (Admin only)
-router.get("/exchange/applications/:programId", async (req, res) => {
-  try {
-    const apps = await Application.find({
-      programId: req.params.programId,
-    }).populate("userId", "name email");
-    res.json(apps);
-  } catch (err) {
-    res.status(500).json(err);
-  }
-});
 
 // 3. POST Route: Create Package (Admin)
 // POST: Create Package
@@ -548,9 +646,7 @@ router.get("/pending-payments", auth, isAdmin, async (req, res) => {
     res.status(500).json({ message: "Error fetching payments" });
   }
 });
-// @desc    Bulk update card status (e.g., Change 100 users to 'Shipped')
-// @route   POST /api/admin/bulk-update-status
-// backend/routes/admin.js
+
 
 // 1. Get stats for the dashboard tabs
 // 1. Get stats for the dashboard including Revenue
@@ -609,7 +705,6 @@ router.post("/bulk-update-status", auth, isAdmin, async (req, res) => {
   } catch (err) { res.status(500).json({ message: "Failed" }); }
 });
 // @desc    Approve a manual payment
-// @route   POST /api/admin/approve-payment/:id
 // POST /api/admin/approve-payment/:id
 router.post("/approve-payment/:id", auth, isAdmin, async (req, res) => {
   try {
