@@ -29,7 +29,17 @@ app.use(express.urlencoded({ extended: true, limit: "5mb" }));
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 // ---------------- DATABASE ----------------
-connectDB();
+connectDB().then(() => {
+  const { connectDB: connectChatDB } = require("./chat-service/dist/config/db");
+  const { schedulerService } = require("./chat-service/dist/services/scheduler.service");
+  connectChatDB().then(() => {
+    schedulerService.initialize().catch((err) => {
+      console.error("❌ Failed to initialize sync scheduler:", err);
+    });
+  }).catch((err) => {
+    console.error("❌ Failed to connect to chat database:", err);
+  });
+});
 
 // ---------------- ROUTES ----------------
 app.use("/api/auth", require("./routes/auth.routes"));
@@ -47,6 +57,7 @@ app.use("/api/resume", require("./routes/resume.routes"));
 app.use("/api/courses", require("./routes/courses.routes"));
 app.use("/api/jobs", require("./routes/jobs.routes"));
 app.use("/api/traveler", require("./routes/traveler.routes"));
+app.use("/api/v1", require("./chat-service/dist/routes/index").default);
 
 // ---------------- AI CHAT (Gemini) ----------------
 // ---------------- AI CHAT (Gemini) ----------------
