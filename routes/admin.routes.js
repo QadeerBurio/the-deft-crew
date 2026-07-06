@@ -340,9 +340,29 @@ router.post("/exchange/add", auth, isAdmin, async (req, res) => {
   }
 });
 
-// @route   GET /admin/exchange/all
-// @desc    Get all programs with scholarship data
-router.get("/exchange/all", auth, isAdmin, async (req, res) => {
+// In admin.routes.js - Add this public route BEFORE the authenticated ones
+
+// ==================== PUBLIC EXCHANGE ROUTES ====================
+
+// @route   GET /admin/exchange/all (PUBLIC - for guests)
+// @desc    Get all active programs with scholarship data
+router.get("/exchange/all", async (req, res) => {
+  try {
+    const programs = await Exchange.find({ active: true })
+      .sort({ createdAt: -1 })
+      .populate('scholarship');
+    
+    // Ensure we return an array even if empty
+    res.json(programs || []);
+  } catch (err) {
+    console.error("Error fetching programs:", err);
+    res.status(500).json({ error: "Server Error: " + err.message });
+  }
+});
+
+// @route   GET /admin/exchange/all-admin (PROTECTED - for admin)
+// @desc    Get ALL programs including inactive
+router.get("/exchange/all-admin", auth, isAdmin, async (req, res) => {
   try {
     const programs = await Exchange.find()
       .sort({ createdAt: -1 })

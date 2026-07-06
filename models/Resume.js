@@ -1,141 +1,680 @@
+// models/Resume.js
 const mongoose = require('mongoose');
 
-const educationSchema = new mongoose.Schema({
-  school: { type: String },
-  degree: { type: String },
-  startDate: { type: String },
-  endDate: { type: String },
-  description: { type: String, default: '' }
-});
-
-const experienceSchema = new mongoose.Schema({
-  company: { type: String },
-  title: { type: String },
-  startDate: { type: String },
-  endDate: { type: String },
-  desc: { type: String, default: '' },
-  description: { type: String, default: '' }
-});
-
-const projectSchema = new mongoose.Schema({
-  name: { type: String },
-  description: { type: String, default: '' },
-  technologies: [{ type: String }],
-  link: { type: String, default: '' }
-});
-
-const certificationSchema = new mongoose.Schema({
-  name: { type: String },
-  issuer: { type: String },
-  date: { type: String }
-});
-
-const languageSchema = new mongoose.Schema({
-  language: { type: String },
-  level: { 
-    type: String, 
-    default: 'Basic',
-    enum: ['Basic', 'Conversational', 'Professional', 'Native']
-  }
-});
-
 const resumeSchema = new mongoose.Schema({
-  userId: { 
-    type: mongoose.Schema.Types.ObjectId, 
-    ref: 'User', 
-    required: true,
-    index: true
+  user: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true
   },
-  
-  // Personal Information
-  fullName: { type: String, default: '' },
-  email: { type: String, default: '' },
-  phone: { type: String, default: '' },
-  address: { type: String, default: '' },
-  linkedin: { type: String, default: '' },
-  github: { type: String, default: '' },
-  portfolio: { type: String, default: '' },
-  website: { type: String, default: '' },
-  
-  // Professional Summary
-  summary: { type: String, default: '' },
-  
-  // Sections
-  education: [educationSchema],
-  experience: [experienceSchema],
-  projects: [projectSchema],
-  certifications: [certificationSchema],
-  languages: [languageSchema],
-  skills: [{ type: String }],
-  
-  // Template Preferences - FIXED: Removed enum restriction
-  templateId: { 
-    type: String, 
-    default: 'modern_001'  // Now accepts any template ID like 'special_003', 'modern_001', etc.
+  personalInfo: {
+    firstName: { type: String, default: '' },
+    lastName: { type: String, default: '' },
+    email: { type: String, default: '' },
+    phone: { type: String, default: '' },
+    address: { type: String, default: '' },
+    city: { type: String, default: '' },
+    state: { type: String, default: '' },
+    country: { type: String, default: '' },
+    postalCode: { type: String, default: '' },
+    linkedin: { type: String, default: '' },
+    github: { type: String, default: '' },
+    portfolio: { type: String, default: '' }
   },
-  savedTemplates: [{ type: String }],
-  
-  // Sharing & Analytics
-  publicUrl: { type: String, unique: true, sparse: true },
-  isPublic: { type: Boolean, default: false },
+  professionalSummary: {
+    title: { type: String, default: '' },
+    summary: { type: String, default: '' },
+    experienceLevel: { 
+      type: String, 
+      enum: ['Entry Level', 'Mid Level', 'Senior Level', 'Executive'],
+      default: 'Mid Level'
+    }
+  },
+  education: [{
+    institution: { type: String, default: '' },
+    degree: { type: String, default: '' },
+    fieldOfStudy: { type: String, default: '' },
+    startDate: { type: Date },
+    endDate: { type: Date },
+    current: { type: Boolean, default: false },
+    gpa: { type: Number },
+    description: { type: String, default: '' }
+  }],
+  skills: [{
+    name: { type: String, default: '' },
+    level: { 
+      type: String, 
+      enum: ['Beginner', 'Intermediate', 'Advanced', 'Expert'],
+      default: 'Intermediate'
+    },
+    category: { 
+      type: String,
+      enum: ['Technical', 'Soft Skills', 'Language', 'Other'],
+      default: 'Technical'
+    }
+  }],
+  workExperience: [{
+    company: { type: String, default: '' },
+    position: { type: String, default: '' },
+    location: { type: String, default: '' },
+    startDate: { type: Date },
+    endDate: { type: Date },
+    current: { type: Boolean, default: false },
+    description: { type: String, default: '' },
+    achievements: [String],
+    companyWebsite: { type: String, default: '' }
+  }],
+  certifications: [{
+    name: { type: String, default: '' },
+    organization: { type: String, default: '' },
+    issueDate: { type: Date },
+    expiryDate: { type: Date },
+    credentialId: { type: String, default: '' },
+    credentialUrl: { type: String, default: '' }
+  }],
+  projects: [{
+    name: { type: String, default: '' },
+    description: { type: String, default: '' },
+    technologies: [String],
+    startDate: { type: Date },
+    endDate: { type: Date },
+    url: { type: String, default: '' },
+    githubUrl: { type: String, default: '' }
+  }],
+  languages: [{
+    name: { type: String, default: '' },
+    proficiency: { 
+      type: String, 
+      enum: ['Native', 'Fluent', 'Intermediate', 'Basic'],
+      default: 'Intermediate'
+    }
+  }],
+  interests: [String],
+  references: [{
+    name: { type: String, default: '' },
+    position: { type: String, default: '' },
+    company: { type: String, default: '' },
+    email: { type: String, default: '' },
+    phone: { type: String, default: '' }
+  }],
+  targetJobs: [{
+    jobTitle: { type: String, default: '' },
+    industry: { type: String, default: '' },
+    jobType: { 
+      type: String, 
+      enum: ['Full-time', 'Part-time', 'Contract', 'Internship', 'Remote'],
+      default: 'Full-time'
+    },
+    desiredSalary: { type: String, default: '' },
+    location: { type: String, default: '' },
+    availability: { type: String, default: '' }
+  }],
+  targetJob: {
+    jobTitle: { type: String, default: '' },
+    industry: { type: String, default: '' },
+    jobType: { 
+      type: String, 
+      enum: ['Full-time', 'Part-time', 'Contract', 'Internship', 'Remote'],
+      default: 'Full-time'
+    },
+    desiredSalary: { type: String, default: '' },
+    location: { type: String, default: '' },
+    availability: { type: String, default: '' }
+  },
+  template: {
+    type: String,
+    enum: ['modern', 'classic', 'creative', 'minimal', 'professional'],
+    default: 'modern'
+  },
+  uploadedResume: {
+    fileName: { type: String, default: '' },
+    fileUrl: { type: String, default: '' },
+    publicId: { type: String, default: '' },
+    uploadDate: { type: Date },
+    parsedData: { type: mongoose.Schema.Types.Mixed }
+  },
+  settings: {
+    visibility: { type: String, enum: ['public', 'private', 'unlisted'], default: 'public' },
+    allowDownload: { type: Boolean, default: true },
+    allowSharing: { type: Boolean, default: true },
+    showContactInfo: { type: Boolean, default: true },
+    showSocialLinks: { type: Boolean, default: true },
+    showSkills: { type: Boolean, default: true },
+    showExperience: { type: Boolean, default: true },
+    showEducation: { type: Boolean, default: true },
+    showCertifications: { type: Boolean, default: true },
+    showProjects: { type: Boolean, default: true },
+    showLanguages: { type: Boolean, default: true },
+    showInterests: { type: Boolean, default: true },
+    showReferences: { type: Boolean, default: true },
+    fontSize: { type: String, enum: ['small', 'medium', 'large'], default: 'medium' },
+    colorScheme: { type: String, enum: ['blue', 'green', 'purple', 'red', 'orange'], default: 'blue' },
+    language: { type: String, default: 'en' },
+    autoSave: { type: Boolean, default: true },
+    saveInterval: { type: Number, default: 30 },
+    defaultTemplate: { type: String, default: 'modern' }
+  },
+  completionPercentage: { type: Number, default: 0 },
+  isComplete: { type: Boolean, default: false },
+  sharedWith: [{
+    user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    sharedAt: { type: Date, default: Date.now }
+  }],
   viewCount: { type: Number, default: 0 },
   downloadCount: { type: Number, default: 0 },
-  
-  // Version Control
-  version: { type: Number, default: 1 },
-  
-  // Status
-  isComplete: { type: Boolean, default: false },
-  completionScore: { type: Number, default: 0 },
-  
+  shareCount: { type: Number, default: 0 },
+  viewsHistory: [{
+    date: { type: Date, default: Date.now },
+    count: { type: Number, default: 1 }
+  }],
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now }
-}, { timestamps: true });
+}, {
+  strict: false,
+  minimize: false
+});
 
-// Calculate completion score
-resumeSchema.methods.calculateCompletionScore = function() {
-  let score = 0;
-  if (this.fullName && this.fullName.trim()) score += 10;
-  if (this.email && this.email.trim()) score += 10;
-  if (this.phone && this.phone.trim()) score += 10;
-  if (this.summary && this.summary.length > 50) score += 15;
-  if (this.experience && this.experience.length > 0) score += 20;
-  if (this.education && this.education.length > 0) score += 15;
-  if (this.skills && this.skills.length >= 5) score += 15;
-  if (this.projects && this.projects.length > 0) score += 5;
-  return Math.min(score, 100);
-};
-
-// Generate public URL
-resumeSchema.methods.generatePublicUrl = function() {
-  const crypto = require('crypto');
-  const hash = crypto.createHash('sha256')
-    .update(`${this.userId}${Date.now()}`)
-    .digest('hex')
-    .substring(0, 12);
-  this.publicUrl = hash;
-  return hash;
-};
+// Indexes
+resumeSchema.index({ user: 1 });
+resumeSchema.index({ 'targetJob.jobTitle': 1 });
+resumeSchema.index({ createdAt: -1 });
 
 // Pre-save middleware
 resumeSchema.pre('save', function() {
-  this.completionScore = this.calculateCompletionScore();
-  this.updatedAt = Date.now();
-  
-  // Ensure description field is populated from desc for compatibility
-  if (this.experience) {
-    this.experience.forEach(exp => {
-      if (exp.desc && !exp.description) {
-        exp.description = exp.desc;
+  this.updatedAt = new Date();
+  try {
+    this.completionPercentage = this.calculateCompletionPercentage();
+    this.isComplete = this.completionPercentage >= 85;
+  } catch (error) {
+    console.error('Error calculating completion:', error);
+  }
+});
+
+// Calculate completion percentage
+resumeSchema.methods.calculateCompletionPercentage = function() {
+  try {
+    let total = 0;
+    let completed = 0;
+
+    // Personal Info (15%)
+    if (this.personalInfo) {
+      const hasName = this.personalInfo.firstName && this.personalInfo.firstName.trim() !== '';
+      const hasEmail = this.personalInfo.email && this.personalInfo.email.trim() !== '';
+      const hasPhone = this.personalInfo.phone && this.personalInfo.phone.trim() !== '';
+      if (hasName) completed += 5;
+      if (hasEmail) completed += 5;
+      if (hasPhone) completed += 5;
+      total += 15;
+    }
+
+    // Professional Summary (10%)
+    if (this.professionalSummary && this.professionalSummary.summary && this.professionalSummary.summary.trim() !== '') {
+      completed += 10;
+    }
+    total += 10;
+
+    // Education (15%)
+    if (this.education && this.education.length > 0) {
+      const validEducation = this.education.filter(e => e.institution && e.institution.trim() !== '');
+      if (validEducation.length > 0) {
+        completed += Math.min(15, validEducation.length * 5);
       }
-      if (exp.description && !exp.desc) {
-        exp.desc = exp.description;
+    }
+    total += 15;
+
+    // Skills (10%)
+    if (this.skills && this.skills.length > 0) {
+      const validSkills = this.skills.filter(s => s.name && s.name.trim() !== '');
+      if (validSkills.length > 0) {
+        completed += Math.min(10, validSkills.length * 2);
+      }
+    }
+    total += 10;
+
+    // Work Experience (20%)
+    if (this.workExperience && this.workExperience.length > 0) {
+      const validExperience = this.workExperience.filter(w => w.company && w.company.trim() !== '');
+      if (validExperience.length > 0) {
+        completed += Math.min(20, validExperience.length * 5);
+      }
+    }
+    total += 20;
+
+    // Certifications (5%)
+    if (this.certifications && this.certifications.length > 0) {
+      const validCerts = this.certifications.filter(c => c.name && c.name.trim() !== '');
+      if (validCerts.length > 0) {
+        completed += Math.min(5, validCerts.length * 2);
+      }
+    }
+    total += 5;
+
+    // Projects (5%)
+    if (this.projects && this.projects.length > 0) {
+      const validProjects = this.projects.filter(p => p.name && p.name.trim() !== '');
+      if (validProjects.length > 0) {
+        completed += Math.min(5, validProjects.length * 2);
+      }
+    }
+    total += 5;
+
+    // Languages (5%)
+    if (this.languages && this.languages.length > 0) {
+      const validLanguages = this.languages.filter(l => l.name && l.name.trim() !== '');
+      if (validLanguages.length > 0) {
+        completed += Math.min(5, validLanguages.length * 2);
+      }
+    }
+    total += 5;
+
+    // Target Jobs (15%)
+    if (this.targetJobs && this.targetJobs.length > 0) {
+      const validJobs = this.targetJobs.filter(j => j.jobTitle && j.jobTitle.trim() !== '');
+      if (validJobs.length > 0) {
+        completed += Math.min(15, validJobs.length * 5);
+      }
+    } else if (this.targetJob && this.targetJob.jobTitle && this.targetJob.jobTitle.trim() !== '') {
+      completed += 15;
+    }
+    total += 15;
+
+    return Math.min(Math.round((completed / total) * 100), 100);
+  } catch (error) {
+    console.error('Error calculating completion:', error);
+    return 0;
+  }
+};
+
+// ============ METHODS FOR JOB RECOMMENDATIONS ============
+
+// Extract all skills from resume
+resumeSchema.methods.extractAllSkills = function() {
+  const skillSet = new Set();
+  
+  // 1. Add skills from skills array
+  if (this.skills && this.skills.length > 0) {
+    this.skills.forEach(skill => {
+      if (skill.name && skill.name.trim()) {
+        skillSet.add(skill.name.toLowerCase().trim());
       }
     });
   }
   
+  // 2. Extract skills from work experience descriptions
+  if (this.workExperience && this.workExperience.length > 0) {
+    this.workExperience.forEach(work => {
+      if (work.description) {
+        const words = work.description.split(/[\s,.;:!?()]+/);
+        const techKeywords = ['javascript', 'react', 'node', 'python', 'java', 'c++', 'typescript', 
+          'angular', 'vue', 'mongodb', 'mysql', 'postgresql', 'docker', 'kubernetes', 'aws', 
+          'git', 'github', 'html', 'css', 'php', 'laravel', 'mern', 'fullstack', 'frontend', 
+          'backend', 'api', 'rest', 'graphql', 'tensorflow', 'pytorch', 'machine', 'learning', 
+          'ai', 'data', 'analytics', 'tableau', 'powerbi', 'flask', 'django', 'spring', 'csharp',
+          'ruby', 'rails', 'swift', 'kotlin', 'flutter', 'reactnative', 'sqlite', 'firebase',
+          'redis', 'elasticsearch', 'kafka', 'jenkins', 'ansible', 'terraform', 'prometheus',
+          'grafana', 'linux', 'unix', 'bash', 'shell', 'vim', 'vscode', 'intellij'];
+        
+        words.forEach(word => {
+          const cleanWord = word.toLowerCase().replace(/[^a-zA-Z0-9#\+\-]/g, '');
+          if (cleanWord.length > 2 && techKeywords.some(tk => cleanWord.includes(tk))) {
+            skillSet.add(cleanWord);
+          }
+        });
+      }
+      // Add position as skill
+      if (work.position) {
+        const positionWords = work.position.split(' ');
+        positionWords.forEach(word => {
+          const cleanWord = word.toLowerCase().trim();
+          if (cleanWord.length > 2 && ['developer', 'engineer', 'analyst', 'manager', 'director', 
+            'architect', 'designer', 'consultant', 'specialist', 'lead', 'senior', 'junior'].includes(cleanWord)) {
+            skillSet.add(cleanWord);
+          }
+        });
+      }
+    });
+  }
   
-});
+  // 3. Extract skills from projects
+  if (this.projects && this.projects.length > 0) {
+    this.projects.forEach(project => {
+      if (project.technologies && project.technologies.length > 0) {
+        project.technologies.forEach(tech => {
+          if (tech && tech.trim()) {
+            skillSet.add(tech.toLowerCase().trim());
+          }
+        });
+      }
+      if (project.description) {
+        const techKeywords = ['react', 'node', 'python', 'javascript', 'mongodb', 'express', 
+          'docker', 'aws', 'firebase', 'flutter', 'reactnative', 'tensorflow', 'pytorch'];
+        const words = project.description.split(/[\s,.;:!?()]+/);
+        words.forEach(word => {
+          const cleanWord = word.toLowerCase().replace(/[^a-zA-Z0-9#\+\-]/g, '');
+          if (cleanWord.length > 2 && techKeywords.some(tk => cleanWord.includes(tk))) {
+            skillSet.add(cleanWord);
+          }
+        });
+      }
+    });
+  }
+  
+  // 4. Extract from certifications
+  if (this.certifications && this.certifications.length > 0) {
+    this.certifications.forEach(cert => {
+      if (cert.name) {
+        const words = cert.name.split(' ');
+        words.forEach(word => {
+          const cleanWord = word.toLowerCase().trim();
+          if (cleanWord.length > 2) {
+            skillSet.add(cleanWord);
+          }
+        });
+      }
+    });
+  }
+  
+  // 5. Extract from education
+  if (this.education && this.education.length > 0) {
+    this.education.forEach(edu => {
+      if (edu.fieldOfStudy) {
+        const fields = edu.fieldOfStudy.split(' ');
+        fields.forEach(field => {
+          const cleanField = field.toLowerCase().trim();
+          if (cleanField.length > 2) {
+            skillSet.add(cleanField);
+          }
+        });
+      }
+    });
+  }
+  
+  return Array.from(skillSet);
+};
+
+// Get experience level
+resumeSchema.methods.getExperienceLevel = function() {
+  let totalYears = 0;
+  
+  if (this.workExperience && this.workExperience.length > 0) {
+    this.workExperience.forEach(work => {
+      if (work.startDate) {
+        const start = new Date(work.startDate);
+        const end = work.current ? new Date() : (work.endDate ? new Date(work.endDate) : new Date());
+        const years = (end - start) / (365.25 * 24 * 60 * 60 * 1000);
+        if (years > 0) {
+          totalYears += years;
+        }
+      }
+    });
+  }
+  
+  if (totalYears <= 2) return 'Entry Level';
+  if (totalYears <= 5) return 'Mid Level';
+  if (totalYears <= 10) return 'Senior Level';
+  return 'Executive';
+};
+
+// Get preferred job types
+resumeSchema.methods.getPreferredJobTypes = function() {
+  const types = new Set();
+  
+  if (this.targetJobs && this.targetJobs.length > 0) {
+    this.targetJobs.forEach(job => {
+      if (job.jobType) {
+        types.add(job.jobType);
+      }
+    });
+  }
+  
+  if (types.size === 0) {
+    types.add('Full-time');
+  }
+  
+  return Array.from(types);
+};
+
+// Get preferred locations
+resumeSchema.methods.getPreferredLocations = function() {
+  const locations = new Set();
+  
+  if (this.targetJobs && this.targetJobs.length > 0) {
+    this.targetJobs.forEach(job => {
+      if (job.location) {
+        locations.add(job.location);
+      }
+    });
+  }
+  
+  if (this.personalInfo && this.personalInfo.city) {
+    locations.add(this.personalInfo.city);
+  }
+  if (this.personalInfo && this.personalInfo.state) {
+    locations.add(this.personalInfo.state);
+  }
+  if (this.personalInfo && this.personalInfo.country) {
+    locations.add(this.personalInfo.country);
+  }
+  
+  return Array.from(locations);
+};
+
+// Get target job titles
+resumeSchema.methods.getTargetTitles = function() {
+  const titles = new Set();
+  
+  if (this.targetJobs && this.targetJobs.length > 0) {
+    this.targetJobs.forEach(job => {
+      if (job.jobTitle) {
+        titles.add(job.jobTitle.toLowerCase());
+      }
+    });
+  }
+  
+  return Array.from(titles);
+};
+
+// Get target industries
+resumeSchema.methods.getTargetIndustries = function() {
+  const industries = new Set();
+  
+  if (this.targetJobs && this.targetJobs.length > 0) {
+    this.targetJobs.forEach(job => {
+      if (job.industry) {
+        industries.add(job.industry.toLowerCase());
+      }
+    });
+  }
+  
+  return Array.from(industries);
+};
+
+// Static method for recommendations
+resumeSchema.statics.getRecommendedJobs = async function(resumeId) {
+  try {
+    const resume = await this.findById(resumeId);
+    if (!resume) return [];
+
+    const skills = resume.extractAllSkills();
+    const experienceLevel = resume.getExperienceLevel();
+    const preferredJobTypes = resume.getPreferredJobTypes();
+    const preferredLocations = resume.getPreferredLocations();
+    const targetTitles = resume.getTargetTitles();
+    const targetIndustries = resume.getTargetIndustries();
+
+    const Job = require('./Job');
+    
+    let query = { active: true };
+    let matchConditions = [];
+
+    if (skills.length > 0) {
+      skills.slice(0, 15).forEach(skill => {
+        matchConditions.push(
+          { skills: { $in: [new RegExp(skill, 'i')] } },
+          { title: { $regex: skill, $options: 'i' } },
+          { description: { $regex: skill, $options: 'i' } },
+          { department: { $regex: skill, $options: 'i' } }
+        );
+      });
+    }
+
+    if (targetTitles.length > 0) {
+      targetTitles.forEach(title => {
+        matchConditions.push({ title: { $regex: title, $options: 'i' } });
+      });
+    }
+
+    if (targetIndustries.length > 0) {
+      targetIndustries.forEach(industry => {
+        matchConditions.push({ department: { $regex: industry, $options: 'i' } });
+        matchConditions.push({ category: { $regex: industry, $options: 'i' } });
+      });
+    }
+
+    if (preferredLocations.length > 0) {
+      preferredLocations.forEach(loc => {
+        matchConditions.push({ location: { $regex: loc, $options: 'i' } });
+      });
+    }
+
+    if (matchConditions.length > 0) {
+      query.$or = matchConditions;
+    }
+
+    if (experienceLevel) {
+      query.experienceLevel = experienceLevel;
+    }
+
+    if (preferredJobTypes.length > 0) {
+      query.type = { $in: preferredJobTypes };
+    }
+
+    const jobs = await Job.find(query)
+      .sort({ featured: -1, urgent: -1, createdAt: -1 })
+      .limit(20);
+
+    const recommendations = jobs.map(job => {
+      let matchScore = 0;
+      let matchedSkills = [];
+      let matchReasons = [];
+
+      if (skills.length > 0 && job.skills && job.skills.length > 0) {
+        const jobSkills = job.skills.map(s => s.toLowerCase().trim());
+        const resumeSkills = skills.map(s => s.toLowerCase().trim());
+        
+        jobSkills.forEach(skill => {
+          if (resumeSkills.some(rs => skill.includes(rs) || rs.includes(skill))) {
+            matchedSkills.push(skill);
+            matchScore += 8;
+          }
+        });
+        if (matchedSkills.length > 0) {
+          matchReasons.push(`Matched ${matchedSkills.length} skills`);
+        }
+      }
+
+      if (targetTitles.length > 0) {
+        const jobTitle = job.title.toLowerCase();
+        let titleMatched = false;
+        targetTitles.forEach(title => {
+          if (jobTitle.includes(title) || title.includes(jobTitle)) {
+            matchScore += 15;
+            titleMatched = true;
+          }
+        });
+        if (titleMatched) {
+          matchReasons.push('Matches target job title');
+        }
+      }
+
+      if (job.experienceLevel === experienceLevel) {
+        matchScore += 10;
+        matchReasons.push(`Experience level: ${experienceLevel}`);
+      }
+
+      if (preferredJobTypes.includes(job.type)) {
+        matchScore += 10;
+        matchReasons.push(`Job type: ${job.type}`);
+      }
+
+      if (preferredLocations.length > 0) {
+        const jobLocation = (job.location || '').toLowerCase();
+        let locationMatched = false;
+        preferredLocations.forEach(loc => {
+          if (jobLocation.includes(loc.toLowerCase())) {
+            matchScore += 10;
+            locationMatched = true;
+          }
+        });
+        if (locationMatched) {
+          matchReasons.push('Location match');
+        }
+      }
+
+      if (targetIndustries.length > 0 && job.department) {
+        const jobDept = (job.department || '').toLowerCase();
+        targetIndustries.forEach(industry => {
+          if (jobDept.includes(industry) || industry.includes(jobDept)) {
+            matchScore += 10;
+            matchReasons.push(`Industry: ${job.department}`);
+          }
+        });
+      }
+
+      if (job.featured) matchScore += 3;
+      if (job.urgent) matchScore += 2;
+
+      matchScore = Math.min(matchScore, 100);
+      
+      if (matchScore >= 20) {
+        return {
+          ...job.toObject(),
+          matchPercentage: matchScore,
+          matchedSkills: matchedSkills.slice(0, 5),
+          matchReasons: matchReasons.slice(0, 3),
+          isRecommended: matchScore >= 50
+        };
+      }
+      return null;
+    }).filter(job => job !== null);
+
+    recommendations.sort((a, b) => b.matchPercentage - a.matchPercentage);
+
+    return recommendations.slice(0, 6);
+  } catch (error) {
+    console.error('Error getting recommended jobs:', error);
+    return [];
+  }
+};
+
+// Track view
+resumeSchema.methods.trackView = function() {
+  this.viewCount = (this.viewCount || 0) + 1;
+  
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  
+  const existingEntry = this.viewsHistory?.find(v => {
+    const entryDate = new Date(v.date);
+    entryDate.setHours(0, 0, 0, 0);
+    return entryDate.getTime() === today.getTime();
+  });
+  
+  if (existingEntry) {
+    existingEntry.count = (existingEntry.count || 0) + 1;
+  } else {
+    if (!this.viewsHistory) this.viewsHistory = [];
+    this.viewsHistory.push({ date: today, count: 1 });
+  }
+  
+  return this.save();
+};
+
+// Track download
+resumeSchema.methods.trackDownload = function() {
+  this.downloadCount = (this.downloadCount || 0) + 1;
+  return this.save();
+};
 
 const Resume = mongoose.model('Resume', resumeSchema);
 module.exports = Resume;

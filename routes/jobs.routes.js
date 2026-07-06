@@ -123,7 +123,7 @@ router.get("/all", authMiddleware, isAdminOrEmployee, async (req, res) => {
     }
 });
 
-// Get jobs posted by employee
+// Get jobs posted by employee - MOVED BEFORE /:id routes
 router.get("/my-jobs", authMiddleware, async (req, res) => {
     try {
         const jobs = await Job.find({ postedBy: req.userId }).sort({ createdAt: -1 });
@@ -137,7 +137,7 @@ router.get("/my-jobs", authMiddleware, async (req, res) => {
     }
 });
 
-// Update job
+// Update job - MOVED AFTER /my-jobs
 router.put("/update/:id", authMiddleware, isAdminOrEmployee, async (req, res) => {
     try {
         const job = await Job.findById(req.params.id);
@@ -206,7 +206,7 @@ router.delete("/delete/:id", authMiddleware, isAdminOrEmployee, async (req, res)
 
 // ==================== PUBLIC JOB ROUTES ====================
 
-// Get all active jobs with advanced search
+// Get all active jobs with advanced search - FIXED: removed extra slash
 router.get("/public/all", async (req, res) => {
     try {
         const { 
@@ -245,7 +245,9 @@ router.get("/public/all", async (req, res) => {
         ]);
 
         // Increment view count
-        await Job.updateMany({ _id: { $in: jobs.map(j => j._id) } }, { $inc: { views: 1 } });
+        if (jobs.length > 0) {
+            await Job.updateMany({ _id: { $in: jobs.map(j => j._id) } }, { $inc: { views: 1 } });
+        }
 
         res.json({
             jobs,
@@ -254,6 +256,7 @@ router.get("/public/all", async (req, res) => {
             totalPages: Math.ceil(total / parseInt(limit))
         });
     } catch (err) {
+        console.error("Error in public/all:", err);
         res.status(500).json({ error: err.message });
     }
 });
@@ -480,53 +483,6 @@ router.patch("/application/:id/status", authMiddleware, async (req, res) => {
     }
 });
 
-// Get statistics
-router.get("/admin/stats", authMiddleware, async (req, res) => {
-    try {
-        let query = {};
-        if (req.user.role !== "admin") {
-            const myJobs = await Job.find({ postedBy: req.userId }).select('_id');
-            query = { jobId: { $in: myJobs.map(j => j._id) } };
-        }
-        
-        const totalJobs = req.user.role === "admin" ? await Job.countDocuments() : await Job.countDocuments({ postedBy: req.userId });
-        const activeJobs = req.user.role === "admin" ? await Job.countDocuments({ active: true }) : await Job.countDocuments({ postedBy: req.userId, active: true });
-        const totalApplications = await JobApplication.countDocuments(query);
-        const pendingApplications = await JobApplication.countDocuments({ ...query, status: "pending" });
-        const shortlistedApplications = await JobApplication.countDocuments({ ...query, status: "shortlisted" });
-        const hiredApplications = await JobApplication.countDocuments({ ...query, status: "hired" });
-        
-        const last7Days = [];
-        for (let i = 6; i >= 0; i--) {
-            const date = new Date();
-            date.setDate(date.getDate() - i);
-            date.setHours(0, 0, 0, 0);
-            const nextDate = new Date(date);
-            nextDate.setDate(nextDate.getDate() + 1);
-            
-            const count = await JobApplication.countDocuments({
-                ...query,
-                appliedAt: { $gte: date, $lt: nextDate }
-            });
-            
-            last7Days.push({ date: date.toLocaleDateString('en-US', { weekday: 'short' }), count });
-        }
-        
-        const jobsByDepartment = req.user.role === "admin" 
-            ? await Job.aggregate([{ $group: { _id: "$department", count: { $sum: 1 } } }])
-            : await Job.aggregate([{ $match: { postedBy: req.user._id } }, { $group: { _id: "$department", count: { $sum: 1 } } }]);
-        
-        res.json({
-            totalJobs, activeJobs, totalApplications, pendingApplications,
-            shortlistedApplications, hiredApplications, weeklyApplications: last7Days,
-            jobsByDepartment, userRole: req.user.role
-        });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
-
-
 // ==================== INTERVIEW MANAGEMENT ROUTES ====================
 
 // Get all interviews (Admin/Employer)
@@ -581,7 +537,7 @@ router.get("/interviews/upcoming", authMiddleware, async (req, res) => {
     }
 });
 
-// Schedule an interview - FIXED
+// Schedule an interview
 router.post("/interviews/schedule", authMiddleware, async (req, res) => {
     try {
         const { applicationId, interviewDate, interviewNotes, meetingLink } = req.body;
@@ -638,7 +594,7 @@ router.post("/interviews/schedule", authMiddleware, async (req, res) => {
     }
 });
 
-// Reschedule an interview - FIXED
+// Reschedule an interview
 router.put("/interviews/reschedule/:id", authMiddleware, async (req, res) => {
     try {
         const { interviewDate, interviewNotes, meetingLink } = req.body;
@@ -689,7 +645,7 @@ router.put("/interviews/reschedule/:id", authMiddleware, async (req, res) => {
     }
 });
 
-// Cancel an interview - FIXED
+// Cancel an interview
 router.delete("/interviews/cancel/:id", authMiddleware, async (req, res) => {
     try {
         const application = await JobApplication.findById(req.params.id).populate('jobId');
@@ -730,7 +686,7 @@ router.delete("/interviews/cancel/:id", authMiddleware, async (req, res) => {
     }
 });
 
-// Mark interview as completed - FIXED
+// Mark interview as completed
 router.patch("/interviews/complete/:id", authMiddleware, async (req, res) => {
     try {
         const { feedback, rating } = req.body;
@@ -762,7 +718,7 @@ router.patch("/interviews/complete/:id", authMiddleware, async (req, res) => {
 
 // ==================== CANDIDATE MANAGEMENT ROUTES ====================
 
-// Get all candidates with filters - FIXED
+// Get all candidates with filters
 router.get("/candidates/all", authMiddleware, async (req, res) => {
     try {
         const { status, jobId, search, limit = 50 } = req.query;
@@ -918,8 +874,11 @@ router.get("/candidates/export", authMiddleware, async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
-// Get statistics - UPDATE THIS SECTION
-router.get("/admin/stats", authMiddleware, async (req, res) => {
+
+// ==================== STATISTICS ROUTE ====================
+
+// Get statistics - FIXED duplicate route issue
+router.get("/stats", authMiddleware, async (req, res) => {
     try {
         let query = {};
         
@@ -937,13 +896,13 @@ router.get("/admin/stats", authMiddleware, async (req, res) => {
         const shortlistedApplications = await JobApplication.countDocuments({ ...query, status: "shortlisted" });
         const hiredApplications = await JobApplication.countDocuments({ ...query, status: "hired" });
         
-        // FIX: Get total interviews (applications with interview date)
+        // Get total interviews (applications with interview date)
         const totalInterviews = await JobApplication.countDocuments({ 
             ...query, 
             interviewDate: { $exists: true, $ne: null } 
         });
         
-        // FIX: Get upcoming interviews (future interviews)
+        // Get upcoming interviews (future interviews)
         const upcomingInterviews = await JobApplication.countDocuments({ 
             ...query, 
             interviewDate: { $gte: new Date(), $exists: true, $ne: null } 
@@ -976,8 +935,8 @@ router.get("/admin/stats", authMiddleware, async (req, res) => {
             pendingApplications,
             shortlistedApplications, 
             hiredApplications,
-            totalInterviews,        // ADD THIS
-            upcomingInterviews,     // ADD THIS
+            totalInterviews,
+            upcomingInterviews,
             weeklyApplications: last7Days,
             jobsByDepartment, 
             userRole: req.user.role
@@ -987,6 +946,8 @@ router.get("/admin/stats", authMiddleware, async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
+
+
 // Helper function
 function getStatusColor(status) {
     const colors = {
@@ -999,5 +960,153 @@ function getStatusColor(status) {
     };
     return colors[status] || "#6b7280";
 }
+
+// routes/job.routes.js - Add these routes to your existing job routes
+
+// ==================== RESUME-BASED JOB RECOMMENDATIONS ====================
+
+// Get job recommendations based on user's resume
+router.get("/recommendations", authMiddleware, async (req, res) => {
+  try {
+    const { limit = 10, page = 1 } = req.query;
+    
+    // Find the user's most recent resume
+    const Resume = require('../models/Resume');
+    const resume = await Resume.findOne({ user: req.userId }).sort({ updatedAt: -1 });
+    
+    if (!resume) {
+      // If no resume, return featured jobs
+      const featuredJobs = await Job.find({ active: true, featured: true })
+        .sort({ createdAt: -1 })
+        .limit(parseInt(limit));
+      
+      return res.json({
+        recommendations: featuredJobs.map(job => ({
+          ...job.toObject(),
+          matchPercentage: 50,
+          isRecommended: false,
+          matchReasons: ['Featured job']
+        })),
+        total: featuredJobs.length,
+        hasResume: false,
+        message: "Create a resume to get personalized recommendations"
+      });
+    }
+    
+    // Get recommendations using the resume's static method
+    const recommendations = await Resume.getRecommendedJobs(resume._id);
+    
+    // Paginate
+    const startIndex = (parseInt(page) - 1) * parseInt(limit);
+    const paginatedRecommendations = recommendations.slice(startIndex, startIndex + parseInt(limit));
+    
+    res.json({
+      recommendations: paginatedRecommendations,
+      total: recommendations.length,
+      page: parseInt(page),
+      totalPages: Math.ceil(recommendations.length / parseInt(limit)),
+      hasResume: true,
+      resumeData: {
+        skills: resume.extractAllSkills().slice(0, 15),
+        experienceLevel: resume.getExperienceLevel(),
+        preferredJobTypes: resume.getPreferredJobTypes(),
+        preferredLocations: resume.getPreferredLocations(),
+        targetTitles: resume.getTargetTitles(),
+        targetIndustries: resume.getTargetIndustries()
+      }
+    });
+  } catch (error) {
+    console.error('Recommendations error:', error);
+    res.status(500).json({ 
+      error: error.message,
+      recommendations: [],
+      message: "Failed to get recommendations"
+    });
+  }
+});
+
+// Get job recommendations for a specific resume
+router.get("/recommendations/:resumeId", authMiddleware, async (req, res) => {
+  try {
+    const { resumeId } = req.params;
+    const { limit = 10, page = 1 } = req.query;
+    
+    const Resume = require('../models/Resume');
+    const resume = await Resume.findOne({ _id: resumeId, user: req.userId });
+    
+    if (!resume) {
+      return res.status(404).json({ 
+        recommendations: [],
+        message: "Resume not found" 
+      });
+    }
+    
+    // Get recommendations
+    const recommendations = await Resume.getRecommendedJobs(resume._id);
+    
+    // Paginate
+    const startIndex = (parseInt(page) - 1) * parseInt(limit);
+    const paginatedRecommendations = recommendations.slice(startIndex, startIndex + parseInt(limit));
+    
+    res.json({
+      recommendations: paginatedRecommendations,
+      total: recommendations.length,
+      page: parseInt(page),
+      totalPages: Math.ceil(recommendations.length / parseInt(limit)),
+      resumeSummary: {
+        skills: resume.extractAllSkills().slice(0, 10),
+        experienceLevel: resume.getExperienceLevel(),
+        preferredJobTypes: resume.getPreferredJobTypes(),
+        preferredLocations: resume.getPreferredLocations(),
+        targetTitles: resume.getTargetTitles()
+      }
+    });
+  } catch (error) {
+    console.error('Recommendations error:', error);
+    res.status(500).json({ 
+      error: error.message,
+      recommendations: [],
+      message: "Failed to get recommendations"
+    });
+  }
+});
+
+// Get top recommended jobs (simplified for dashboard)
+router.get("/recommendations/top", authMiddleware, async (req, res) => {
+  try {
+    const { limit = 5 } = req.query;
+    
+    const Resume = require('../models/Resume');
+    const resume = await Resume.findOne({ user: req.userId }).sort({ updatedAt: -1 });
+    
+    if (!resume) {
+      // Return featured jobs if no resume
+      const featuredJobs = await Job.find({ active: true, featured: true })
+        .limit(parseInt(limit))
+        .sort({ createdAt: -1 });
+      
+      return res.json({
+        recommendations: featuredJobs.map(job => ({ 
+          ...job.toObject(), 
+          matchPercentage: 50,
+          isRecommended: false
+        })),
+        total: featuredJobs.length,
+        hasResume: false
+      });
+    }
+    
+    const recommendations = await Resume.getRecommendedJobs(resume._id);
+    
+    res.json({
+      recommendations: recommendations.slice(0, parseInt(limit)),
+      total: recommendations.length,
+      hasResume: true
+    });
+  } catch (error) {
+    console.error('Top recommendations error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
 
 module.exports = router;

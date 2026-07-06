@@ -53,10 +53,9 @@ app.use("/api/membership", require("./routes/membership.route"));
 app.use("/api/bookings", require("./routes/booking.routes"));
 app.use("/api/social", require("./routes/social.routes"));
 app.use("/api/events", require("./routes/event.routes"));
-app.use("/api/resume", require("./routes/resume.routes"));
-app.use("/api/courses", require("./routes/courses.routes"));
 app.use("/api/jobs", require("./routes/jobs.routes"));
 app.use("/api/traveler", require("./routes/traveler.routes"));
+app.use("/api/resume", require("./routes/resume.routes"));
 app.use("/api/v1", require("./chat-service/dist/routes/index").default);
 
 // ---------------- AI CHAT (Gemini) ----------------
