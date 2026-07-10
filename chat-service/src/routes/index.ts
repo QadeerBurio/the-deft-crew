@@ -3,6 +3,7 @@ import healthRoutes from './health.routes';
 import chatRoutes from './chat.routes';
 import knowledgeRoutes from './knowledge.routes';
 import syncRoutes from './sync.routes';
+import travelRoutes from './travel.routes';
 
 const router = Router();
 
@@ -11,5 +12,6 @@ router.use('/health', healthRoutes);
 router.use('/chat', chatRoutes);
 router.use('/knowledge', knowledgeRoutes);
 router.use('/sync', syncRoutes);
+router.use('/travel', travelRoutes);
 
 export default router;

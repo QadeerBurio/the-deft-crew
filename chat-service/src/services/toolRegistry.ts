@@ -127,6 +127,19 @@ export const toolDefinitions = [
       },
     },
   },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'searchTDCKnowledge',
+      description: 'Search TDC company knowledge base for information about The Deft Crew, its founder Majid Shah, services offered, university partnerships, and the student ecosystem.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Knowledge query (e.g. "Majid Shah", "TDC services", "university partnerships", "IoBM")' },
+        },
+      },
+    },
+  },
 ];
 
 export const toolHandlers: Record<string, (args: any) => Promise<any>> = {
@@ -137,4 +150,5 @@ export const toolHandlers: Record<string, (args: any) => Promise<any>> = {
   searchUniversities: async (args) => searchCollection('universities', args.query),
   searchTemplates: async (args) => searchCollection('templates', args.query),
   searchPackages: async (args) => searchCollection('packages', args.query),
+  searchTDCKnowledge: async (args) => searchCollection('tdc_knowledge', args.query),
 };

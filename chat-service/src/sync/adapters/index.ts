@@ -8,6 +8,7 @@ import { PackagesAdapter } from './packages.adapter';
 import { TemplatesAdapter } from './templates.adapter';
 import { SlidersAdapter } from './sliders.adapter';
 import { NotesAdapter, BooksAdapter, LecturesAdapter, PapersAdapter } from './skeleton.adapters';
+import { ResumesAdapter } from './resumes.adapter';
 
 export * from './adapter.interface';
 
@@ -23,7 +24,8 @@ export const adapters: ISyncAdapter[] = [
   new NotesAdapter(),
   new BooksAdapter(),
   new LecturesAdapter(),
-  new PapersAdapter()
+  new PapersAdapter(),
+  new ResumesAdapter()
 ];
 
 export default adapters;

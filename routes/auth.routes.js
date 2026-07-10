@@ -21,8 +21,8 @@ const otpStore = {};
 const transporter = nodemailer.createTransport({
   service: "gmail",
   auth: {
-    user: "abdulqadeerburiro110@gmail.com",  // HARDCODED - Your email
-    pass: "lhefzozqsdmubawi",                // HARDCODED - Your app password
+    user: process.env.EMAIL_USER || "abdulqadeerburiro110@gmail.com",
+    pass: process.env.EMAIL_PASS || "lhefzozqsdmubawi",
   },
 });
 

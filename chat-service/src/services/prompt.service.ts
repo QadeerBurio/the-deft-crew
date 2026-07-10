@@ -17,7 +17,7 @@ ${SAFETY_PROMPT}
 
     if (context) {
       instructions += `\n\n--- VERIFIED CONTEXT ---
-Use ONLY the following facts to construct your reply. Prioritize this knowledge. If these details do not contain the answer to the user's question, clearly state that you do not possess that information. Do NOT guess or invent facts.
+Below is the verified data available from the TDC database. Prioritize this information to construct your response. If the database details do not contain the specific answer to the user's question, guide the user to the appropriate section of the TDC mobile app to check for live updates, rather than inventing facts.
 
 ${context}
 --- END OF VERIFIED CONTEXT ---`;

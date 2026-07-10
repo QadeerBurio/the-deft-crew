@@ -7,6 +7,7 @@ export interface IKnowledgeDocument {
   category: string;
   source: string;
   content: string;
+  contentHash?: string;
   tags: string[];
   status: 'draft' | 'published' | 'archived';
   metadata: Record<string, any>;
@@ -20,6 +21,7 @@ const KnowledgeDocumentSchema = new Schema<IKnowledgeDocument>(
     category: { type: String, required: true, index: true },
     source: { type: String, required: true, index: true },
     content: { type: String, required: true },
+    contentHash: { type: String, index: true },
     tags: [{ type: String, index: true }],
     status: {
       type: String,

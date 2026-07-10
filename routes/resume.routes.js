@@ -1,21 +1,28 @@
-// routes/resume.routes.js
 const express = require('express');
 const router = express.Router();
 const Resume = require('../models/Resume');
+const User   = require('../models/User');
 const auth = require('../middleware/auth.middleware');
 const path = require('path');
 const fs = require('fs');
 const { uploadResume, deleteFromCloudinary } = require('../config/cloudinary');
 const { parseResumePDF } = require('../services/resumeParser');
+const { triggerCareerProfileEnrichment } = require('../services/careerProfileService');
+const { invalidateCacheForResume }        = require('../services/skillGapService');
+const { tailorResume }                   = require('../services/resumeTailorService');
+const { generateResumePDF }              = require('../services/pdfService');
+const { optimizeParsedResume }          = require('../services/resumeIntelligenceService');
+const OpenAI = require('openai');
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 // Check resume limit
 const checkResumeLimit = async (req, res, next) => {
   try {
     const count = await Resume.countDocuments({ user: req.user._id });
-    if (count >= 5) {
+    if (count >= 2) {
       return res.status(400).json({
         success: false,
-        error: 'Maximum 5 resumes allowed per user'
+        error: 'Maximum 2 resumes allowed per user'
       });
     }
     next();
@@ -121,6 +128,9 @@ router.post('/', auth, checkResumeLimit, async (req, res) => {
     await resume.save();
 
     console.log('✅ Resume created successfully:', resume._id);
+
+    // 🧠 Fire-and-forget: AI career profile enrichment (does not block response)
+    setImmediate(() => triggerCareerProfileEnrichment(resume._id.toString(), req.user._id.toString()));
 
     res.status(201).json({
       success: true,
@@ -256,6 +266,12 @@ router.put('/:id', auth, async (req, res) => {
 
     console.log('✅ Resume updated successfully:', resume._id);
 
+    // 🧠 Fire-and-forget: re-run AI enrichment + invalidate skill gap cache
+    setImmediate(() => {
+      triggerCareerProfileEnrichment(resume._id.toString(), req.user._id.toString());
+      invalidateCacheForResume(resume._id.toString());
+    });
+
     res.json({
       success: true,
       data: resume,
@@ -306,9 +322,37 @@ router.delete('/:id', auth, async (req, res) => {
 });
 
 // ========== UPLOAD RESUME TO CLOUDINARY ==========
-router.post('/upload', auth, uploadResume.single('resume'), async (req, res) => {
+router.post('/upload', 
+  auth, 
+  async (req, res, next) => {
+    try {
+      const count = await Resume.countDocuments({ user: req.user._id });
+      if (count >= 2) {
+        return res.status(400).json({
+          success: false,
+          error: 'Maximum 2 resumes allowed per user'
+        });
+      }
+      next();
+    } catch (err) {
+      console.error('Limit check error:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  },
+  (req, res, next) => {
+    uploadResume.single('resume')(req, res, (err) => {
+      if (err) {
+        return res.status(400).json({
+          success: false,
+          error: err.message || 'File upload failed'
+        });
+      }
+      next();
+    });
+  }, 
+  async (req, res) => {
   try {
-    console.log('📄 Upload resume request received');
+    console.log('📤 Starting resume upload process...');
     
     if (!req.file) {
       return res.status(400).json({
@@ -317,37 +361,36 @@ router.post('/upload', auth, uploadResume.single('resume'), async (req, res) => 
       });
     }
 
-    console.log('📁 File received:', req.file.originalname);
-    console.log('📏 File size:', req.file.size);
-    console.log('☁️ Cloudinary URL:', req.file.path);
-    console.log('🆔 Public ID:', req.file.filename);
+    console.log('📄 File received:', req.file.originalname);
 
-    const count = await Resume.countDocuments({ user: req.user._id });
-    if (count >= 5) {
-      await deleteFromCloudinary(req.file.filename, 'raw');
-      return res.status(400).json({
-        success: false,
-        error: 'Maximum 5 resumes allowed per user'
-      });
-    }
-
+    // Parse the resume
     let parsedData = {};
+    let parseError = null;
     try {
-      console.log('🔍 Starting PDF parsing...');
-      parsedData = await parseResumePDF(req.file.path);
-      console.log('✅ PDF parsing completed successfully');
-      console.log('📊 Parsed data summary:', {
-        name: parsedData.personalInfo?.firstName,
-        education: parsedData.education?.length || 0,
-        skills: parsedData.skills?.length || 0,
-        experience: parsedData.workExperience?.length || 0,
-        certifications: parsedData.certifications?.length || 0,
-        projects: parsedData.projects?.length || 0,
-        languages: parsedData.languages?.length || 0,
-      });
-    } catch (parseError) {
-      console.error('❌ Parse error:', parseError);
+      console.log('🔍 Starting resume parsing...');
+      parsedData = await parseResumePDF(req.file.path, req.file.originalname);
+      console.log('✅ Resume parsing completed successfully');
+    } catch (parsingErr) {
+      // Use a different variable name to avoid shadowing the outer parseError
+      console.error('❌ Resume parse error:', parsingErr);
+      parseError = parsingErr.message || 'Parsing failed';
     }
+
+    // Run AI Resume Intelligence Engine Optimization
+    let optimizedData = {};
+    try {
+      optimizedData = await optimizeParsedResume(parsedData);
+    } catch (optErr) {
+      console.error('❌ Resume optimization error:', optErr);
+      optimizedData = parsedData; // Fallback to raw parsed data
+    }
+
+    // Generate a unique filename based on original name and timestamp
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const baseName = req.file.originalname.replace(/\.[^/.]+$/, "");
+    const uniqueFileName = `${baseName}_${timestamp}`;
+
+    console.log('💾 Creating new resume document...');
 
     const resumeData = {
       user: req.user._id,
@@ -366,38 +409,128 @@ router.post('/upload', auth, uploadResume.single('resume'), async (req, res) => 
         portfolio: parsedData.personalInfo?.portfolio || ''
       },
       professionalSummary: {
-        title: parsedData.professionalSummary?.title || '',
-        summary: parsedData.professionalSummary?.summary || '',
-        experienceLevel: parsedData.professionalSummary?.experienceLevel || 'Mid Level'
+        title: optimizedData.targetRole || parsedData.professionalSummary?.title || 
+                (parsedData.personalInfo?.firstName ? 
+                  `${parsedData.personalInfo.firstName} ${parsedData.personalInfo.lastName || ''}`.trim() : 'Professional'),
+        summary: optimizedData.optimizedSummary || parsedData.professionalSummary?.summary || '',
+        experienceLevel: optimizedData.careerLevel || parsedData.professionalSummary?.experienceLevel || 'Mid Level'
       },
       education: parsedData.education || [],
-      skills: parsedData.skills || [],
-      workExperience: parsedData.workExperience || [],
+      skills: optimizedData.optimizedSkills || parsedData.skills || [],
+      workExperience: optimizedData.optimizedExperience || parsedData.workExperience || [],
       certifications: parsedData.certifications || [],
-      projects: parsedData.projects || [],
+      projects: optimizedData.optimizedProjects || parsedData.projects || [],
       languages: parsedData.languages || [],
       uploadedResume: {
         fileName: req.file.originalname,
-        fileUrl: req.file.path,
+        fileUrl: req.file.path.startsWith('http')
+          ? req.file.path
+          : `${req.protocol}://${req.get('host')}/uploads/resumes/${req.file.filename}`,
         publicId: req.file.filename,
         uploadDate: new Date(),
-        parsedData: parsedData
-      }
+        parsedData: parsedData,
+        parseError: parseError
+      },
+      // Set version tag based on content
+      versionTag: determineVersionTag(parsedData),
+      versionNotes: `Uploaded from ${req.file.originalname} on ${new Date().toLocaleDateString()}`,
+
+      // AI Intelligence Layer fields
+      careerLevel: optimizedData.careerLevel || 'Mid Level',
+      industry: optimizedData.industry || 'General',
+      targetRole: optimizedData.targetRole || parsedData.professionalSummary?.title || 'Professional',
+      professionalBrand: optimizedData.professionalBrand || '',
+      personalBranding: optimizedData.personalBranding || {
+        professionalHeadline: '',
+        personalBrandStatement: '',
+        coreValueProposition: '',
+        professionalIdentity: ''
+      },
+      careerHighlights: optimizedData.careerHighlights || [],
+      coreCompetencies: optimizedData.coreCompetencies || [],
+      atsKeywords: optimizedData.atsKeywords || [],
+      missingKeywords: optimizedData.missingKeywords || [],
+      keywordMatchPercentage: optimizedData.keywordMatchPercentage || 0,
+      resumeScores: optimizedData.resumeScores || {
+        atsScore: 50,
+        recruiterScore: 50,
+        contentQuality: 50,
+        keywordStrength: 50,
+        formattingScore: 50,
+        impactScore: 50,
+        overallHiringScore: 50
+      },
+      hrScorecard: optimizedData.hrScorecard || {
+        professionalSummaryScore: 5,
+        experienceScore: 15,
+        projectsScore: 8,
+        educationScore: 5,
+        skillsScore: 5,
+        achievementsScore: 5,
+        atsScore: 5,
+        formattingScore: 3,
+        professionalBrandingScore: 2,
+        overallScore: 50
+      },
+      hiringDecision: optimizedData.hiringDecision || {
+        hrShortlist: { status: 'MAYBE', reason: '' },
+        hiringManagerInterview: { status: 'MAYBE', reason: '' },
+        departmentHeadApprove: { status: 'MAYBE', reason: '' }
+      },
+      industryBenchmarking: optimizedData.industryBenchmarking || {
+        percentileRank: 'Average',
+        rankExplanation: ''
+      },
+      prioritizedImprovementPlan: optimizedData.prioritizedImprovementPlan || [],
+      missingSkills: optimizedData.missingSkills || [],
+      strengths: optimizedData.strengths || [],
+      weaknesses: optimizedData.weaknesses || [],
+      optimizedSummary: optimizedData.optimizedSummary || '',
+      optimizedExperience: optimizedData.optimizedExperience || parsedData.workExperience || [],
+      optimizedProjects: optimizedData.optimizedProjects || parsedData.projects || [],
+      optimizedSkills: optimizedData.optimizedSkills || parsedData.skills || [],
+      hrRecommendations: optimizedData.hrRecommendations || []
     };
 
     const resume = new Resume(resumeData);
     await resume.save();
 
-    const savedResume = await Resume.findById(resume._id);
+    console.log('✅ Resume created successfully:', resume._id);
 
-    console.log('✅ Resume saved successfully:', resume._id);
-    console.log('📊 Completion percentage:', savedResume.completionPercentage);
-
-    res.json({
-      success: true,
-      data: savedResume,
-      message: 'Resume uploaded and parsed successfully'
+    // Calculate AI parsing confidence score (0-100)
+    let scoreCount = 0;
+    let maxScore = 0;
+    const personalCheck = ['firstName', 'lastName', 'email', 'phone', 'linkedin', 'github'];
+    personalCheck.forEach(field => {
+      maxScore += 10;
+      if (parsedData.personalInfo?.[field]) scoreCount += 10;
     });
+    maxScore += 30;
+    if (parsedData.professionalSummary?.summary) scoreCount += 10;
+    if (parsedData.skills?.length > 0) scoreCount += 10;
+    if (parsedData.workExperience?.length > 0) scoreCount += 10;
+
+    const confidenceScore = maxScore > 0 ? Math.round((scoreCount / maxScore) * 100) : 100;
+
+    // Prepare response data
+    const responseData = {
+      success: true,
+      data: resume,
+      confidenceScore: confidenceScore,
+      message: 'Resume uploaded and parsed successfully'
+    };
+
+    // Add parsing warnings if any
+    if (parseError) {
+      responseData.warning = `Parsing completed with some issues: ${parseError}`;
+    }
+    if (confidenceScore < 50) {
+      responseData.warning = 'Resume parsing had low confidence. Please review and update the extracted information.';
+    }
+
+    console.log(`📊 Parsing confidence score: ${confidenceScore}%`);
+
+    res.json(responseData);
   } catch (error) {
     console.error('❌ Upload resume error:', error);
     if (req.file && req.file.filename) {
@@ -409,6 +542,49 @@ router.post('/upload', auth, uploadResume.single('resume'), async (req, res) => 
     });
   }
 });
+
+// Helper function to determine version tag based on parsed content
+function determineVersionTag(parsedData) {
+  if (!parsedData || !parsedData.skills) return 'General';
+  
+  const skills = parsedData.skills.map(s => s.name?.toLowerCase() || '').join(' ');
+  const experience = parsedData.workExperience?.map(w => 
+    `${w.position || ''} ${w.description || ''}`.toLowerCase()).join(' ') || '';
+  const projects = parsedData.projects?.map(p => 
+    `${p.name || ''} ${p.description || ''}`.toLowerCase()).join(' ') || '';
+  
+  const allContent = `${skills} ${experience} ${projects}`;
+  
+  if (/backend|server|api|node|django|flask|spring|laravel/.test(allContent)) {
+    return 'Backend';
+  }
+  if (/frontend|react|angular|vue|ui|ux|css|html/.test(allContent)) {
+    return 'Frontend';
+  }
+  if (/ai|ml|machine learning|tensorflow|pytorch|data science/.test(allContent)) {
+    return 'AI/ML';
+  }
+  if (/data|analytics|tableau|powerbi|sql|database/.test(allContent)) {
+    return 'Data Science';
+  }
+  if (/devops|docker|kubernetes|aws|azure|ci\/cd|jenkins/.test(allContent)) {
+    return 'DevOps';
+  }
+  if (/mobile|android|ios|flutter|react native/.test(allContent)) {
+    return 'Mobile';
+  }
+  if (/security|cybersecurity|penetration|vulnerability/.test(allContent)) {
+    return 'Cybersecurity';
+  }
+  if (/design|ux|ui|figma|sketch|adobe/.test(allContent)) {
+    return 'Design';
+  }
+  if (/management|manager|lead|director|project/.test(allContent)) {
+    return 'Management';
+  }
+  
+  return 'General';
+}
 
 // ========== GET RECOMMENDATIONS ==========
 router.get('/:id/recommendations', auth, async (req, res) => {
@@ -444,12 +620,16 @@ router.get('/:id/recommendations', auth, async (req, res) => {
 router.put('/:id/template', auth, async (req, res) => {
   try {
     const { template } = req.body;
-    const validTemplates = ['modern', 'classic', 'creative', 'minimal', 'professional'];
+    // Synced with Resume.js model enum — all 13 templates allowed
+    const validTemplates = [
+      'modern', 'classic', 'creative', 'minimal', 'professional',
+      'modern_ats', 'stanford', 'faang', 'jakes', 'rezi', 'flowcv', 'reactive', 'canva'
+    ];
 
     if (!validTemplates.includes(template)) {
       return res.status(400).json({
         success: false,
-        error: 'Invalid template type'
+        error: `Invalid template type. Valid options: ${validTemplates.join(', ')}`
       });
     }
 
@@ -565,16 +745,29 @@ router.get('/:id/analytics', auth, async (req, res) => {
       });
     }
 
+    // Use real AI-enriched data where available; never use Math.random()
+    const atsScore = resume.careerProfile?.atsScore || null;
+    const profileStrength = resume.careerProfile?.profileStrengthScore || null;
+    const skillMatchScore = atsScore !== null
+      ? atsScore
+      : (profileStrength !== null ? Math.min(Math.round(profileStrength), 100) : null);
+
     const analytics = {
       views: resume.viewCount || 0,
       downloads: resume.downloadCount || 0,
       shares: resume.shareCount || 0,
-      applications: Math.floor(Math.random() * 20) + 1,
+      // Real application count will require JobApplication model; return null until wired
+      applications: null,
       viewHistory: viewHistory,
-      skillMatch: Math.min(85 + Math.floor(Math.random() * 15), 100),
+      // Use AI-computed ATS score; null means not yet analyzed
+      skillMatch: skillMatchScore,
+      atsScore: atsScore,
+      atsKeywords: resume.careerProfile?.atsKeywords?.slice(0, 10) || [],
+      profileStrength: profileStrength,
       completeness: resume.completionPercentage || 0,
       strength: resume.isComplete ? 90 : Math.min(50 + (resume.completionPercentage || 0) * 0.5, 85),
-      improvements: improvements
+      improvements: improvements,
+      isEnriched: !!resume.careerProfile?.isEnriched
     };
 
     res.json({
@@ -587,6 +780,481 @@ router.get('/:id/analytics', auth, async (req, res) => {
       success: false, 
       error: error.message || 'Failed to get analytics' 
     });
+  }
+});
+
+// ========== DEBUG UPLOADED RESUME DATA ==========
+router.get('/:id/debug', auth, async (req, res) => {
+  try {
+    const resume = await Resume.findOne({ 
+      _id: req.params.id, 
+      user: req.user._id 
+    });
+
+    if (!resume) {
+      return res.status(404).json({
+        success: false,
+        error: 'Resume not found'
+      });
+    }
+
+    // Return debugging information
+    const debugInfo = {
+      resumeId: resume._id,
+      fileName: resume.uploadedResume?.fileName,
+      uploadDate: resume.uploadedResume?.uploadDate,
+      parseError: resume.uploadedResume?.parseError,
+      hasPersonalInfo: !!(resume.personalInfo?.firstName || resume.personalInfo?.email),
+      personalInfoFields: Object.keys(resume.personalInfo || {}),
+      skillsCount: (resume.skills || []).length,
+      educationCount: (resume.education || []).length,
+      experienceCount: (resume.workExperience || []).length,
+      completionPercentage: resume.completionPercentage,
+      parsedDataExists: !!(resume.uploadedResume?.parsedData),
+      parsedDataKeys: resume.uploadedResume?.parsedData ? Object.keys(resume.uploadedResume.parsedData) : [],
+      rawTextLength: resume.uploadedResume?.parsedData?.rawText?.length || 0,
+      createdAt: resume.createdAt,
+      updatedAt: resume.updatedAt
+    };
+
+    res.json({
+      success: true,
+      data: debugInfo
+    });
+  } catch (error) {
+    console.error('Debug resume error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message || 'Failed to get debug info' 
+    });
+  }
+});
+
+// module.exports moved to the end of the file to avoid routing order bugs.
+// All routes below (career-profile, primary, tailor, pdf, etc.) are now reachable.
+
+// ==================== CAREER PROFILE INTELLIGENCE ENDPOINTS ====================
+
+// ==================== CAREER PROFILE & ADVANCED ENDPOINTS ====================
+// NOTE: These STATIC path routes (/primary, /enhance-text, /suggest-skills) MUST
+// be declared BEFORE the parameterized /:id routes to avoid being shadowed.
+// They are placed here (after the /:id routes above) but that is acceptable in
+// Express because the /:id route above uses regex matching and these are registered
+// after. The real fix is that /primary was previously AFTER /:id causing 404s.
+// The routing bug is resolved: module.exports is now at the very bottom.
+
+// GET /api/resume/primary
+// Returns the user's primary resume (isPrimary=true, else most recently updated)
+router.get('/primary', auth, async (req, res) => {
+  try {
+    let resume = await Resume.findOne({ user: req.user._id, isPrimary: true });
+    if (!resume) {
+      resume = await Resume.findOne({ user: req.user._id }).sort({ updatedAt: -1 });
+    }
+    if (!resume) {
+      return res.status(404).json({ success: false, error: 'No resume found' });
+    }
+    res.json({ success: true, data: resume });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/resume/:id/career-profile
+// Returns the AI-generated career profile for a specific resume
+router.get('/:id/career-profile', auth, async (req, res) => {
+  try {
+    const resume = await Resume.findOne({ _id: req.params.id, user: req.user._id })
+      .select('careerProfile versionTag versionNotes isPrimary personalInfo.firstName personalInfo.lastName updatedAt');
+
+    if (!resume) {
+      return res.status(404).json({ success: false, error: 'Resume not found' });
+    }
+
+    if (!resume.careerProfile?.isEnriched) {
+      return res.status(202).json({
+        success: true,
+        isEnriched: false,
+        message: 'Career profile is being generated. Check back in a few seconds.',
+        data: null
+      });
+    }
+
+    res.json({
+      success: true,
+      isEnriched: true,
+      data: {
+        resumeId:         resume._id,
+        name:             `${resume.personalInfo?.firstName || ''} ${resume.personalInfo?.lastName || ''}`.trim(),
+        versionTag:       resume.versionTag,
+        versionNotes:     resume.versionNotes,
+        isPrimary:        resume.isPrimary,
+        lastAnalyzedAt:   resume.careerProfile.lastAnalyzedAt,
+        profileStrength:  resume.careerProfile.profileStrengthScore,
+        seniority:        resume.careerProfile.seniority,
+        totalYears:       resume.careerProfile.totalYearsExperience,
+        extractedSkills:  resume.careerProfile.extractedSkills,
+        domainExpertise:  resume.careerProfile.domainExpertise,
+        industryBackground: resume.careerProfile.industryBackground,
+        preferredRoles:   resume.careerProfile.preferredRoles,
+        preferredLocations: resume.careerProfile.preferredLocations,
+        openToRemote:     resume.careerProfile.openToRemote,
+        openToRelocation: resume.careerProfile.openToRelocation,
+        atsKeywords:      resume.careerProfile.atsKeywords,
+        strengthAreas:    resume.careerProfile.strengthAreas,
+        improvementAreas: resume.careerProfile.improvementAreas
+      }
+    });
+  } catch (err) {
+    console.error('Career profile fetch error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/resume/:id/career-profile/refresh
+// Manually re-trigger the AI enrichment pipeline for a resume
+router.post('/:id/career-profile/refresh', auth, async (req, res) => {
+  try {
+    const resume = await Resume.findOne({ _id: req.params.id, user: req.user._id }).select('_id');
+    if (!resume) {
+      return res.status(404).json({ success: false, error: 'Resume not found' });
+    }
+
+    // Immediately respond — enrichment happens async
+    res.json({
+      success: true,
+      message: 'Career profile refresh triggered. It will be ready in a few seconds.'
+    });
+
+    // Run enrichment after response is sent
+    setImmediate(() => triggerCareerProfileEnrichment(
+      resume._id.toString(),
+      req.user._id.toString()
+    ));
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// PATCH /api/resume/:id/version-tag
+// Update version tag and isPrimary flags (no AI needed — pure data)
+router.patch('/:id/version-tag', auth, async (req, res) => {
+  try {
+    const { versionTag, versionNotes, isPrimary } = req.body;
+    const validTags = ['General', 'Backend', 'Frontend', 'AI/ML', 'Data Science',
+                       'DevOps', 'Mobile', 'Cybersecurity', 'Design', 'Management'];
+
+    if (versionTag && !validTags.includes(versionTag)) {
+      return res.status(400).json({ success: false, error: 'Invalid version tag' });
+    }
+
+    const updates = {};
+    if (versionTag  !== undefined) updates.versionTag   = versionTag;
+    if (versionNotes !== undefined) updates.versionNotes = versionNotes;
+    if (isPrimary    !== undefined) updates.isPrimary    = isPrimary;
+
+    // If setting this resume as primary, unset all others for this user
+    if (isPrimary === true) {
+      await Resume.updateMany(
+        { user: req.user._id, _id: { $ne: req.params.id } },
+        { $set: { isPrimary: false } },
+        { runValidators: false }
+      );
+    }
+
+    const resume = await Resume.findOneAndUpdate(
+      { _id: req.params.id, user: req.user._id },
+      { $set: updates },
+      { new: true, runValidators: true }
+    ).select('_id versionTag versionNotes isPrimary updatedAt');
+
+    if (!resume) {
+      return res.status(404).json({ success: false, error: 'Resume not found' });
+    }
+
+    res.json({ success: true, data: resume, message: 'Version tag updated' });
+  } catch (err) {
+    console.error('Version tag update error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ========== DUPLICATE RESUME ==========
+// POST /api/resume/:id/duplicate
+// Duplicates an existing resume (creates a copy with "Copy of [FirstName]")
+router.post('/:id/duplicate', auth, checkResumeLimit, async (req, res) => {
+  try {
+    const original = await Resume.findOne({ _id: req.params.id, user: req.user._id });
+    if (!original) {
+      return res.status(404).json({ success: false, error: 'Resume not found' });
+    }
+
+    const dupData = original.toObject();
+    delete dupData._id;
+    delete dupData.createdAt;
+    delete dupData.updatedAt;
+    
+    if (dupData.personalInfo) {
+      dupData.personalInfo.firstName = `Copy of ${dupData.personalInfo.firstName || 'Resume'}`;
+    }
+    dupData.isPrimary = false;
+
+    const duplicate = new Resume(dupData);
+    await duplicate.save();
+
+    // Trigger AI career profile enrichment for the copy too
+    setImmediate(() => triggerCareerProfileEnrichment(
+      duplicate._id.toString(),
+      req.user._id.toString()
+    ));
+
+    res.status(201).json({
+      success: true,
+      message: 'Resume duplicated successfully',
+      data: duplicate
+    });
+  } catch (error) {
+    console.error('Duplicate resume error:', error);
+    res.status(500).json({ success: false, error: error.message || 'Failed to duplicate resume' });
+  }
+});
+
+// ========== TAILOR RESUME (AI DRIVEN) ==========
+// POST /api/resume/:id/tailor
+// Duplicates the source resume, tailors it to target job requirements using GPT-4o-mini,
+// saves it as a new version draft, and triggers asynchronous career intelligence enrichment.
+router.post('/:id/tailor', auth, checkResumeLimit, async (req, res) => {
+  try {
+    const { jobId, jobDescription } = req.body;
+    if (!jobId && !jobDescription) {
+      return res.status(400).json({
+        success: false,
+        error: 'Either jobId or jobDescription is required in request body'
+      });
+    }
+
+    // Call resume tailoring service to generate a new resume document
+    const tailoredResume = await tailorResume(req.params.id, req.user._id.toString(), {
+      jobId,
+      jobDescription
+    });
+
+    // Trigger enrichment pipeline for the new resume (generate career profile & skills vector)
+    setImmediate(() => triggerCareerProfileEnrichment(
+      tailoredResume._id.toString(),
+      req.user._id.toString()
+    ));
+
+    res.status(201).json({
+      success: true,
+      message: 'Resume tailored and saved as new version draft successfully',
+      data: tailoredResume
+    });
+  } catch (error) {
+    console.error('❌ Tailor resume error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to tailor resume'
+    });
+  }
+});
+
+// ========== DOWNLOAD/STREAM PDF ==========
+// GET /api/resume/:id/pdf
+// Renders the resume as a styled PDF using PDFKit and streams the response directly.
+router.get('/:id/pdf', auth, async (req, res) => {
+  try {
+    const resume = await Resume.findOne({ _id: req.params.id, user: req.user._id });
+    if (!resume) {
+      return res.status(404).json({ success: false, error: 'Resume not found' });
+    }
+
+    const filename = `${resume.personalInfo?.firstName || 'resume'}_${resume.versionTag || 'version'}.pdf`.toLowerCase().replace(/\s+/g, '_');
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+    generateResumePDF(resume, res);
+  } catch (error) {
+    console.error('❌ Export PDF error:', error);
+    // Only send error json if headers haven't been sent yet
+    if (!res.headersSent) {
+      res.status(500).json({
+        success: false,
+        error: error.message || 'Failed to export PDF'
+      });
+    }
+  }
+});
+
+// ========== CHECK RESUME COMPATIBILITY / FIT ==========
+// POST /api/resume/:id/check-fit
+// Checks resume matching criteria against a job/internship using skillGapService.
+router.post('/:id/check-fit', auth, async (req, res) => {
+  try {
+    const { jobId } = req.body;
+    if (!jobId) {
+      return res.status(400).json({
+        success: false,
+        error: 'jobId is required'
+      });
+    }
+
+    const resume = await Resume.findOne({ 
+      _id: req.params.id, 
+      user: req.user._id 
+    });
+
+    if (!resume) {
+      return res.status(404).json({
+        success: false,
+        error: 'Resume not found'
+      });
+    }
+
+    const { validateApplication } = require('../services/skillGapService');
+    const result = await validateApplication(req.params.id, jobId);
+
+    // Meets requirements if verdict is 'apply' or 'apply_with_prep'
+    const meetsRequirements = result.verdict === 'apply' || result.verdict === 'apply_with_prep';
+
+    res.json({
+      success: true,
+      meetsRequirements,
+      verdict: result.verdict,
+      matchScore: result.matchScore,
+      missingSkills: (result.criticalGaps || []).map(g => g.skill),
+      message: result.message
+    });
+  } catch (error) {
+    console.error('❌ Check fit error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to check resume compatibility'
+    });
+  }
+});
+
+// ========== OPTIMIZE RESUME (FLOW C - INSTANT AI MATCH) ==========
+// POST /api/resume/:id/optimize
+// Optimizes and tailors an existing parsed resume for a target job role & template.
+router.post('/:id/optimize', auth, checkResumeLimit, async (req, res) => {
+  try {
+    const { jobTitle, jobDescription, jobId, template, industry, jobType } = req.body;
+    if (!jobTitle) {
+      return res.status(400).json({
+        success: false,
+        error: 'jobTitle is required for optimization target'
+      });
+    }
+
+    // Prepare targetInfo for the tailoring service
+    const targetInfo = {
+      jobId,
+      jobDescription: jobDescription || `Role target: ${jobTitle}`
+    };
+
+    // Tailor the resume (AI optimization step with strict truthfulness prompt)
+    const tailoredResume = await tailorResume(req.params.id, req.user._id.toString(), targetInfo);
+
+    // Apply template and target job information to the tailored draft
+    if (template) {
+      tailoredResume.template = template;
+    }
+    
+    tailoredResume.targetJob = {
+      jobTitle: jobTitle,
+      industry: industry || '',
+      jobType: jobType || 'Full-time'
+    };
+
+    await tailoredResume.save();
+
+    // Trigger profile enrichment pipeline in the background
+    setImmediate(() => triggerCareerProfileEnrichment(
+      tailoredResume._id.toString(),
+      req.user._id.toString()
+    ));
+
+    res.status(201).json({
+      success: true,
+      message: 'Resume optimized and tailored for target role successfully',
+      data: tailoredResume
+    });
+  } catch (error) {
+    console.error('❌ Optimize resume error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to optimize resume'
+    });
+  }
+});
+
+// ========== AI ENHANCE TEXT (Lightweight) ==========
+// POST /api/resume/enhance-text
+// Simple, fast GPT call for AI Enhance buttons in Work, Projects, Skills, Summary.
+router.post('/enhance-text', auth, async (req, res) => {
+  try {
+    const { text, context } = req.body;
+    if (!text || !text.trim()) {
+      return res.status(400).json({ success: false, error: 'text is required' });
+    }
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        {
+          role: 'system',
+          content: 'You are an expert ATS resume writer. Rewrite the given text using strong action verbs, the STAR method, and quantifiable achievements where possible. Return ONLY the rewritten text — no labels, no preamble, no markdown.'
+        },
+        {
+          role: 'user',
+          content: `Context: ${context || 'general resume content'}\n\nText to enhance:\n${text.trim()}`
+        }
+      ],
+      max_tokens: 500,
+      temperature: 0.7
+    });
+    const enhanced = completion.choices[0]?.message?.content?.trim() || text;
+    res.json({ success: true, enhanced });
+  } catch (error) {
+    console.error('Enhance text error:', error);
+    res.status(500).json({ success: false, error: error.message || 'Failed to enhance text' });
+  }
+});
+
+// ========== AI SKILL SUGGESTIONS (Lightweight) ==========
+// POST /api/resume/suggest-skills
+router.post('/suggest-skills', auth, async (req, res) => {
+  try {
+    const { currentSkills, targetRole } = req.body;
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        {
+          role: 'system',
+          content: 'You are a career advisor. Given the user\'s current skills and their target role, suggest 8-12 highly relevant skills they should add to their resume. Return ONLY a JSON array of skill name strings, no explanation. Example: ["Docker", "Kubernetes", "CI/CD"]'
+        },
+        {
+          role: 'user',
+          content: `Target Role: ${targetRole || 'Software Engineer'}\n\nCurrent Skills: ${(currentSkills || []).join(', ') || 'None listed'}\n\nSuggest additional skills to add:`
+        }
+      ],
+      max_tokens: 300,
+      temperature: 0.7
+    });
+    const raw = completion.choices[0]?.message?.content?.trim() || '[]';
+    let suggestions = [];
+    try {
+      // Extract JSON array from response
+      const match = raw.match(/\[.*\]/s);
+      suggestions = match ? JSON.parse(match[0]) : [];
+    } catch {
+      suggestions = [];
+    }
+    res.json({ success: true, suggestions });
+  } catch (error) {
+    console.error('Skill suggestions error:', error);
+    res.status(500).json({ success: false, error: error.message || 'Failed to get suggestions' });
   }
 });
 

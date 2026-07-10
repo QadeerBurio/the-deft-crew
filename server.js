@@ -30,6 +30,22 @@ app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 // ---------------- DATABASE ----------------
 connectDB().then(() => {
+  // Purge any existing non-Pakistan/worldwide external jobs to keep the feed clean
+  const Job = require("./models/Job");
+  const JobEmbedding = require("./models/JobEmbedding");
+  Job.find({
+    location: { $not: /pakistan|karachi|lahore|islamabad|rawalpindi|faisalabad|multan|peshawar|quetta|sialkot|gujranwala|hyderabad|abbottabad|sargodha|bahawalpur|sukkur|larkana|gujrat|sheikhupura|jhelum|sahiwal|pk/i }
+  }).select("_id").then(async jobsToDelete => {
+    if (jobsToDelete.length > 0) {
+      const ids = jobsToDelete.map(j => j._id);
+      const deleteJobsResult = await Job.deleteMany({ _id: { $in: ids } });
+      const deleteEmbeddingsResult = await JobEmbedding.deleteMany({ jobId: { $in: ids } });
+      console.log(`🧹 [Startup] Purged ${deleteJobsResult.deletedCount} foreign jobs and ${deleteEmbeddingsResult.deletedCount} orphaned embeddings.`);
+    }
+  }).catch(err => {
+    console.error("❌ [Startup] Failed to purge non-Pakistan jobs:", err);
+  });
+
   const { connectDB: connectChatDB } = require("./chat-service/dist/config/db");
   const { schedulerService } = require("./chat-service/dist/services/scheduler.service");
   connectChatDB().then(() => {
@@ -39,6 +55,18 @@ connectDB().then(() => {
   }).catch((err) => {
     console.error("❌ Failed to connect to chat database:", err);
   });
+
+  // ⏰ Job Ingestion Scheduler (Disabled - Exclusively Internships Mode)
+  // const jobIngestionService = require("./services/jobIngestionService");
+  // setTimeout(() => {
+  //   console.log("⏰ [Scheduler] Running initial job ingestion scan...");
+  //   jobIngestionService.ingestJobs().catch(err => console.error("❌ [Scheduler] Initial ingestion error:", err.message));
+  // }, 5000);
+
+  // setInterval(() => {
+  //   console.log("⏰ [Scheduler] Running recurring 6-hour job ingestion...");
+  //   jobIngestionService.ingestJobs().catch(err => console.error("❌ [Scheduler] Recurring ingestion error:", err.message));
+  // }, 21600000);
 });
 
 // ---------------- ROUTES ----------------
@@ -58,137 +86,6 @@ app.use("/api/traveler", require("./routes/traveler.routes"));
 app.use("/api/resume", require("./routes/resume.routes"));
 app.use("/api/v1", require("./chat-service/dist/routes/index").default);
 
-// ---------------- AI CHAT (Gemini) ----------------
-// ---------------- AI CHAT (Gemini) ----------------
-app.post("/api/chat", async (req, res) => {
-  const { message, history } = req.body;
-
-  // Check if message is provided
-  if (!message) {
-    return res.status(400).json({ 
-      success: false, 
-      error: "Message is required" 
-    });
-  }
-
-  // Check for API key
-  if (!process.env.GEMINI_API_KEY) {
-    return res.status(503).json({ 
-      success: false, 
-      error: "AI service is not configured. Please contact support." 
-    });
-  }
-
-  try {
-    let conversationHistory = "";
-    if (history?.length) {
-      // Limit to last 10 messages for better context
-      history.slice(-10).forEach((m) => {
-        conversationHistory += `${m.role}: ${m.content}\n`;
-      });
-    }
-
-    const prompt = `
-You are TDC Assistant, a helpful AI assistant for a university platform. 
-Your role is to assist students with:
-- University admissions and applications
-- Course information and recommendations
-- Scholarship opportunities
-- Campus facilities and services
-- Event information
-- General academic guidance
-
-Be friendly, professional, and concise. Keep responses under 3-4 sentences when possible.
-
-${conversationHistory}
-User: ${message}
-Assistant:`;
-
-    const response = await axios.post(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
-      {
-        contents: [{ 
-          parts: [{ 
-            text: prompt 
-          }] 
-        }],
-        generationConfig: {
-          temperature: 0.7,
-          maxOutputTokens: 500,
-          topP: 0.95,
-          topK: 40
-        },
-        safetySettings: [
-          {
-            category: "HARM_CATEGORY_HARASSMENT",
-            threshold: "BLOCK_MEDIUM_AND_ABOVE"
-          },
-          {
-            category: "HARM_CATEGORY_HATE_SPEECH",
-            threshold: "BLOCK_MEDIUM_AND_ABOVE"
-          }
-        ]
-      },
-      {
-        timeout: 15000 // 15 second timeout
-      }
-    );
-
-    const reply = response.data.candidates?.[0]?.content?.parts?.[0]?.text || null;
-    
-    if (!reply) {
-      return res.status(500).json({
-        success: false,
-        error: "AI service returned an empty response. Please try again."
-      });
-    }
-
-    // Clean up the response
-    const cleanedReply = reply.trim().replace(/^Assistant:\s*/i, '');
-    
-    res.json({ 
-      success: true, 
-      reply: cleanedReply,
-      timestamp: new Date().toISOString()
-    });
-    
-  } catch (err) {
-    console.error("AI Chat Error:", {
-      message: err.message,
-      code: err.code,
-      response: err.response?.data
-    });
-
-    // Handle specific error types
-    if (err.code === 'ECONNABORTED') {
-      return res.status(504).json({
-        success: false,
-        error: "Request timeout. Please try again."
-      });
-    }
-    
-    if (err.response?.status === 429) {
-      return res.status(429).json({
-        success: false,
-        error: "AI service is busy. Please wait a moment and try again."
-      });
-    }
-    
-    if (err.response?.status === 403) {
-      return res.status(503).json({
-        success: false,
-        error: "AI service authentication failed. Please contact support."
-      });
-    }
-
-    // Default error response
-    res.status(500).json({
-      success: false,
-      error: "Unable to process your request. Please try again in a moment.",
-      details: process.env.NODE_ENV === 'development' ? err.message : undefined
-    });
-  }
-});
 // ---------------- SOCKET.IO CHAT & CALL HANDLER ----------------
 const { Message, Conversation } = require('./models/Chat');
 

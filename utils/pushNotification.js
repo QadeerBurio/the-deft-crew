@@ -1,7 +1,7 @@
 const { Expo } = require('expo-server-sdk');
 let expo = new Expo();
 
-const sendPushNotification = async (targetToken, title, body) => {
+const sendPushNotification = async (targetToken, title, body, extraData = {}) => {
   if (!Expo.isExpoPushToken(targetToken)) {
     console.error("Invalid Expo push token:", targetToken);
     return;

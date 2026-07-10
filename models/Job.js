@@ -130,6 +130,27 @@ const JobSchema = new mongoose.Schema({
         type: String,
         default: ""
     },
+    // --- JOB INGESTION PIPELINE FIELDS ---
+    source: {
+        type: String,
+        enum: ['manual', 'jSearch', 'remotive', 'rozee', 'mustakbil', 'adzuna', 'lever', 'greenhouse', 'workable'],
+        default: 'manual'
+    },
+    externalId: {
+        type: String,
+        default: ''
+    },
+    externalUrl: {
+        type: String,
+        default: ''
+    },
+    isExternal: {
+        type: Boolean,
+        default: false
+    },
+    lastFetchedAt: {
+        type: Date
+    },
     createdAt: { 
         type: Date, 
         default: Date.now 
@@ -139,6 +160,16 @@ const JobSchema = new mongoose.Schema({
         default: Date.now
     }
 });
+
+// ==================== PERFORMANCE INDEXES ====================
+// Critical for public job feed queries (eliminates collection scans)
+JobSchema.index({ active: 1, type: 1, createdAt: -1 });          // Main feed
+JobSchema.index({ active: 1, category: 1, locationType: 1 });    // Category filters
+JobSchema.index({ active: 1, featured: -1, urgent: -1 });        // Featured/urgent jobs
+JobSchema.index({ active: 1, applicationDeadline: 1 });          // Deadline queries
+JobSchema.index({ postedBy: 1, active: 1 });                     // Employer dashboard
+JobSchema.index({ skills: 1 });                                  // Skill matching
+JobSchema.index({ source: 1, externalId: 1 }, { sparse: true }); // Deduplication
 
 JobSchema.pre('save', function() {
     this.updatedAt = Date.now();

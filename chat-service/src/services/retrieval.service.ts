@@ -3,6 +3,7 @@ import { mongoVectorStore } from '../vector/mongoVectorStore';
 import { env } from '../config/envValidator';
 import { logger } from '../config/logger';
 import { KnowledgeDocument } from '../models/KnowledgeDocument';
+import { KnowledgeChunk } from '../models/KnowledgeChunk';
 
 export interface RetrievedContext {
   contextText: string;
@@ -29,6 +30,17 @@ export class RetrievalService {
     
     logger.info(`Starting RAG context retrieval for query: "${query}"`);
 
+    // Guard: Bypass OpenAI embedding API call if vector store has no knowledge chunks
+    const chunkCount = await KnowledgeChunk.countDocuments({}).maxTimeMS(1000).catch(() => 1);
+    if (chunkCount === 0) {
+      logger.info('Knowledge chunks collection is empty. Bypassing embedding generation.');
+      return {
+        contextText: '',
+        sourceDocuments: [],
+        retrievalLatencyMs: Date.now() - startTime,
+      };
+    }
+
     // 1. Generate query embedding vector
     const queryEmbedding = await embeddingService.getEmbedding(query);
     const embeddingLatency = Date.now() - startTime;
@@ -39,7 +51,7 @@ export class RetrievalService {
     const candidates = await mongoVectorStore.similaritySearch(
       queryEmbedding,
       topK,
-      category ? { category } : undefined
+      { category, queryText: query }
     );
     const searchLatency = Date.now() - searchStartTime;
 
@@ -107,7 +119,9 @@ export class RetrievalService {
     
     // Map intent to unified KnowledgeDocument category values
     const intentLower = intent.toLowerCase();
-    if (intentLower.includes('job') || intentLower.includes('career') || intentLower.includes('intern')) {
+    if (intentLower.includes('tdc knowledge') || intentLower.includes('founder') || intentLower.includes('company')) {
+      categoryFilter = 'tdc_knowledge';
+    } else if (intentLower.includes('job') || intentLower.includes('career') || intentLower.includes('intern')) {
       categoryFilter = 'jobs';
     } else if (intentLower.includes('scholarship') || intentLower.includes('grant') || intentLower.includes('financial')) {
       categoryFilter = 'scholarships';

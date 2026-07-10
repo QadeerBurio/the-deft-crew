@@ -130,4 +130,11 @@ const JobApplicationSchema = new mongoose.Schema({
     }
 });
 
+// ==================== PERFORMANCE INDEXES ====================
+// Critical for employer pipeline dashboards and student application views
+JobApplicationSchema.index({ jobId: 1, status: 1 });            // Employer: filter by status per job
+JobApplicationSchema.index({ userId: 1, appliedAt: -1 });       // Student: my applications sorted by date
+JobApplicationSchema.index({ userId: 1, jobId: 1 }, { unique: true }); // Prevent duplicate applications
+JobApplicationSchema.index({ status: 1, appliedAt: -1 });       // Admin: overview by status
+
 module.exports = mongoose.model('JobApplication', JobApplicationSchema);

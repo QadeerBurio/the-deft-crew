@@ -139,34 +139,67 @@ export const postStream = asyncHandler(async (req: AuthenticatedRequest, res: Re
   const startTime = Date.now();
   const user = req.user || ({ id: 'guest-user', name: 'Guest Student', role: 'guest', isGuest: true } as AuthenticatedUser);
 
-  // 1. Get or create session
-  const { session, isNew } = await getOrCreateSession(bodySessionId, user.id);
-  const sessionId = session.sessionId;
+  try {
+    // Setup SSE connection headers immediately to register millisecond-level startup connection response
+    streamingService.setupSSEHeaders(res);
+    res.write(':\n\n'); // Send SSE comment heartbeat to open the stream right away
 
-  // 2. Classify intent
-  const intent = await intentClassifier.classifyIntent(message);
+    // 1. Get or create session
+    const { session, isNew } = await getOrCreateSession(bodySessionId, user.id);
+    const sessionId = session.sessionId;
 
-  // 3. Persist user message
-  const userMsg = new ChatMessage({
-    sessionId,
-    role: 'user',
-    message,
-    intent,
-  });
-  await userMsg.save();
+    // 2. Classify intent (instant local regex check)
+    const intent = await intentClassifier.classifyIntent(message);
 
-  // 4. Retrieve context directly (avoiding the synchronous handleUserMessage OpenAI call)
-  const { messages: historyMessages } = await memoryService.getConversationContext(sessionId);
-  const directContext = await retrievalService.retrieveDirectDatabaseContext(intent, message, category);
-  const retrievalResult = await retrievalService.retrieveRelevantContext(message, category);
-  const retrievalLatencyMs = Date.now() - startTime;
+    // 3. Initiate context loading, database context, vector context, and user message persistence in parallel
+    const directContextPromise = (intent !== 'Greeting' && intent !== 'Help')
+      ? retrievalService.retrieveDirectDatabaseContext(intent, message, category)
+      : Promise.resolve('');
 
-  const combinedContext = [directContext, retrievalResult.contextText].filter(Boolean).join('\n\n');
+    const relevantContextPromise = (intent !== 'Greeting' && intent !== 'Help')
+      ? retrievalService.retrieveRelevantContext(message, category)
+      : Promise.resolve({ contextText: '', sourceDocuments: [], retrievalLatencyMs: 0 });
 
-  // Build the prompt instructions
-  let composedPrompt = promptService.getSystemInstructions(combinedContext);
-  if (user) {
-    composedPrompt = `[User Identity Profile]
+    const conversationContextPromise = memoryService.getConversationContext(sessionId);
+
+    const userMsg = new ChatMessage({
+      sessionId,
+      role: 'user',
+      message,
+      intent,
+    });
+    const userMsgSavePromise = userMsg.save();
+
+    let combinedContext = '';
+    let retrievalLatencyMs = 0;
+    let historyMessages: any[] = [];
+
+    try {
+      const [directContext, retrievalResult, historyResult] = await Promise.all([
+        directContextPromise,
+        relevantContextPromise,
+        conversationContextPromise,
+        userMsgSavePromise
+      ]);
+
+      historyMessages = historyResult.messages;
+      retrievalLatencyMs = Date.now() - startTime;
+      combinedContext = [directContext, retrievalResult.contextText].filter(Boolean).join('\n\n');
+    } catch (parallelErr: any) {
+      logger.error('Parallel retrieval / context load error in streaming:', parallelErr.message);
+      // Fallback: try loading conversation context if promise.all failed
+      try {
+        const historyResult = await conversationContextPromise;
+        historyMessages = historyResult.messages;
+      } catch (historyErr) {
+        historyMessages = [];
+      }
+    }
+
+    // Build the prompt instructions
+    let composedPrompt = promptService.getSystemInstructions(combinedContext);
+    if (user) {
+      composedPrompt = `[User Identity Profile]
 Name: ${user.name}
 Role: ${user.role}
 Is Guest: ${user.isGuest}
@@ -174,51 +207,56 @@ ${user.university ? `University Reference ID: ${user.university}` : ''}
 Greet the user by their name if they greet you or if context is appropriate.
 -----------------------
 \n` + composedPrompt;
-  }
+    }
 
-  // 5. Setup SSE pipeline headers immediately
-  streamingService.setupSSEHeaders(res);
+    // 6. Execute streaming loops
+    await streamingService.streamChatCompletion(
+      composedPrompt,
+      message,
+      historyMessages,
+      res,
+      async (fullReply, tokens) => {
+        const overallLatency = Date.now() - startTime;
 
-  // 6. Execute streaming loops
-  await streamingService.streamChatCompletion(
-    composedPrompt,
-    message,
-    historyMessages,
-    res,
-    async (fullReply, tokens) => {
-      const overallLatency = Date.now() - startTime;
+        // Persist generated reply
+        const assistantMsg = new ChatMessage({
+          sessionId,
+          role: 'assistant',
+          message: fullReply,
+          promptTokens: tokens.prompt,
+          completionTokens: tokens.completion,
+          totalTokens: tokens.prompt + tokens.completion,
+          model: env.OPENAI_MODEL,
+          intent,
+          latencyMs: overallLatency,
+          retrievalLatencyMs,
+          openaiLatencyMs: overallLatency - retrievalLatencyMs,
+          cacheHit: false,
+        });
+        await assistantMsg.save();
 
-      // Persist generated reply
-      const assistantMsg = new ChatMessage({
-        sessionId,
-        role: 'assistant',
-        message: fullReply,
-        promptTokens: tokens.prompt,
-        completionTokens: tokens.completion,
-        totalTokens: tokens.prompt + tokens.completion,
-        model: env.OPENAI_MODEL,
-        intent,
-        latencyMs: overallLatency,
-        retrievalLatencyMs,
-        openaiLatencyMs: overallLatency - retrievalLatencyMs,
-        cacheHit: false,
-      });
-      await assistantMsg.save();
+        session.updatedAt = new Date();
+        await session.save();
 
-      session.updatedAt = new Date();
-      await session.save();
+        if (isNew) {
+          memoryService.generateSessionTitle(sessionId, message).catch((err) => {
+            logger.error('Background title streaming error:', err.message);
+          });
+        }
 
-      if (isNew) {
-        memoryService.generateSessionTitle(sessionId, message).catch((err) => {
-          logger.error('Background title streaming error:', err.message);
+        memoryService.compressContextIfNecessary(sessionId).catch((err) => {
+          logger.error('Background compression streaming error:', err.message);
         });
       }
-
-      memoryService.compressContextIfNecessary(sessionId).catch((err) => {
-        logger.error('Background compression streaming error:', err.message);
-      });
+    );
+  } catch (err: any) {
+    logger.error('Fatal error in postStream controller:', err.message);
+    if (!res.headersSent) {
+      streamingService.setupSSEHeaders(res);
     }
-  );
+    res.write(`data: ${JSON.stringify({ error: err.message || 'Streaming failed' })}\n\n`);
+    res.end();
+  }
 });
 
 /**

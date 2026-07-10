@@ -100,26 +100,6 @@ router.put('/cancel/:id', authMiddleware, async (req, res) => {
   }
 });
 
-// Debug route to see all bookings (remove in production)
-router.get('/debug/all', authMiddleware, async (req, res) => {
-  try {
-    const bookings = await Booking.find({});
-    res.json({
-      userInfo: {
-        id: req.user._id,
-        email: req.user.email,
-        name: req.user.name
-      },
-      totalBookings: bookings.length,
-      userBookings: bookings.filter(b => 
-        b.userId?.toString() === req.user._id.toString() || 
-        b.customerEmail === req.user.email
-      ),
-      allBookings: bookings
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
+
 
 module.exports = router;

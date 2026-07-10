@@ -24,7 +24,7 @@ export interface IVectorStore {
   similaritySearch(
     queryEmbedding: number[],
     topK: number,
-    filter?: { category?: string }
+    filter?: { category?: string; queryText?: string }
   ): Promise<
     Array<{
       docId: string;

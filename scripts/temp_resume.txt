@@ -1,0 +1,51 @@
+
+John Doe
+Software Engineer
+john.doe@email.com
++1-234-567-8900
+linkedin.com/in/johndoe
+github.com/johndoe
+
+PROFESSIONAL SUMMARY
+Experienced Full Stack Developer with 3+ years in web development, specializing in React and Node.js applications.
+
+EDUCATION
+Bachelor of Science in Computer Science
+University of Technology
+2018 - 2022
+GPA: 3.8
+
+WORK EXPERIENCE
+Software Engineer
+Tech Solutions Inc
+2022 - Present
+• Developed React applications serving 10,000+ users
+• Built REST APIs using Node.js and Express
+• Collaborated with cross-functional teams
+
+Junior Developer
+StartupCo
+2021 - 2022
+• Created responsive web interfaces
+• Implemented database queries in MongoDB
+
+SKILLS
+JavaScript, React, Node.js, Python, HTML, CSS, MongoDB, SQL, Git, AWS
+
+PROJECTS
+E-commerce Platform
+Built full-stack web application using MERN stack
+Technologies: React, Node.js, MongoDB, Express
+
+Task Management App
+React Native mobile application with real-time updates
+Technologies: React Native, Firebase, Redux
+
+CERTIFICATIONS
+AWS Certified Developer Associate
+Amazon Web Services
+2023
+
+LANGUAGES
+English - Native
+Spanish - Intermediate

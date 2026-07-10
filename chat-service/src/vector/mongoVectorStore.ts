@@ -20,7 +20,7 @@ export class MongoVectorStore implements IVectorStore {
     if (chunks.length === 0) return;
 
     const docId = chunks[0].docId;
-    
+
     // Purge existing chunks for this document first
     await this.deleteVectors(docId);
 
@@ -54,7 +54,7 @@ export class MongoVectorStore implements IVectorStore {
   public async similaritySearch(
     queryEmbedding: number[],
     topK: number,
-    filter?: { category?: string }
+    filter?: { category?: string; queryText?: string }
   ): Promise<
     Array<{
       docId: string;
@@ -69,8 +69,27 @@ export class MongoVectorStore implements IVectorStore {
       query.category = filter.category.toLowerCase().trim();
     }
 
-    // Fetch candidate chunks from MongoDB
-    const candidates = await KnowledgeChunk.find(query).select('+embedding');
+    // Narrow candidate pool by keyword match if queryText is provided
+    if (filter?.queryText && filter.queryText.trim().length > 0) {
+      const keywords = filter.queryText
+        .split(/\s+/)
+        .filter(w => w.length > 2)
+        .map(w => w.replace(/[^a-zA-Z0-9]/g, ''))
+        .filter(w => w.length > 0);
+      if (keywords.length > 0) {
+        const keywordRegex = new RegExp(keywords.join('|'), 'i');
+        query.content = keywordRegex;
+      }
+    }
+
+    // Fetch candidate chunks from MongoDB with a hard limit of 300 to ensure performance
+    let candidates = await KnowledgeChunk.find(query).select('+embedding').limit(300);
+
+    // Fallback: if keyword filter returned 0, relax it to ensure we get general candidates
+    if (candidates.length === 0 && query.content) {
+      delete query.content;
+      candidates = await KnowledgeChunk.find(query).select('+embedding').sort({ updatedAt: -1 }).limit(300);
+    }
     
     const results = candidates.map((cand) => {
       const score = this.cosineSimilarity(queryEmbedding, cand.embedding);

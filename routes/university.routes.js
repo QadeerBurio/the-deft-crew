@@ -1,5 +1,7 @@
 const express = require("express");
 const University = require("../models/University");
+const auth = require("../middleware/auth.middleware");
+const isAdmin = require("../middleware/adminMiddleware");
 
 const router = express.Router();
 
@@ -14,7 +16,7 @@ router.get("/", async (req, res) => {
 });
 
 // Seed universities
-router.post("/seed", async (req, res) => {
+router.post("/seed", auth, isAdmin, async (req, res) => {
   const uniNames = [
     "NED University",
     "Mehran University",

@@ -6,6 +6,7 @@ import { reindexService } from './reindex.service';
 import { mongoVectorStore } from '../vector/mongoVectorStore';
 import { adapters } from '../sync/adapters';
 import { ApiError } from '../utils/ApiError';
+import * as crypto from 'crypto';
 
 export class SyncEngineService {
   private isSyncing = false;
@@ -96,6 +97,7 @@ export class SyncEngineService {
                 activeBackendIds.add(originalId);
 
                 const input = adapter.mapToKnowledge(rawDoc);
+                const contentHash = crypto.createHash('sha256').update(input.content).digest('hex');
 
                 // Check if this document already exists in the AI database
                 let existingDoc = await KnowledgeDocument.findOne({
@@ -106,13 +108,14 @@ export class SyncEngineService {
                 let needsReindexing = false;
 
                 if (existingDoc) {
-                  // Check if document was modified in backend (e.g. check content changes or updatedAt)
-                  const isContentChanged = existingDoc.content !== input.content || existingDoc.title !== input.title;
+                  // Check if document was modified in backend
+                  const isContentChanged = existingDoc.contentHash !== contentHash || existingDoc.title !== input.title;
                   const isStatusChanged = existingDoc.status !== input.status;
 
                   if (isContentChanged || isStatusChanged) {
                     existingDoc.title = input.title;
                     existingDoc.content = input.content;
+                    existingDoc.contentHash = contentHash;
                     existingDoc.tags = input.tags;
                     existingDoc.status = input.status;
                     existingDoc.metadata = { ...existingDoc.metadata, ...input.metadata };
@@ -127,6 +130,7 @@ export class SyncEngineService {
                     category: adapter.name,
                     source: 'backend',
                     content: input.content,
+                    contentHash,
                     tags: input.tags,
                     status: input.status,
                     metadata: input.metadata,
@@ -247,6 +251,7 @@ export class SyncEngineService {
           activeBackendIds.add(originalId);
 
           const input = adapter.mapToKnowledge(rawDoc);
+          const contentHash = crypto.createHash('sha256').update(input.content).digest('hex');
 
           let existingDoc = await KnowledgeDocument.findOne({
             category: adapter.name,
@@ -256,12 +261,13 @@ export class SyncEngineService {
           let needsReindexing = false;
 
           if (existingDoc) {
-            const isContentChanged = existingDoc.content !== input.content || existingDoc.title !== input.title;
+            const isContentChanged = existingDoc.contentHash !== contentHash || existingDoc.title !== input.title;
             const isStatusChanged = existingDoc.status !== input.status;
 
             if (isContentChanged || isStatusChanged) {
               existingDoc.title = input.title;
               existingDoc.content = input.content;
+              existingDoc.contentHash = contentHash;
               existingDoc.tags = input.tags;
               existingDoc.status = input.status;
               existingDoc.metadata = { ...existingDoc.metadata, ...input.metadata };
@@ -275,6 +281,7 @@ export class SyncEngineService {
               category: adapter.name,
               source: 'backend',
               content: input.content,
+              contentHash,
               tags: input.tags,
               status: input.status,
               metadata: input.metadata,

@@ -31,6 +31,7 @@ const format = winston.format.combine(
 
 const transports = [
   new winston.transports.Console({
+    level: 'warn',
     format: winston.format.combine(
       winston.format.colorize({ all: true }),
       winston.format.printf(

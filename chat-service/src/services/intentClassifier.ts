@@ -1,48 +1,78 @@
-import { openaiService } from './openai.service';
 import { logger } from '../config/logger';
 
 export class IntentClassifier {
-  private readonly validIntents = [
-    'Search Scholarship',
-    'Search Job',
-    'Search Discount',
-    'Search Event',
-    'Search University',
-    'Greeting',
-    'General Navigation',
-    'Help',
-    'Unknown',
-  ];
 
   /**
    * Classifies user query into one of the standard intent labels.
    */
   public async classifyIntent(message: string): Promise<string> {
     try {
-      const prompt = `Classify the following user message into exactly one of these categories:
-${this.validIntents.map((i) => `- ${i}`).join('\n')}
+      const text = message.trim().toLowerCase();
+      
+      // Fast, millisecond-level local classification checks
 
-Rules:
-- Respond with ONLY the exact category name.
-- Do NOT include any other text or punctuation.
+      // Greetings
+      if (/^(hi|hello|hey|hola|salam|assalam o alaikum|heyy|greetings|good morning|good afternoon|good evening|howdy|hi there)$/i.test(text) || text.length < 4) {
+        return 'Greeting';
+      }
 
-Message: "${message}"
-Category:`;
+      // Founder / Leadership queries
+      if (/\b(majid|majid shah|founder|co-founder|cofounder|head of marketing|who founded|leadership|ceo|owner)\b/i.test(text)) {
+        return 'TDC Knowledge';
+      }
 
-      const completion = await openaiService.getChatCompletion(
-        'You are an expert intent classification model. Return only the exact category name.',
-        prompt
-      );
+      // TDC Company knowledge queries
+      if (/\b(what is tdc|what is the deft crew|tell me about tdc|tell me about the deft crew|about tdc|about the deft crew|tdc services|deft crew services|what does tdc do|what does the deft crew do|tdc mission|tdc vision|tdc partners|university partners|university partnerships|iobm|szabist|ziauddin|indus university|denning)\b/i.test(text)) {
+        return 'TDC Knowledge';
+      }
 
-      const detectedLabel = completion.reply.trim().replace(/["']/g, '');
+      // Service queries
+      if (/\b(services|digital marketing|performance marketing|seo|branding|web development|app development|ai solution|automation|consulting|workflow)\b/i.test(text)) {
+        return 'TDC Knowledge';
+      }
 
-      // Match against valid intents or fall back to Unknown
-      const finalIntent = this.validIntents.find(
-        (intent) => intent.toLowerCase() === detectedLabel.toLowerCase()
-      ) || 'Unknown';
+      // Jobs & Internships
+      if (/\b(job|internship|intern|work|career|hiring|vacancy|employment|placement|openings|opportunity|opportunities)\b/i.test(text)) {
+        return 'Search Job';
+      }
 
-      logger.info(`Intent classification result for query "${message}": [${finalIntent}]`);
-      return finalIntent;
+      // Scholarships
+      if (/\b(scholarship|financial aid|funding|bursary|hec scholarship|grant|stipend|fully funded)\b/i.test(text)) {
+        return 'Search Scholarship';
+      }
+
+      // Discounts & Offers
+      if (/\b(discount|promo|deal|coupon|voucher|offer|off|sale|brand deal|student deal)\b/i.test(text)) {
+        return 'Search Discount';
+      }
+
+      // Events
+      if (/\b(event|seminar|workshop|meetup|webinar|symposium|conference|hackathon|competition|mixer)\b/i.test(text)) {
+        return 'Search Event';
+      }
+
+      // Universities
+      if (/\b(university|college|school|admission|campus|degree|apply to)\b/i.test(text)) {
+        return 'Search University';
+      }
+
+      // Resume / Templates
+      if (/\b(resume|cv|template|ats|cover letter|portfolio|curriculum vitae)\b/i.test(text)) {
+        return 'Search Template';
+      }
+
+      // Travel packages
+      if (/\b(travel|tour|package|trip|skardu|hunza|adventure|vacation)\b/i.test(text)) {
+        return 'Search Package';
+      }
+
+      // Help
+      if (/^(help|support|info|information|guide|menu|what can you do|how do you work|what can i ask)$/i.test(text)) {
+        return 'Help';
+      }
+
+      // Default to Unknown — LLM will answer with grounded system prompt
+      return 'Unknown';
     } catch (err: any) {
       logger.error('Intent classification failed, falling back to Unknown:', err.message);
       return 'Unknown';

@@ -940,33 +940,7 @@ router.get('/stories/visibility-status/:targetUserId', auth, async (req, res) =>
 
 // -------------------- USER & CONNECTIONS --------------------
 
-// 2.  Profile Update
-router.put('/profile/update', auth, async (req, res) => {
-  try {
-    const { name, bio, school, degree } = req.body;
 
-    // We update the User document using the ID from the JWT token
-    const updatedUser = await User.findByIdAndUpdate(
-      req.user.id,
-      { 
-        $set: { 
-          name, 
-          bio, 
-          // Updating the first element in education array or creating a new one
-          education: [{ school, degree }] 
-        } 
-      },
-      { new: true } // Returns the updated document
-    );
-
-    res.status(200).json({
-      message: "Profile updated successfully",
-      user: updatedUser
-    });
-  } catch (err) {
-    res.status(500).json({ error: "Failed to update profile information" });
-  }
-});
 
 // 3. @route   GET api/social/users/search
 
@@ -1040,27 +1014,7 @@ router.post('/user/accept/:senderId', auth, async (req, res) => {
   }
 });
 
-// 2. Accept Request (Run by the other person)
-router.post('/user/accept/:senderId', auth, async (req, res) => {
-  try {
-    const me = await User.findById(req.user.id);
-    const sender = await User.findById(req.params.senderId);
 
-    if (!me.connections.includes(req.params.senderId)) {
-      me.connections.push(req.params.senderId);
-      sender.connections.push(req.user.id);
-
-      // Remove from the sender's pending list now that it's official
-      sender.sentRequests = sender.sentRequests.filter(id => id.toString() !== req.user.id);
-      
-      await me.save();
-      await sender.save();
-    }
-    res.json({ success: true, status: "connected" });
-  } catch (err) {
-    res.status(500).json({ message: "Server error" });
-  }
-});
 
 // 3. Respond to Request (Accept/Decline)
 router.post('/notifications/respond', auth, async (req, res) => {
@@ -1280,40 +1234,7 @@ router.put('/notifications/read/:id', auth, async (req, res) => {
   }
 });
 
-// 3. @desc    Accept or Decline a connection request
-router.post('/notifications/respond', auth, async (req, res) => {
-  const { notificationId, action } = req.body; // action: 'accepted' or 'declined'
 
-  try {
-    const notification = await Notification.findById(notificationId);
-    if (!notification) return res.status(404).json({ message: "Notification not found" });
-
-    // Update notification status
-    notification.status = action;
-    notification.readBy.push(req.user._id); // Mark as read when responded
-    await notification.save();
-
-    // Logic: If accepted, add to each other's connection list
-    if (action === 'accepted') {
-      await User.findByIdAndUpdate(req.user._id, { $addToSet: { connections: notification.sender } });
-      await User.findByIdAndUpdate(notification.sender, { $addToSet: { connections: req.user._id } });
-      
-      // Send confirmation notification back to sender
-      const sender = await User.findById(req.user._id);
-      await createNotification(
-        notification.sender,
-        req.user._id,
-        'request',
-        `${sender.name} accepted your connection request.`
-      );
-    }
-
-    res.json({ success: true });
-  } catch (err) {
-    console.error("Response error:", err);
-    res.status(500).json({ message: "Error processing response" });
-  }
-});
 
 // --- MARK ALL AS READ ---
 router.put('/notifications/read-all', auth, async (req, res) => {

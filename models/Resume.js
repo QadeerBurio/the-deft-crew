@@ -26,7 +26,6 @@ const resumeSchema = new mongoose.Schema({
     summary: { type: String, default: '' },
     experienceLevel: { 
       type: String, 
-      enum: ['Entry Level', 'Mid Level', 'Senior Level', 'Executive'],
       default: 'Mid Level'
     }
   },
@@ -44,12 +43,10 @@ const resumeSchema = new mongoose.Schema({
     name: { type: String, default: '' },
     level: { 
       type: String, 
-      enum: ['Beginner', 'Intermediate', 'Advanced', 'Expert'],
       default: 'Intermediate'
     },
     category: { 
       type: String,
-      enum: ['Technical', 'Soft Skills', 'Language', 'Other'],
       default: 'Technical'
     }
   }],
@@ -85,7 +82,6 @@ const resumeSchema = new mongoose.Schema({
     name: { type: String, default: '' },
     proficiency: { 
       type: String, 
-      enum: ['Native', 'Fluent', 'Intermediate', 'Basic'],
       default: 'Intermediate'
     }
   }],
@@ -123,9 +119,73 @@ const resumeSchema = new mongoose.Schema({
   },
   template: {
     type: String,
-    enum: ['modern', 'classic', 'creative', 'minimal', 'professional'],
-    default: 'modern'
+    enum: ['modern', 'classic', 'creative', 'minimal', 'professional', 'modern_ats', 'stanford', 'faang', 'jakes', 'rezi', 'flowcv', 'reactive', 'canva'],
+    default: 'modern_ats'
   },
+  customStyles: {
+    font: { type: String, default: 'Inter' },
+    accentColor: { type: String, default: '#1E3A8A' },
+    headingColor: { type: String, default: '#0F172A' },
+    textColor: { type: String, default: '#334155' },
+    bgColor: { type: String, default: '#FFFFFF' }
+  },
+
+  // ==================== CAREER INTELLIGENCE LAYER ====================
+  // Populated automatically after each resume save via careerProfileService.
+  // Never written directly by the frontend — always AI-generated.
+  careerProfile: {
+    // AI-extracted skill taxonomy
+    extractedSkills: {
+      technical:   { type: [String], default: [] },
+      frameworks:  { type: [String], default: [] },
+      languages:   { type: [String], default: [] },
+      softSkills:  { type: [String], default: [] },
+      tools:       { type: [String], default: [] },
+      databases:   { type: [String], default: [] },
+      cloud:       { type: [String], default: [] }
+    },
+    // Domain intelligence
+    domainExpertise:       { type: [String], default: [] },
+    seniority:             { type: String, default: '' },
+    totalYearsExperience:  { type: Number, default: 0 },
+    industryBackground:    { type: [String], default: [] },
+    // Career intent (normalised from targetJobs)
+    preferredRoles:        { type: [String], default: [] },
+    preferredIndustries:   { type: [String], default: [] },
+    preferredLocations:    { type: [String], default: [] },
+    preferredSalaryMin:    { type: Number, default: 0 },
+    preferredSalaryMax:    { type: Number, default: 0 },
+    openToRemote:          { type: Boolean, default: false },
+    openToRelocation:      { type: Boolean, default: false },
+    // ATS intelligence
+    atsKeywords:           { type: [String], default: [] },
+    atsScore:              { type: Number, default: 0 },
+    // Strengths & improvement areas
+    strengthAreas:         { type: [String], default: [] },
+    improvementAreas:      { type: [String], default: [] },
+    // Semantic embedding for vector similarity search
+    embedding: {
+      vector:      { type: [Number], select: false },  // 1536-dim; never returned in default queries
+      model:       { type: String, default: 'text-embedding-3-small' },
+      generatedAt: { type: Date },
+      version:     { type: Number, default: 1 }
+    },
+    // Pipeline metadata
+    lastAnalyzedAt:        { type: Date },
+    analysisVersion:       { type: String, default: '1.0.0' },
+    profileStrengthScore:  { type: Number, default: 0 },
+    isEnriched:            { type: Boolean, default: false }  // true once AI pipeline has run
+  },
+
+  // ==================== RESUME VERSION INTELLIGENCE ====================
+  versionTag: {
+    type: String,
+    enum: ['General', 'Backend', 'Frontend', 'AI/ML', 'Data Science',
+           'DevOps', 'Mobile', 'Cybersecurity', 'Design', 'Management'],
+    default: 'General'
+  },
+  versionNotes: { type: String, default: '' },
+  isPrimary:    { type: Boolean, default: false },
   uploadedResume: {
     fileName: { type: String, default: '' },
     fileUrl: { type: String, default: '' },
@@ -167,6 +227,79 @@ const resumeSchema = new mongoose.Schema({
     date: { type: Date, default: Date.now },
     count: { type: Number, default: 1 }
   }],
+  careerLevel: { type: String, default: '' },
+  industry: { type: String, default: '' },
+  targetRole: { type: String, default: '' },
+  professionalBrand: { type: String, default: '' },
+  personalBranding: {
+    professionalHeadline: { type: String, default: '' },
+    personalBrandStatement: { type: String, default: '' },
+    coreValueProposition: { type: String, default: '' },
+    professionalIdentity: { type: String, default: '' }
+  },
+  careerHighlights: { type: [String], default: [] },
+  coreCompetencies: { type: [String], default: [] },
+  atsKeywords: { type: [String], default: [] },
+  missingKeywords: { type: [String], default: [] },
+  keywordMatchPercentage: { type: Number, default: 0 },
+  resumeScores: {
+    atsScore: { type: Number, default: 0 },
+    recruiterScore: { type: Number, default: 0 },
+    contentQuality: { type: Number, default: 0 },
+    keywordStrength: { type: Number, default: 0 },
+    formattingScore: { type: Number, default: 0 },
+    impactScore: { type: Number, default: 0 },
+    overallHiringScore: { type: Number, default: 0 }
+  },
+  hrScorecard: {
+    professionalSummaryScore: { type: Number, default: 0 },
+    experienceScore: { type: Number, default: 0 },
+    projectsScore: { type: Number, default: 0 },
+    educationScore: { type: Number, default: 0 },
+    skillsScore: { type: Number, default: 0 },
+    achievementsScore: { type: Number, default: 0 },
+    atsScore: { type: Number, default: 0 },
+    formattingScore: { type: Number, default: 0 },
+    professionalBrandingScore: { type: Number, default: 0 },
+    overallScore: { type: Number, default: 0 }
+  },
+  hiringDecision: {
+    hrShortlist: {
+      status: { type: String, default: '' },
+      reason: { type: String, default: '' }
+    },
+    hiringManagerInterview: {
+      status: { type: String, default: '' },
+      reason: { type: String, default: '' }
+    },
+    departmentHeadApprove: {
+      status: { type: String, default: '' },
+      reason: { type: String, default: '' }
+    }
+  },
+  industryBenchmarking: {
+    percentileRank: { type: String, default: '' },
+    rankExplanation: { type: String, default: '' }
+  },
+  prioritizedImprovementPlan: [{
+    priority: { type: String, default: '' },
+    recommendation: { type: String, default: '' },
+    why: { type: String, default: '' },
+    impact: {
+      business: { type: String, default: '' },
+      hr: { type: String, default: '' },
+      ats: { type: String, default: '' },
+      hiring: { type: String, default: '' }
+    }
+  }],
+  missingSkills: { type: [String], default: [] },
+  strengths: { type: [String], default: [] },
+  weaknesses: { type: [String], default: [] },
+  optimizedSummary: { type: String, default: '' },
+  optimizedExperience: { type: mongoose.Schema.Types.Mixed },
+  optimizedProjects: { type: mongoose.Schema.Types.Mixed },
+  optimizedSkills: { type: mongoose.Schema.Types.Mixed },
+  hrRecommendations: { type: [String], default: [] },
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now }
 }, {
@@ -504,7 +637,7 @@ resumeSchema.statics.getRecommendedJobs = async function(resumeId) {
 
     const Job = require('./Job');
     
-    let query = { active: true };
+    let query = { active: true, type: 'Internship', location: { $regex: 'pakistan|karachi|lahore|islamabad|rawalpindi|faisalabad|multan|peshawar|quetta|sialkot|gujranwala|hyderabad|abbottabad|sargodha|bahawalpur|sukkur|larkana|gujrat|sheikhupura|jhelum|sahiwal|pk', $options: 'i' } };
     let matchConditions = [];
 
     if (skills.length > 0) {
@@ -546,12 +679,28 @@ resumeSchema.statics.getRecommendedJobs = async function(resumeId) {
     }
 
     if (preferredJobTypes.length > 0) {
-      query.type = { $in: preferredJobTypes };
+      const filteredTypes = preferredJobTypes.filter(t => t.toLowerCase() === 'internship');
+      if (filteredTypes.length > 0) {
+        query.type = { $in: filteredTypes };
+      } else {
+        query.type = 'Internship';
+      }
+    } else {
+      query.type = 'Internship';
     }
 
-    const jobs = await Job.find(query)
+    let jobs = await Job.find(query)
       .sort({ featured: -1, urgent: -1, createdAt: -1 })
       .limit(20);
+
+    // Fallback: if no jobs are found with strict experienceLevel filters, relax them
+    if (jobs.length === 0 && query.experienceLevel) {
+      const fallbackQuery = { ...query };
+      delete fallbackQuery.experienceLevel;
+      jobs = await Job.find(fallbackQuery)
+        .sort({ featured: -1, urgent: -1, createdAt: -1 })
+        .limit(20);
+    }
 
     const recommendations = jobs.map(job => {
       let matchScore = 0;

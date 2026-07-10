@@ -5,6 +5,9 @@ const JobApplication = require("../models/JobApplication");
 const Notification = require("../models/Notification");
 const User = require("../models/User");
 const { uploadResume, cloudinary } = require("../config/cloudinary");
+const { generateJobEmbedding } = require('../services/jobEmbeddingService');
+const { getHybridRecommendations, getSimilarJobs } = require('../services/recommendationService');
+const { analyseSkillGap, validateApplication } = require('../services/skillGapService');
 
 // Auth middleware
 const authMiddleware = async (req, res, next) => {
@@ -57,8 +60,12 @@ router.post("/add", authMiddleware, isAdminOrEmployee, async (req, res) => {
             skills: skills || [], active: active !== undefined ? active : true,
             featured: featured || false, urgent: urgent || false,
             applicationDeadline: applicationDeadline || new Date(+new Date() + 30*24*60*60*1000),
-            postedBy: req.userId, companyName: companyName || req.user?.name,
-            companyWebsite: companyWebsite || ""
+            postedBy: req.userId,
+            companyName: companyName || 'The Deft Crew',
+            companyWebsite: companyWebsite || '',
+            // TDC internal jobs are NEVER from the external pipeline
+            isExternal: false,
+            source: 'manual'
         });
 
         await newJob.save();
@@ -74,6 +81,9 @@ router.post("/add", authMiddleware, isAdminOrEmployee, async (req, res) => {
                 metadata: { jobId: newJob._id }
             });
         }
+
+        // 🧠 Fire-and-forget: generate embedding for semantic search
+        setImmediate(() => generateJobEmbedding(newJob._id.toString()));
         
         res.status(201).json({ message: "Job posted successfully", data: newJob });
     } catch (err) {
@@ -206,31 +216,45 @@ router.delete("/delete/:id", authMiddleware, isAdminOrEmployee, async (req, res)
 
 // ==================== PUBLIC JOB ROUTES ====================
 
-// Get all active jobs with advanced search - FIXED: removed extra slash
+// Get all active EXTERNAL jobs with advanced search (General Jobs feed)
 router.get("/public/all", async (req, res) => {
     try {
         const { 
             search, department, category, type, locationType, experienceLevel,
-            location, minSalary, maxSalary, page = 1, limit = 20 
+            location, minSalary, maxSalary, page = 1, limit = 20
         } = req.query;
         
-        let query = { active: true, applicationDeadline: { $gte: new Date() } };
+        // Always filter to external pipeline jobs only — TDC openings never appear here
+        // Strictly restrict to Pakistan
+        let query = {
+            active: true,
+            type: 'Internship',
+            isExternal: true,
+            applicationDeadline: { $gte: new Date() },
+            location: { $regex: 'pakistan|karachi|lahore|islamabad|rawalpindi|faisalabad|multan|peshawar|quetta|sialkot|gujranwala|hyderabad|abbottabad|sargodha|bahawalpur|sukkur|larkana|gujrat|sheikhupura|jhelum|sahiwal|pk|remote', $options: 'i' }
+        };
 
         if (search) {
-            query.$or = [
-                { title: { $regex: search, $options: 'i' } },
-                { department: { $regex: search, $options: 'i' } },
-                { description: { $regex: search, $options: 'i' } },
-                { skills: { $in: [new RegExp(search, 'i')] } },
-                { companyName: { $regex: search, $options: 'i' } }
+            query.$and = [
+                { $or: [
+                    { title: { $regex: search, $options: 'i' } },
+                    { department: { $regex: search, $options: 'i' } },
+                    { category: { $regex: search, $options: 'i' } },
+                    { skills: { $in: [new RegExp(search, 'i')] } },
+                    { companyName: { $regex: search, $options: 'i' } },
+                    { location: { $regex: search, $options: 'i' } }
+                ]}
             ];
         }
         if (department) query.department = department;
         if (category) query.category = category;
-        if (type) query.type = type;
+        query.type = 'Internship';
         if (locationType) query.locationType = locationType;
         if (experienceLevel) query.experienceLevel = experienceLevel;
-        if (location) query.location = { $regex: location, $options: 'i' };
+        if (location) {
+            query.$and = query.$and || [];
+            query.$and.push({ location: { $regex: location, $options: 'i' } });
+        }
         if (minSalary) query.salaryMin = { $gte: parseInt(minSalary) };
         if (maxSalary) query.salaryMax = { $lte: parseInt(maxSalary) };
 
@@ -238,7 +262,7 @@ router.get("/public/all", async (req, res) => {
         
         const [jobs, total] = await Promise.all([
             Job.find(query)
-                .sort({ featured: -1, urgent: -1, createdAt: -1 })
+                .sort({ featured: -1, urgent: -1, createdAt: -1, _id: 1 })
                 .skip(skip)
                 .limit(parseInt(limit)),
             Job.countDocuments(query)
@@ -253,7 +277,8 @@ router.get("/public/all", async (req, res) => {
             jobs,
             total,
             page: parseInt(page),
-            totalPages: Math.ceil(total / parseInt(limit))
+            totalPages: Math.ceil(total / parseInt(limit)),
+            scope: 'pakistan'
         });
     } catch (err) {
         console.error("Error in public/all:", err);
@@ -286,6 +311,65 @@ router.get("/public/filters", async (req, res) => {
         
         res.json({ departments, categories, types, locations, locationTypes, experienceLevels });
     } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ==================== TDC CAREERS FEED ====================
+// Get all active TDC internal job openings (isExternal: false)
+router.get("/public/tdc", async (req, res) => {
+    try {
+        const {
+            search, department, category, type, locationType, experienceLevel,
+            page = 1, limit = 20
+        } = req.query;
+
+        // Only TDC internal jobs — never external pipeline jobs
+        // Strictly restrict to Pakistan
+        let query = {
+            active: true,
+            isExternal: false,
+            applicationDeadline: { $gte: new Date() },
+            location: { $regex: 'pakistan|karachi|lahore|islamabad|rawalpindi|faisalabad|multan|peshawar|quetta|sialkot|gujranwala|hyderabad|abbottabad|sargodha|bahawalpur|sukkur|larkana|gujrat|sheikhupura|jhelum|sahiwal|pk|remote', $options: 'i' }
+        };
+
+        if (search) {
+            query.$and = [{ $or: [
+                { title: { $regex: search, $options: 'i' } },
+                { department: { $regex: search, $options: 'i' } },
+                { category: { $regex: search, $options: 'i' } },
+                { skills: { $in: [new RegExp(search, 'i')] } },
+                { location: { $regex: search, $options: 'i' } }
+            ]}];
+        }
+        if (department) query.department = department;
+        if (category) query.category = category;
+        if (type) query.type = type;
+        if (locationType) query.locationType = locationType;
+        if (experienceLevel) query.experienceLevel = experienceLevel;
+
+        const skip = (parseInt(page) - 1) * parseInt(limit);
+
+        const [jobs, total] = await Promise.all([
+            Job.find(query)
+                .sort({ featured: -1, urgent: -1, createdAt: -1, _id: 1 })
+                .skip(skip)
+                .limit(parseInt(limit)),
+            Job.countDocuments(query)
+        ]);
+
+        if (jobs.length > 0) {
+            await Job.updateMany({ _id: { $in: jobs.map(j => j._id) } }, { $inc: { views: 1 } });
+        }
+
+        res.json({
+            jobs,
+            total,
+            page: parseInt(page),
+            totalPages: Math.ceil(total / parseInt(limit))
+        });
+    } catch (err) {
+        console.error('Error in public/tdc:', err);
         res.status(500).json({ error: err.message });
     }
 });
@@ -334,7 +418,9 @@ router.post("/apply/:jobId", authMiddleware, uploadResume.single('resume'), asyn
         };
 
         if (req.file) {
-            applicationData.resumeUrl = req.file.path;
+            applicationData.resumeUrl = req.file.path.startsWith('http')
+                ? req.file.path
+                : `${req.protocol}://${req.get('host')}/uploads/resumes/${req.file.filename}`;
             applicationData.resumePublicId = req.file.filename;
             applicationData.resumeFileName = req.file.originalname;
         }
@@ -342,6 +428,18 @@ router.post("/apply/:jobId", authMiddleware, uploadResume.single('resume'), asyn
         const application = new JobApplication(applicationData);
         await application.save();
         await Job.findByIdAndUpdate(jobId, { $inc: { totalApplications: 1 } });
+
+        // Log apply interaction
+        try {
+            const JobInteraction = require('../models/JobInteraction');
+            await JobInteraction.findOneAndUpdate(
+                { userId: req.userId, jobId, interactionType: 'apply' },
+                { userId: req.userId, jobId, interactionType: 'apply', createdAt: new Date() },
+                { upsert: true }
+            );
+        } catch (interErr) {
+            console.error('Error logging apply interaction:', interErr.message);
+        }
 
         // Notifications
         await Notification.create({
@@ -965,147 +1063,510 @@ function getStatusColor(status) {
 
 // ==================== RESUME-BASED JOB RECOMMENDATIONS ====================
 
-// Get job recommendations based on user's resume
+// Get job recommendations based on user's primary resume (hybrid AI engine)
 router.get("/recommendations", authMiddleware, async (req, res) => {
   try {
     const { limit = 10, page = 1 } = req.query;
-    
-    // Find the user's most recent resume
+
     const Resume = require('../models/Resume');
-    const resume = await Resume.findOne({ user: req.userId }).sort({ updatedAt: -1 });
-    
+    // Use isPrimary first, fallback to most recent
+    let resume = await Resume.findOne({ user: req.userId, isPrimary: true });
+    if (!resume) resume = await Resume.findOne({ user: req.userId }).sort({ updatedAt: -1 });
+
     if (!resume) {
-      // If no resume, return featured jobs
-      const featuredJobs = await Job.find({ active: true, featured: true })
-        .sort({ createdAt: -1 })
-        .limit(parseInt(limit));
-      
+      // Fallback: featured external internships only, strictly Pakistan
+      const featuredJobs = await Job.find({ active: true, type: 'Internship', featured: true, isExternal: true, location: { $regex: 'pakistan|karachi|lahore|islamabad|rawalpindi|faisalabad|multan|peshawar|quetta|sialkot|gujranwala|hyderabad|abbottabad|sargodha|bahawalpur|sukkur|larkana|gujrat|sheikhupura|jhelum|sahiwal|pk|remote', $options: 'i' } })
+        .sort({ createdAt: -1 }).limit(parseInt(limit));
       return res.json({
-        recommendations: featuredJobs.map(job => ({
-          ...job.toObject(),
-          matchPercentage: 50,
-          isRecommended: false,
-          matchReasons: ['Featured job']
+        recommendations: featuredJobs.map(j => ({
+          ...j.toObject(), matchPercentage: 50, isRecommended: false, matchReasons: ['Featured job']
         })),
         total: featuredJobs.length,
         hasResume: false,
-        message: "Create a resume to get personalized recommendations"
+        engine: 'featured_fallback',
+        message: 'Create a resume to get personalized recommendations'
       });
     }
-    
-    // Get recommendations using the resume's static method
-    const recommendations = await Resume.getRecommendedJobs(resume._id);
-    
-    // Paginate
+
     const startIndex = (parseInt(page) - 1) * parseInt(limit);
-    const paginatedRecommendations = recommendations.slice(startIndex, startIndex + parseInt(limit));
-    
+    const allRecs = await getHybridRecommendations(resume._id.toString(), req.userId, {
+      limit: startIndex + parseInt(limit) + 10,  // fetch a bit extra for pagination
+      isExternal: true  // General Jobs recommendations: external jobs only
+    });
+
     res.json({
-      recommendations: paginatedRecommendations,
-      total: recommendations.length,
+      recommendations: allRecs.slice(startIndex, startIndex + parseInt(limit)),
+      total: allRecs.length,
       page: parseInt(page),
-      totalPages: Math.ceil(recommendations.length / parseInt(limit)),
+      totalPages: Math.ceil(allRecs.length / parseInt(limit)),
       hasResume: true,
-      resumeData: {
-        skills: resume.extractAllSkills().slice(0, 15),
-        experienceLevel: resume.getExperienceLevel(),
-        preferredJobTypes: resume.getPreferredJobTypes(),
-        preferredLocations: resume.getPreferredLocations(),
-        targetTitles: resume.getTargetTitles(),
-        targetIndustries: resume.getTargetIndustries()
-      }
+      engine: resume.careerProfile?.isEnriched ? 'hybrid_vector' : 'hybrid_skill',
+      isEnriched: !!resume.careerProfile?.isEnriched
     });
   } catch (error) {
     console.error('Recommendations error:', error);
-    res.status(500).json({ 
-      error: error.message,
-      recommendations: [],
-      message: "Failed to get recommendations"
-    });
+    res.status(500).json({ error: error.message, recommendations: [], message: 'Failed to get recommendations' });
   }
 });
 
-// Get job recommendations for a specific resume
+// Get recommendations for a specific resume (hybrid AI engine)
 router.get("/recommendations/:resumeId", authMiddleware, async (req, res) => {
   try {
     const { resumeId } = req.params;
     const { limit = 10, page = 1 } = req.query;
-    
+
     const Resume = require('../models/Resume');
-    const resume = await Resume.findOne({ _id: resumeId, user: req.userId });
-    
+    const resume = await Resume.findOne({ _id: resumeId, user: req.userId }).select('_id careerProfile');
     if (!resume) {
-      return res.status(404).json({ 
-        recommendations: [],
-        message: "Resume not found" 
-      });
+      return res.status(404).json({ recommendations: [], message: 'Resume not found' });
     }
-    
-    // Get recommendations
-    const recommendations = await Resume.getRecommendedJobs(resume._id);
-    
-    // Paginate
+
     const startIndex = (parseInt(page) - 1) * parseInt(limit);
-    const paginatedRecommendations = recommendations.slice(startIndex, startIndex + parseInt(limit));
-    
+    const allRecs = await getHybridRecommendations(resumeId, req.userId, {
+      limit: startIndex + parseInt(limit) + 10
+    });
+
     res.json({
-      recommendations: paginatedRecommendations,
-      total: recommendations.length,
+      recommendations: allRecs.slice(startIndex, startIndex + parseInt(limit)),
+      total: allRecs.length,
       page: parseInt(page),
-      totalPages: Math.ceil(recommendations.length / parseInt(limit)),
-      resumeSummary: {
-        skills: resume.extractAllSkills().slice(0, 10),
-        experienceLevel: resume.getExperienceLevel(),
-        preferredJobTypes: resume.getPreferredJobTypes(),
-        preferredLocations: resume.getPreferredLocations(),
-        targetTitles: resume.getTargetTitles()
-      }
+      totalPages: Math.ceil(allRecs.length / parseInt(limit)),
+      engine: resume.careerProfile?.isEnriched ? 'hybrid_vector' : 'hybrid_skill',
+      isEnriched: !!resume.careerProfile?.isEnriched
     });
   } catch (error) {
     console.error('Recommendations error:', error);
-    res.status(500).json({ 
-      error: error.message,
-      recommendations: [],
-      message: "Failed to get recommendations"
-    });
+    res.status(500).json({ error: error.message, recommendations: [], message: 'Failed to get recommendations' });
   }
 });
 
-// Get top recommended jobs (simplified for dashboard)
+// Get top recommended jobs for dashboard (hybrid AI engine)
 router.get("/recommendations/top", authMiddleware, async (req, res) => {
   try {
     const { limit = 5 } = req.query;
-    
+
     const Resume = require('../models/Resume');
-    const resume = await Resume.findOne({ user: req.userId }).sort({ updatedAt: -1 });
-    
+    let resume = await Resume.findOne({ user: req.userId, isPrimary: true });
+    if (!resume) resume = await Resume.findOne({ user: req.userId }).sort({ updatedAt: -1 });
+
     if (!resume) {
-      // Return featured jobs if no resume
-      const featuredJobs = await Job.find({ active: true, featured: true })
-        .limit(parseInt(limit))
-        .sort({ createdAt: -1 });
-      
+      const featuredJobs = await Job.find({ active: true, type: 'Internship', featured: true, location: { $regex: 'pakistan|karachi|lahore|islamabad|rawalpindi|faisalabad|multan|peshawar|quetta|sialkot|gujranwala|hyderabad|abbottabad|sargodha|bahawalpur|sukkur|larkana|gujrat|sheikhupura|jhelum|sahiwal|pk|remote', $options: 'i' } })
+        .limit(parseInt(limit)).sort({ createdAt: -1 });
       return res.json({
-        recommendations: featuredJobs.map(job => ({ 
-          ...job.toObject(), 
-          matchPercentage: 50,
-          isRecommended: false
-        })),
+        recommendations: featuredJobs.map(j => ({ ...j.toObject(), matchPercentage: 50, isRecommended: false })),
         total: featuredJobs.length,
         hasResume: false
       });
     }
-    
-    const recommendations = await Resume.getRecommendedJobs(resume._id);
-    
+
+    const recs = await getHybridRecommendations(resume._id.toString(), req.userId, { limit: parseInt(limit) });
     res.json({
-      recommendations: recommendations.slice(0, parseInt(limit)),
-      total: recommendations.length,
-      hasResume: true
+      recommendations: recs,
+      total: recs.length,
+      hasResume: true,
+      engine: resume.careerProfile?.isEnriched ? 'hybrid_vector' : 'hybrid_skill'
     });
   } catch (error) {
     console.error('Top recommendations error:', error);
     res.status(500).json({ error: error.message });
+  }
+});
+
+// ==================== PERSONALISED JOB FEED ====================
+
+// GET /api/jobs/feed
+// Full personalised job feed: primary resume hybrid recommendations + filters
+router.get('/feed', authMiddleware, async (req, res) => {
+  try {
+    const { limit = 20, page = 1, type, locationType, experienceLevel, category, department, search } = req.query;
+    const Resume = require('../models/Resume');
+
+    let resume = await Resume.findOne({ user: req.userId, isPrimary: true });
+    if (!resume) resume = await Resume.findOne({ user: req.userId }).sort({ updatedAt: -1 });
+
+    if (!resume) {
+      // No resume: return quality-sorted active jobs with basic filters, strictly Pakistan
+      const baseQuery = { active: true, type: 'Internship', applicationDeadline: { $gte: new Date() }, location: { $regex: 'pakistan|karachi|lahore|islamabad|rawalpindi|faisalabad|multan|peshawar|quetta|sialkot|gujranwala|hyderabad|abbottabad|sargodha|bahawalpur|sukkur|larkana|gujrat|sheikhupura|jhelum|sahiwal|pk|remote', $options: 'i' } };
+      if (locationType)   baseQuery.locationType = locationType;
+      if (experienceLevel) baseQuery.experienceLevel = experienceLevel;
+
+      const jobs = await Job.find(baseQuery)
+        .sort({ featured: -1, urgent: -1, createdAt: -1 })
+        .skip((parseInt(page) - 1) * parseInt(limit))
+        .limit(parseInt(limit))
+        .lean();
+
+      const total = await Job.countDocuments(baseQuery);
+      return res.json({
+        jobs: jobs.map(j => ({ ...j, matchPercentage: 50, isRecommended: false })),
+        total,
+        page: parseInt(page),
+        totalPages: Math.ceil(total / parseInt(limit)),
+        hasResume: false,
+        engine: 'featured_fallback'
+      });
+    }
+
+    // With resume: use hybrid engine
+    const pageNum = parseInt(page);
+    const pageSize = parseInt(limit);
+    const allRecs = await getHybridRecommendations(resume._id.toString(), req.userId, {
+      limit: pageNum * pageSize + 20
+    });
+
+    // Apply optional client-side filters on top of recommendations
+    let filtered = allRecs;
+    if (locationType)    filtered = filtered.filter(j => j.locationType === locationType);
+    if (experienceLevel) filtered = filtered.filter(j => j.experienceLevel === experienceLevel);
+    if (category)        filtered = filtered.filter(j => j.category === category);
+    if (department)      filtered = filtered.filter(j => j.department === department);
+    if (search) {
+      const searchRegex = new RegExp(search, 'i');
+      filtered = filtered.filter(j => 
+        searchRegex.test(j.title) || 
+        searchRegex.test(j.companyName) || 
+        searchRegex.test(j.department) || 
+        searchRegex.test(j.category) || 
+        (j.skills && j.skills.some(s => searchRegex.test(s)))
+      );
+    }
+
+    const startIdx = (pageNum - 1) * pageSize;
+    res.json({
+      jobs: filtered.slice(startIdx, startIdx + pageSize),
+      total: filtered.length,
+      page: pageNum,
+      totalPages: Math.ceil(filtered.length / pageSize),
+      hasResume: true,
+      engine: resume.careerProfile?.isEnriched ? 'hybrid_vector' : 'hybrid_skill',
+      isEnriched: !!resume.careerProfile?.isEnriched
+    });
+  } catch (err) {
+    console.error('[Feed] error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/jobs/similar/:jobId
+// Return semantically similar jobs to the given job (for job detail screen)
+router.get('/similar/:jobId', authMiddleware, async (req, res) => {
+  try {
+    const { jobId } = req.params;
+    const { limit = 6 } = req.query;
+
+    const similar = await getSimilarJobs(jobId, parseInt(limit));
+    res.json({ success: true, jobs: similar, total: similar.length });
+  } catch (err) {
+    console.error('[SimilarJobs] error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+module.exports = router;
+
+// ==================== JOB BOOKMARKS ====================
+
+// GET /api/jobs/bookmarks — Get all saved/bookmarked jobs for the authenticated user
+router.get('/bookmarks', authMiddleware, async (req, res) => {
+    try {
+        const user = await User.findById(req.userId)
+            .populate({
+                path: 'savedJobs.jobId',
+                match: { active: true },  // Only return active jobs
+                select: 'title companyName location locationType type salary experienceLevel category featured urgent applicationDeadline createdAt'
+            })
+            .select('savedJobs');
+
+        if (!user) return res.status(404).json({ message: 'User not found' });
+
+        // Filter out any nulls (jobs that were deleted or deactivated)
+        const bookmarks = user.savedJobs
+            .filter(b => b.jobId !== null)
+            .map(b => ({
+                job: b.jobId,
+                savedAt: b.savedAt,
+                tag: b.tag || ''
+            }));
+
+        res.json({ success: true, bookmarks, total: bookmarks.length });
+    } catch (err) {
+        console.error('Get bookmarks error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/jobs/bookmarks/:jobId — Save/bookmark a job
+router.post('/bookmarks/:jobId', authMiddleware, async (req, res) => {
+    try {
+        const { jobId } = req.params;
+        const { tag = '' } = req.body || {};
+
+        const mongoose = require('mongoose');
+        if (!mongoose.Types.ObjectId.isValid(jobId)) {
+            return res.status(400).json({ message: 'Invalid job ID format' });
+        }
+
+        // Verify job exists
+        const job = await Job.findById(jobId).select('_id title active');
+        if (!job) return res.status(404).json({ message: 'Job not found' });
+
+        const user = await User.findById(req.userId).select('savedJobs');
+        if (!user) return res.status(404).json({ message: 'User not found' });
+
+        // Check if already bookmarked
+        const alreadyBookmarked = (user.savedJobs || []).some(
+            b => b.jobId && b.jobId.toString() === jobId
+        );
+        if (alreadyBookmarked) {
+            return res.status(409).json({ message: 'Job already bookmarked', alreadyBookmarked: true });
+        }
+
+        await User.findByIdAndUpdate(
+            req.userId,
+            { $push: { savedJobs: { jobId: new mongoose.Types.ObjectId(jobId), savedAt: new Date(), tag } } },
+            { new: true }
+        );
+
+        // Log save interaction
+        try {
+            const JobInteraction = require('../models/JobInteraction');
+            await JobInteraction.findOneAndUpdate(
+                { userId: req.userId, jobId, interactionType: 'save' },
+                { userId: req.userId, jobId, interactionType: 'save', createdAt: new Date() },
+                { upsert: true }
+            );
+        } catch (interErr) {
+            console.error('Error logging save interaction:', interErr.message);
+        }
+
+        res.json({ success: true, message: `"${job.title}" saved to bookmarks`, jobId, tag });
+    } catch (err) {
+        console.error('Bookmark job error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// DELETE /api/jobs/bookmarks/:jobId — Remove a bookmarked job
+router.delete('/bookmarks/:jobId', authMiddleware, async (req, res) => {
+    try {
+        const { jobId } = req.params;
+
+        const mongoose = require('mongoose');
+        if (!mongoose.Types.ObjectId.isValid(jobId)) {
+            return res.status(400).json({ message: 'Invalid job ID format' });
+        }
+
+        await User.findByIdAndUpdate(
+            req.userId,
+            { $pull: { savedJobs: { jobId: new mongoose.Types.ObjectId(jobId) } } }
+        );
+
+        // Log remove bookmark (delete interaction)
+        try {
+            const JobInteraction = require('../models/JobInteraction');
+            await JobInteraction.deleteOne({ userId: req.userId, jobId, interactionType: 'save' });
+        } catch (interErr) {
+            console.error('Error deleting save interaction:', interErr.message);
+        }
+
+        res.json({ success: true, message: 'Job removed from bookmarks', jobId });
+    } catch (err) {
+        console.error('Remove bookmark error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/jobs/:jobId/interactions
+// Log interaction events like view, ignore, dismiss
+router.post('/:jobId/interactions', authMiddleware, async (req, res) => {
+    try {
+        const { jobId } = req.params;
+        const { interactionType } = req.body;
+
+        if (!['view', 'ignore', 'dismiss'].includes(interactionType)) {
+            return res.status(400).json({ message: 'Invalid interaction type' });
+        }
+
+        const job = await Job.findById(jobId).select('_id');
+        if (!job) return res.status(404).json({ message: 'Job not found' });
+
+        const JobInteraction = require('../models/JobInteraction');
+        await JobInteraction.findOneAndUpdate(
+            { userId: req.userId, jobId, interactionType },
+            { userId: req.userId, jobId, interactionType, createdAt: new Date() },
+            { upsert: true, new: true }
+        );
+
+        res.json({ success: true, message: `Logged "${interactionType}" interaction for job ${jobId}` });
+    } catch (err) {
+        console.error('Log interaction error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ==================== SKILL INTELLIGENCE ENDPOINTS ====================
+
+// GET /api/jobs/:jobId/skill-gap
+// Analyse skill gap between the user's primary resume and a specific job.
+// Returns cached result if available (24h TTL). Runs AI analysis on first request.
+router.get('/:jobId/skill-gap', authMiddleware, async (req, res) => {
+  try {
+    const { jobId } = req.params;
+    const { resumeId } = req.query; // optional: specific resume; defaults to primary
+
+    const Resume = require('../models/Resume');
+
+    // Resolve which resume to use
+    let targetResumeId = resumeId;
+    if (!targetResumeId) {
+      let r = await Resume.findOne({ user: req.userId, isPrimary: true }).select('_id');
+      if (!r) r = await Resume.findOne({ user: req.userId }).sort({ updatedAt: -1 }).select('_id');
+      if (!r) {
+        return res.status(404).json({
+          success: false,
+          error: 'No resume found. Please create a resume first to see skill gap analysis.'
+        });
+      }
+      targetResumeId = r._id.toString();
+    }
+
+    // Verify ownership
+    const resumeExists = await Resume.exists({ _id: targetResumeId, user: req.userId });
+    if (!resumeExists) {
+      return res.status(403).json({ success: false, error: 'Access denied to this resume' });
+    }
+
+    const analysis = await analyseSkillGap(targetResumeId, jobId);
+
+    res.json({
+      success: true,
+      fromCache: analysis.fromCache || false,
+      data: analysis
+    });
+  } catch (err) {
+    console.error('[SkillGap] error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/jobs/:jobId/skill-gap/refresh
+// Force-refresh the skill gap analysis (bypasses 24h cache)
+router.post('/:jobId/skill-gap/refresh', authMiddleware, async (req, res) => {
+  try {
+    const { jobId } = req.params;
+    const { resumeId } = req.body;
+
+    const Resume = require('../models/Resume');
+    let targetResumeId = resumeId;
+    if (!targetResumeId) {
+      let r = await Resume.findOne({ user: req.userId, isPrimary: true }).select('_id');
+      if (!r) r = await Resume.findOne({ user: req.userId }).sort({ updatedAt: -1 }).select('_id');
+      if (!r) return res.status(404).json({ success: false, error: 'No resume found' });
+      targetResumeId = r._id.toString();
+    }
+
+    const resumeExists = await Resume.exists({ _id: targetResumeId, user: req.userId });
+    if (!resumeExists) return res.status(403).json({ success: false, error: 'Access denied' });
+
+    const analysis = await analyseSkillGap(targetResumeId, jobId, true); // forceRefresh=true
+
+    res.json({ success: true, fromCache: false, data: analysis });
+  } catch (err) {
+    console.error('[SkillGap Refresh] error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/jobs/:jobId/validate-application
+// "Should I apply?" — returns a clear verdict with action items.
+// Also returns ATS score, weeks-to-ready, and cover letter hints.
+router.post('/:jobId/validate-application', authMiddleware, async (req, res) => {
+  try {
+    const { jobId } = req.params;
+    const { resumeId } = req.body;
+
+    const Resume = require('../models/Resume');
+    let targetResumeId = resumeId;
+    if (!targetResumeId) {
+      let r = await Resume.findOne({ user: req.userId, isPrimary: true }).select('_id');
+      if (!r) r = await Resume.findOne({ user: req.userId }).sort({ updatedAt: -1 }).select('_id');
+      if (!r) {
+        return res.status(404).json({
+          success: false,
+          error: 'No resume found. Please create a resume first.',
+          verdict: 'no_resume'
+        });
+      }
+      targetResumeId = r._id.toString();
+    }
+
+    const resumeExists = await Resume.exists({ _id: targetResumeId, user: req.userId });
+    if (!resumeExists) return res.status(403).json({ success: false, error: 'Access denied' });
+
+    const validation = await validateApplication(targetResumeId, jobId);
+
+    res.json({
+      success: true,
+      resumeId: targetResumeId,
+      jobId,
+      ...validation
+    });
+  } catch (err) {
+    console.error('[ValidateApplication] error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/jobs/:jobId/ats-score
+// Quick ATS compatibility score — lightweight, uses cache or runs minimal analysis
+router.get('/:jobId/ats-score', authMiddleware, async (req, res) => {
+  try {
+    const { jobId } = req.params;
+    const Resume = require('../models/Resume');
+
+    let r = await Resume.findOne({ user: req.userId, isPrimary: true }).select('_id');
+    if (!r) r = await Resume.findOne({ user: req.userId }).sort({ updatedAt: -1 }).select('_id');
+    if (!r) return res.status(404).json({ success: false, error: 'No resume found' });
+
+    const analysis = await analyseSkillGap(r._id.toString(), jobId);
+
+    res.json({
+      success: true,
+      jobId,
+      resumeId: r._id,
+      atsScore:       analysis.atsCompatibilityScore,
+      matchScore:     analysis.overallMatchScore,
+      shouldApply:    analysis.shouldApply,
+      matchedCount:   (analysis.matchedSkills || []).length,
+      missingCount:   (analysis.missingSkills || []).length,
+      fromCache:      analysis.fromCache || false
+    });
+  } catch (err) {
+    console.error('[ATS Score] error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ==================== JOB INGESTION ROUTE ====================
+
+// POST /api/jobs/ingest/trigger
+// Manually triggers job ingestion from external sources (Remotive, JSearch).
+// Protected: Admin or Employee only.
+router.post('/ingest/trigger', authMiddleware, isAdminOrEmployee, async (req, res) => {
+  try {
+    const jobIngestionService = require('../services/jobIngestionService');
+    const stats = await jobIngestionService.ingestJobs();
+
+    res.json({
+      success: true,
+      message: 'External job ingestion completed successfully',
+      data: stats
+    });
+  } catch (err) {
+    console.error('Job ingestion trigger error:', err);
+    res.status(500).json({
+      success: false,
+      error: err.message || 'Job Ingestion failed'
+    });
   }
 });
 

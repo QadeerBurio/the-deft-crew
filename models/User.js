@@ -119,11 +119,32 @@ const userSchema = new mongoose.Schema(
     ],
     connections: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
     sentRequests: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+
+    // --- CAREER INTELLIGENCE ---
+    savedJobs: [{
+      jobId: { type: mongoose.Schema.Types.ObjectId, ref: 'Job' },
+      savedAt: { type: Date, default: Date.now },
+      tag: { type: String, default: '' }  // e.g. "Apply Later", "Dream Job"
+    }],
+    careerProfileId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Resume'
+    },
+    quickProfile: {
+      topSkills: [{ type: String }],
+      seniority: { type: String, default: '' },
+      targetRole: { type: String, default: '' },
+      lastSyncedAt: { type: Date }
+    }
   },
   {
     timestamps: true,
   },
 );
+
+// ==================== PERFORMANCE INDEXES ====================
+userSchema.index({ role: 1, status: 1 });         // Admin user management queries
+userSchema.index({ university: 1, role: 1 });     // University-scoped filters
 
 // --- PRE-SAVE HOOK: AUTOMATIC REFERRAL CODE GENERATION ---
 userSchema.pre("save", async function () {

@@ -76,7 +76,7 @@ router.post("/approve-user/:id", auth, isAdmin, async (req, res) => {
 });
 
 // 1. CREATE: Add new Slider or Offer
-router.post("/add", upload.single("image"), async (req, res) => {
+router.post("/add", auth, isAdmin, upload.single("image"), async (req, res) => {
   try {
     const { type, title, description, link } = req.body;
     if (!req.file)
@@ -134,7 +134,7 @@ router.get("/all", async (req, res) => {
 });
 
 // 3. UPDATE: Toggle Active Status (Hide/Show on App)
-router.patch("/toggle/:id", async (req, res) => {
+router.patch("/toggle/:id", auth, isAdmin, async (req, res) => {
   try {
     const item = await Slider.findById(req.params.id);
     item.active = !item.active;
@@ -146,7 +146,7 @@ router.patch("/toggle/:id", async (req, res) => {
 });
 
 // 4. DELETE: Remove an item
-router.delete("/delete/:id", async (req, res) => {
+router.delete("/delete/:id", auth, isAdmin, async (req, res) => {
   try {
     await Slider.findByIdAndDelete(req.params.id);
     res.json({ message: "Item deleted successfully" });
@@ -154,32 +154,11 @@ router.delete("/delete/:id", async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
-// GET users by role (student or brand)
-// Get users by role (student/brand)
-router.get("/users/:role", auth, async (req, res) => {
-  try {
-    const users = await User.find({ role: req.params.role })
-      .populate("university", "name")
-      .select("-password");
-    res.json(users);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
 
-// Toggle Verification
-router.post("/approve-user/:id", auth, async (req, res) => {
-  try {
-    const user = await User.findById(req.params.id);
-    user.status = user.status === "Verified" ? "Not Verified" : "Verified";
-    await user.save();
-    res.json({ message: "Status Updated", user });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
 
-router.patch("/verify-user/:targetUserId", auth, async (req, res) => {
+
+
+router.patch("/verify-user/:targetUserId", auth, isAdmin, async (req, res) => {
   try {
     const updatedUser = await User.findByIdAndUpdate(
       req.params.targetUserId,
@@ -528,7 +507,7 @@ router.get("/exchange/applications/:programId", auth, isAdmin, async (req, res) 
 router.post(
   "/packages/create",
   auth,
-  
+  isAdmin,
   upload.single("image"),
   async (req, res) => {
     try {
@@ -569,7 +548,7 @@ router.post(
 );
 
 // GET all packages for Admin list (Shows even inactive ones if you add an active field)
-router.get("/packages/all", auth,  async (req, res) => {
+router.get("/packages/all", auth, isAdmin, async (req, res) => {
   try {
     const packages = await Package.find().sort({ createdAt: -1 });
     res.json(packages);
@@ -579,7 +558,7 @@ router.get("/packages/all", auth,  async (req, res) => {
 });
 
 // DELETE Package
-router.delete("/packages/delete/:id", auth,  async (req, res) => {
+router.delete("/packages/delete/:id", auth, isAdmin, async (req, res) => {
   try {
     const deletedPackage = await Package.findByIdAndDelete(req.params.id);
     if (!deletedPackage)
@@ -593,7 +572,7 @@ router.delete("/packages/delete/:id", auth,  async (req, res) => {
 router.put(
   "/packages/update/:id",
   auth,
- 
+  isAdmin,
   upload.single("image"),
   async (req, res) => {
     try {
@@ -764,7 +743,7 @@ router.post("/reject-payment/:id", auth, isAdmin, async (req, res) => {
 });
 
 // Get all bookings (admin only)
-router.get("/bookings/all", auth,  async (req, res) => {
+router.get("/bookings/all", auth, isAdmin, async (req, res) => {
   try {
     const bookings = await Booking.find()
       .sort({ createdAt: -1 })
@@ -778,7 +757,7 @@ router.get("/bookings/all", auth,  async (req, res) => {
 });
 
 // --- 3. NOTIFY ON BOOKING STATUS (The "Response" Step) ---
-router.put("/bookings/:id", auth,  async (req, res) => {
+router.put("/bookings/:id", auth, isAdmin, async (req, res) => {
     try {
         const { status, adminNotes } = req.body;
         const booking = await Booking.findByIdAndUpdate(
@@ -811,7 +790,7 @@ router.put("/bookings/:id", auth,  async (req, res) => {
 });
 
 // Get booking statistics (admin only)
-router.get("/bookings/stats", auth,  async (req, res) => {
+router.get("/bookings/stats", auth, isAdmin, async (req, res) => {
   try {
     const totalBookings = await Booking.countDocuments();
     const pendingBookings = await Booking.countDocuments({ status: "pending" });
