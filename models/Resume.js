@@ -24,8 +24,8 @@ const resumeSchema = new mongoose.Schema({
   professionalSummary: {
     title: { type: String, default: '' },
     summary: { type: String, default: '' },
-    experienceLevel: { 
-      type: String, 
+    experienceLevel: {
+      type: String,
       default: 'Mid Level'
     }
   },
@@ -41,11 +41,11 @@ const resumeSchema = new mongoose.Schema({
   }],
   skills: [{
     name: { type: String, default: '' },
-    level: { 
-      type: String, 
+    level: {
+      type: String,
       default: 'Intermediate'
     },
-    category: { 
+    category: {
       type: String,
       default: 'Technical'
     }
@@ -80,8 +80,8 @@ const resumeSchema = new mongoose.Schema({
   }],
   languages: [{
     name: { type: String, default: '' },
-    proficiency: { 
-      type: String, 
+    proficiency: {
+      type: String,
       default: 'Intermediate'
     }
   }],
@@ -96,8 +96,8 @@ const resumeSchema = new mongoose.Schema({
   targetJobs: [{
     jobTitle: { type: String, default: '' },
     industry: { type: String, default: '' },
-    jobType: { 
-      type: String, 
+    jobType: {
+      type: String,
       enum: ['Full-time', 'Part-time', 'Contract', 'Internship', 'Remote'],
       default: 'Full-time'
     },
@@ -108,8 +108,8 @@ const resumeSchema = new mongoose.Schema({
   targetJob: {
     jobTitle: { type: String, default: '' },
     industry: { type: String, default: '' },
-    jobType: { 
-      type: String, 
+    jobType: {
+      type: String,
       enum: ['Full-time', 'Part-time', 'Contract', 'Internship', 'Remote'],
       default: 'Full-time'
     },
@@ -136,56 +136,56 @@ const resumeSchema = new mongoose.Schema({
   careerProfile: {
     // AI-extracted skill taxonomy
     extractedSkills: {
-      technical:   { type: [String], default: [] },
-      frameworks:  { type: [String], default: [] },
-      languages:   { type: [String], default: [] },
-      softSkills:  { type: [String], default: [] },
-      tools:       { type: [String], default: [] },
-      databases:   { type: [String], default: [] },
-      cloud:       { type: [String], default: [] }
+      technical: { type: [String], default: [] },
+      frameworks: { type: [String], default: [] },
+      languages: { type: [String], default: [] },
+      softSkills: { type: [String], default: [] },
+      tools: { type: [String], default: [] },
+      databases: { type: [String], default: [] },
+      cloud: { type: [String], default: [] }
     },
     // Domain intelligence
-    domainExpertise:       { type: [String], default: [] },
-    seniority:             { type: String, default: '' },
-    totalYearsExperience:  { type: Number, default: 0 },
-    industryBackground:    { type: [String], default: [] },
+    domainExpertise: { type: [String], default: [] },
+    seniority: { type: String, default: '' },
+    totalYearsExperience: { type: Number, default: 0 },
+    industryBackground: { type: [String], default: [] },
     // Career intent (normalised from targetJobs)
-    preferredRoles:        { type: [String], default: [] },
-    preferredIndustries:   { type: [String], default: [] },
-    preferredLocations:    { type: [String], default: [] },
-    preferredSalaryMin:    { type: Number, default: 0 },
-    preferredSalaryMax:    { type: Number, default: 0 },
-    openToRemote:          { type: Boolean, default: false },
-    openToRelocation:      { type: Boolean, default: false },
+    preferredRoles: { type: [String], default: [] },
+    preferredIndustries: { type: [String], default: [] },
+    preferredLocations: { type: [String], default: [] },
+    preferredSalaryMin: { type: Number, default: 0 },
+    preferredSalaryMax: { type: Number, default: 0 },
+    openToRemote: { type: Boolean, default: false },
+    openToRelocation: { type: Boolean, default: false },
     // ATS intelligence
-    atsKeywords:           { type: [String], default: [] },
-    atsScore:              { type: Number, default: 0 },
+    atsKeywords: { type: [String], default: [] },
+    atsScore: { type: Number, default: 0 },
     // Strengths & improvement areas
-    strengthAreas:         { type: [String], default: [] },
-    improvementAreas:      { type: [String], default: [] },
+    strengthAreas: { type: [String], default: [] },
+    improvementAreas: { type: [String], default: [] },
     // Semantic embedding for vector similarity search
     embedding: {
-      vector:      { type: [Number], select: false },  // 1536-dim; never returned in default queries
-      model:       { type: String, default: 'text-embedding-3-small' },
+      vector: { type: [Number], select: false },  // 1536-dim; never returned in default queries
+      model: { type: String, default: 'text-embedding-3-small' },
       generatedAt: { type: Date },
-      version:     { type: Number, default: 1 }
+      version: { type: Number, default: 1 }
     },
     // Pipeline metadata
-    lastAnalyzedAt:        { type: Date },
-    analysisVersion:       { type: String, default: '1.0.0' },
-    profileStrengthScore:  { type: Number, default: 0 },
-    isEnriched:            { type: Boolean, default: false }  // true once AI pipeline has run
+    lastAnalyzedAt: { type: Date },
+    analysisVersion: { type: String, default: '1.0.0' },
+    profileStrengthScore: { type: Number, default: 0 },
+    isEnriched: { type: Boolean, default: false }  // true once AI pipeline has run
   },
 
   // ==================== RESUME VERSION INTELLIGENCE ====================
   versionTag: {
     type: String,
     enum: ['General', 'Backend', 'Frontend', 'AI/ML', 'Data Science',
-           'DevOps', 'Mobile', 'Cybersecurity', 'Design', 'Management'],
+      'DevOps', 'Mobile', 'Cybersecurity', 'Design', 'Management'],
     default: 'General'
   },
   versionNotes: { type: String, default: '' },
-  isPrimary:    { type: Boolean, default: false },
+  isPrimary: { type: Boolean, default: false },
   uploadedResume: {
     fileName: { type: String, default: '' },
     fileUrl: { type: String, default: '' },
@@ -303,7 +303,7 @@ const resumeSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now }
 }, {
-  strict: false,
+  strict: true,
   minimize: false
 });
 
@@ -313,7 +313,7 @@ resumeSchema.index({ 'targetJob.jobTitle': 1 });
 resumeSchema.index({ createdAt: -1 });
 
 // Pre-save middleware
-resumeSchema.pre('save', function() {
+resumeSchema.pre('save', function () {
   this.updatedAt = new Date();
   try {
     this.completionPercentage = this.calculateCompletionPercentage();
@@ -324,7 +324,7 @@ resumeSchema.pre('save', function() {
 });
 
 // Calculate completion percentage
-resumeSchema.methods.calculateCompletionPercentage = function() {
+resumeSchema.methods.calculateCompletionPercentage = function () {
   try {
     let total = 0;
     let completed = 0;
@@ -421,9 +421,9 @@ resumeSchema.methods.calculateCompletionPercentage = function() {
 // ============ METHODS FOR JOB RECOMMENDATIONS ============
 
 // Extract all skills from resume
-resumeSchema.methods.extractAllSkills = function() {
+resumeSchema.methods.extractAllSkills = function () {
   const skillSet = new Set();
-  
+
   // 1. Add skills from skills array
   if (this.skills && this.skills.length > 0) {
     this.skills.forEach(skill => {
@@ -432,21 +432,21 @@ resumeSchema.methods.extractAllSkills = function() {
       }
     });
   }
-  
+
   // 2. Extract skills from work experience descriptions
   if (this.workExperience && this.workExperience.length > 0) {
     this.workExperience.forEach(work => {
       if (work.description) {
         const words = work.description.split(/[\s,.;:!?()]+/);
-        const techKeywords = ['javascript', 'react', 'node', 'python', 'java', 'c++', 'typescript', 
-          'angular', 'vue', 'mongodb', 'mysql', 'postgresql', 'docker', 'kubernetes', 'aws', 
-          'git', 'github', 'html', 'css', 'php', 'laravel', 'mern', 'fullstack', 'frontend', 
-          'backend', 'api', 'rest', 'graphql', 'tensorflow', 'pytorch', 'machine', 'learning', 
+        const techKeywords = ['javascript', 'react', 'node', 'python', 'java', 'c++', 'typescript',
+          'angular', 'vue', 'mongodb', 'mysql', 'postgresql', 'docker', 'kubernetes', 'aws',
+          'git', 'github', 'html', 'css', 'php', 'laravel', 'mern', 'fullstack', 'frontend',
+          'backend', 'api', 'rest', 'graphql', 'tensorflow', 'pytorch', 'machine', 'learning',
           'ai', 'data', 'analytics', 'tableau', 'powerbi', 'flask', 'django', 'spring', 'csharp',
           'ruby', 'rails', 'swift', 'kotlin', 'flutter', 'reactnative', 'sqlite', 'firebase',
           'redis', 'elasticsearch', 'kafka', 'jenkins', 'ansible', 'terraform', 'prometheus',
           'grafana', 'linux', 'unix', 'bash', 'shell', 'vim', 'vscode', 'intellij'];
-        
+
         words.forEach(word => {
           const cleanWord = word.toLowerCase().replace(/[^a-zA-Z0-9#\+\-]/g, '');
           if (cleanWord.length > 2 && techKeywords.some(tk => cleanWord.includes(tk))) {
@@ -459,7 +459,7 @@ resumeSchema.methods.extractAllSkills = function() {
         const positionWords = work.position.split(' ');
         positionWords.forEach(word => {
           const cleanWord = word.toLowerCase().trim();
-          if (cleanWord.length > 2 && ['developer', 'engineer', 'analyst', 'manager', 'director', 
+          if (cleanWord.length > 2 && ['developer', 'engineer', 'analyst', 'manager', 'director',
             'architect', 'designer', 'consultant', 'specialist', 'lead', 'senior', 'junior'].includes(cleanWord)) {
             skillSet.add(cleanWord);
           }
@@ -467,7 +467,7 @@ resumeSchema.methods.extractAllSkills = function() {
       }
     });
   }
-  
+
   // 3. Extract skills from projects
   if (this.projects && this.projects.length > 0) {
     this.projects.forEach(project => {
@@ -479,7 +479,7 @@ resumeSchema.methods.extractAllSkills = function() {
         });
       }
       if (project.description) {
-        const techKeywords = ['react', 'node', 'python', 'javascript', 'mongodb', 'express', 
+        const techKeywords = ['react', 'node', 'python', 'javascript', 'mongodb', 'express',
           'docker', 'aws', 'firebase', 'flutter', 'reactnative', 'tensorflow', 'pytorch'];
         const words = project.description.split(/[\s,.;:!?()]+/);
         words.forEach(word => {
@@ -491,7 +491,7 @@ resumeSchema.methods.extractAllSkills = function() {
       }
     });
   }
-  
+
   // 4. Extract from certifications
   if (this.certifications && this.certifications.length > 0) {
     this.certifications.forEach(cert => {
@@ -506,7 +506,7 @@ resumeSchema.methods.extractAllSkills = function() {
       }
     });
   }
-  
+
   // 5. Extract from education
   if (this.education && this.education.length > 0) {
     this.education.forEach(edu => {
@@ -521,14 +521,14 @@ resumeSchema.methods.extractAllSkills = function() {
       }
     });
   }
-  
+
   return Array.from(skillSet);
 };
 
 // Get experience level
-resumeSchema.methods.getExperienceLevel = function() {
+resumeSchema.methods.getExperienceLevel = function () {
   let totalYears = 0;
-  
+
   if (this.workExperience && this.workExperience.length > 0) {
     this.workExperience.forEach(work => {
       if (work.startDate) {
@@ -541,7 +541,7 @@ resumeSchema.methods.getExperienceLevel = function() {
       }
     });
   }
-  
+
   if (totalYears <= 2) return 'Entry Level';
   if (totalYears <= 5) return 'Mid Level';
   if (totalYears <= 10) return 'Senior Level';
@@ -549,9 +549,9 @@ resumeSchema.methods.getExperienceLevel = function() {
 };
 
 // Get preferred job types
-resumeSchema.methods.getPreferredJobTypes = function() {
+resumeSchema.methods.getPreferredJobTypes = function () {
   const types = new Set();
-  
+
   if (this.targetJobs && this.targetJobs.length > 0) {
     this.targetJobs.forEach(job => {
       if (job.jobType) {
@@ -559,18 +559,18 @@ resumeSchema.methods.getPreferredJobTypes = function() {
       }
     });
   }
-  
+
   if (types.size === 0) {
     types.add('Full-time');
   }
-  
+
   return Array.from(types);
 };
 
 // Get preferred locations
-resumeSchema.methods.getPreferredLocations = function() {
+resumeSchema.methods.getPreferredLocations = function () {
   const locations = new Set();
-  
+
   if (this.targetJobs && this.targetJobs.length > 0) {
     this.targetJobs.forEach(job => {
       if (job.location) {
@@ -578,7 +578,7 @@ resumeSchema.methods.getPreferredLocations = function() {
       }
     });
   }
-  
+
   if (this.personalInfo && this.personalInfo.city) {
     locations.add(this.personalInfo.city);
   }
@@ -588,14 +588,14 @@ resumeSchema.methods.getPreferredLocations = function() {
   if (this.personalInfo && this.personalInfo.country) {
     locations.add(this.personalInfo.country);
   }
-  
+
   return Array.from(locations);
 };
 
 // Get target job titles
-resumeSchema.methods.getTargetTitles = function() {
+resumeSchema.methods.getTargetTitles = function () {
   const titles = new Set();
-  
+
   if (this.targetJobs && this.targetJobs.length > 0) {
     this.targetJobs.forEach(job => {
       if (job.jobTitle) {
@@ -603,14 +603,14 @@ resumeSchema.methods.getTargetTitles = function() {
       }
     });
   }
-  
+
   return Array.from(titles);
 };
 
 // Get target industries
-resumeSchema.methods.getTargetIndustries = function() {
+resumeSchema.methods.getTargetIndustries = function () {
   const industries = new Set();
-  
+
   if (this.targetJobs && this.targetJobs.length > 0) {
     this.targetJobs.forEach(job => {
       if (job.industry) {
@@ -618,12 +618,12 @@ resumeSchema.methods.getTargetIndustries = function() {
       }
     });
   }
-  
+
   return Array.from(industries);
 };
 
 // Static method for recommendations
-resumeSchema.statics.getRecommendedJobs = async function(resumeId) {
+resumeSchema.statics.getRecommendedJobs = async function (resumeId) {
   try {
     const resume = await this.findById(resumeId);
     if (!resume) return [];
@@ -636,7 +636,7 @@ resumeSchema.statics.getRecommendedJobs = async function(resumeId) {
     const targetIndustries = resume.getTargetIndustries();
 
     const Job = require('./Job');
-    
+
     let query = { active: true, type: 'Internship', location: { $regex: 'pakistan|karachi|lahore|islamabad|rawalpindi|faisalabad|multan|peshawar|quetta|sialkot|gujranwala|hyderabad|abbottabad|sargodha|bahawalpur|sukkur|larkana|gujrat|sheikhupura|jhelum|sahiwal|pk', $options: 'i' } };
     let matchConditions = [];
 
@@ -710,7 +710,7 @@ resumeSchema.statics.getRecommendedJobs = async function(resumeId) {
       if (skills.length > 0 && job.skills && job.skills.length > 0) {
         const jobSkills = job.skills.map(s => s.toLowerCase().trim());
         const resumeSkills = skills.map(s => s.toLowerCase().trim());
-        
+
         jobSkills.forEach(skill => {
           if (resumeSkills.some(rs => skill.includes(rs) || rs.includes(skill))) {
             matchedSkills.push(skill);
@@ -774,7 +774,7 @@ resumeSchema.statics.getRecommendedJobs = async function(resumeId) {
       if (job.urgent) matchScore += 2;
 
       matchScore = Math.min(matchScore, 100);
-      
+
       if (matchScore >= 20) {
         return {
           ...job.toObject(),
@@ -797,32 +797,35 @@ resumeSchema.statics.getRecommendedJobs = async function(resumeId) {
 };
 
 // Track view
-resumeSchema.methods.trackView = function() {
-  this.viewCount = (this.viewCount || 0) + 1;
-  
+resumeSchema.methods.trackView = async function () {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  
-  const existingEntry = this.viewsHistory?.find(v => {
-    const entryDate = new Date(v.date);
-    entryDate.setHours(0, 0, 0, 0);
-    return entryDate.getTime() === today.getTime();
-  });
-  
-  if (existingEntry) {
-    existingEntry.count = (existingEntry.count || 0) + 1;
-  } else {
-    if (!this.viewsHistory) this.viewsHistory = [];
-    this.viewsHistory.push({ date: today, count: 1 });
+
+  const result = await this.constructor.updateOne(
+    { _id: this._id, 'viewsHistory.date': today },
+    { 
+      $inc: { viewCount: 1, 'viewsHistory.$.count': 1 } 
+    }
+  );
+
+  if (result.matchedCount === 0) {
+    return this.constructor.updateOne(
+      { _id: this._id },
+      { 
+        $inc: { viewCount: 1 },
+        $push: { viewsHistory: { date: today, count: 1 } }
+      }
+    );
   }
-  
-  return this.save();
+  return result;
 };
 
 // Track download
-resumeSchema.methods.trackDownload = function() {
-  this.downloadCount = (this.downloadCount || 0) + 1;
-  return this.save();
+resumeSchema.methods.trackDownload = function () {
+  return this.constructor.updateOne(
+    { _id: this._id },
+    { $inc: { downloadCount: 1 } }
+  );
 };
 
 const Resume = mongoose.model('Resume', resumeSchema);

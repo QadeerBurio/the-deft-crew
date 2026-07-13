@@ -19,7 +19,13 @@ const Job    = require('../models/Job');
 
 let openai;
 function getOpenAI() {
-  if (!openai) openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  if (!openai) {
+    openai = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+      timeout: 45000,
+      maxRetries: 2
+    });
+  }
   return openai;
 }
 

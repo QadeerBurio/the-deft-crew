@@ -9,7 +9,11 @@ const axios = require('axios');
 let openai;
 function getOpenAI() {
   if (!openai) {
-    openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    openai = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+      timeout: 45000,
+      maxRetries: 2
+    });
   }
   return openai;
 }
@@ -20,83 +24,51 @@ function getOpenAI() {
 const extractSectionText = (text, sectionName) => {
   const sections = ['Summary', 'Education', 'Skills', 'Projects', 'Experience', 'Certifications', 'Languages'];
   const lowerText = text.toLowerCase();
-  
-  // Find start index of target section
-  const targetHeader = `\n${sectionName.toLowerCase()}\n`;
-  let startIndex = lowerText.indexOf(targetHeader);
-  if (startIndex === -1) {
-    // Try without surrounding newlines
-    startIndex = lowerText.indexOf(sectionName.toLowerCase());
-  }
-  if (startIndex === -1) return '';
-  
-  // The actual section starts after the header
-  startIndex += sectionName.length;
-  
-  // Find where the next section starts
-  let nextSectionIndex = text.length;
-  for (const sec of sections) {
-    if (sec === sectionName) continue;
-    const secHeader = `\n${sec.toLowerCase()}\n`;
-    let idx = lowerText.indexOf(secHeader, startIndex);
-    if (idx === -1) {
-      idx = lowerText.indexOf(sec.toLowerCase(), startIndex);
-    }
-    if (idx !== -1 && idx < nextSectionIndex) {
-      nextSectionIndex = idx;
-    }
-  }
-  
-  return text.substring(startIndex, nextSectionIndex).trim();
-};
 
-/**
- * Extract text from PDF file
- */
-const extractTextFromPDF = async (filePath) => {
-  try {
-    console.log('📄 Extracting text from PDF...');
-    let dataBuffer;
-    if (filePath.startsWith('http://') || filePath.startsWith('https://')) {
-      console.log('🌐 Fetching PDF from remote URL:', filePath);
-      const response = await axios.get(filePath, { responseType: 'arraybuffer' });
-      dataBuffer = Buffer.from(response.data);
-    } else {
-      dataBuffer = fs.readFileSync(filePath);
+  let currentSearchIndex = 0;
+  while (currentSearchIndex < text.length) {
+    // Find start index of target section
+    const targetHeader = `\n${sectionName.toLowerCase()}`;
+    let startIndex = lowerText.indexOf(targetHeader, currentSearchIndex);
+    if (startIndex === -1) {
+      startIndex = lowerText.indexOf(sectionName.toLowerCase(), currentSearchIndex);
     }
-    const parser = new PDFParse({ data: dataBuffer });
-    const data = await parser.getText();
-    const text = data.text || '';
-    console.log(`✅ Extracted ${text.length} characters from PDF`);
-    return text;
-  } catch (error) {
-    console.error('❌ PDF extraction error:', error);
-    throw new Error('Failed to extract text from PDF: ' + error.message);
-  }
-};
+    if (startIndex === -1) break;
 
-/**
- * Extract text from Word document
- */
-const extractTextFromWord = async (filePath) => {
-  try {
-    console.log('📄 Extracting text from Word document...');
-    let dataBuffer;
-    if (filePath.startsWith('http://') || filePath.startsWith('https://')) {
-      console.log('🌐 Fetching Word document from remote URL:', filePath);
-      const response = await axios.get(filePath, { responseType: 'arraybuffer' });
-      dataBuffer = Buffer.from(response.data);
-    } else {
-      dataBuffer = fs.readFileSync(filePath);
+    // The actual section starts after the header word
+    let startAfterHeader = startIndex + sectionName.length;
+    if (lowerText.substring(startIndex, startIndex + targetHeader.length) === targetHeader) {
+      startAfterHeader = startIndex + targetHeader.length;
     }
-    const result = await mammoth.extractRawText({ buffer: dataBuffer });
-    const text = result.value || '';
-    console.log(`✅ Extracted ${text.length} characters from Word document`);
-    return text;
-  } catch (error) {
-    console.error('❌ Word extraction error:', error);
-    throw new Error('Failed to extract text from Word document: ' + error.message);
+
+    // skip the extra \n or spaces
+    while (startAfterHeader < text.length && (text[startAfterHeader] === '\n' || text[startAfterHeader] === '\r' || text[startAfterHeader] === ' ' || text[startAfterHeader] === '\t')) {
+      startAfterHeader++;
+    }
+
+    // Find where the next section starts
+    let nextSectionIndex = text.length;
+    for (const sec of sections) {
+      if (sec.toLowerCase() === sectionName.toLowerCase()) continue;
+      const secHeader = `\n${sec.toLowerCase()}`;
+      let idx = lowerText.indexOf(secHeader, startAfterHeader);
+      if (idx === -1) {
+        idx = lowerText.indexOf(sec.toLowerCase(), startAfterHeader);
+      }
+      if (idx !== -1 && idx < nextSectionIndex) {
+        nextSectionIndex = idx;
+      }
+    }
+
+    const sectionContent = text.substring(startAfterHeader, nextSectionIndex).trim();
+    if (sectionContent.length > 5) {
+      return sectionContent;
+    }
+
+    currentSearchIndex = startIndex + 1;
   }
+
+  return '';
 };
 
 /**
@@ -104,18 +76,18 @@ const extractTextFromWord = async (filePath) => {
  */
 const parsePersonalInfo = (text) => {
   console.log('🔍 Parsing personal information...');
-  
+
   const lines = text.split('\n').filter(line => line.trim());
   const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/;
   const phoneRegex = /(?:\+92|0)?\s?3[0-9]{2}[-\s]?[0-9]{7}|(?:\+92|0)?\s?3[0-9]{2}[-\s]?[0-9]{3}[-\s]?[0-9]{4}|(?:\+\d{1,3}[-.]?)?\(?\d{3}\)?[-.]?\d{3}[-.]?\d{4}/;
   const linkedinRegex = /linkedin\.com\/in\/[a-zA-Z0-9-]+/;
   const githubRegex = /github\.com\/[a-zA-Z0-9-]+/;
-  
+
   let email = text.match(emailRegex)?.[0] || '';
   let phone = text.match(phoneRegex)?.[0] || '';
   let linkedin = text.match(linkedinRegex)?.[0] || '';
   let github = text.match(githubRegex)?.[0] || '';
-  
+
   // Try to find name (usually first 1-3 lines)
   let firstName = '';
   let lastName = '';
@@ -128,11 +100,11 @@ const parsePersonalInfo = (text) => {
   // Clean lines and find name
   const cleanLines = lines.filter(line => {
     const l = line.trim();
-    return l.length > 0 && 
-           !l.match(emailRegex) && 
-           !l.match(phoneRegex) &&
-           !l.match(linkedinRegex) &&
-           !l.match(githubRegex);
+    return l.length > 0 &&
+      !l.match(emailRegex) &&
+      !l.match(phoneRegex) &&
+      !l.match(linkedinRegex) &&
+      !l.match(githubRegex);
   });
 
   // Try to find name (first line that looks like a name)
@@ -154,12 +126,12 @@ const parsePersonalInfo = (text) => {
 
   // Try to find city/country in regex mode
   const pkCities = [
-    'karachi', 'lahore', 'islamabad', 'rawalpindi', 'faisalabad', 'peshawar', 
-    'multan', 'gujranwala', 'sialkot', 'hyderabad', 'quetta', 'abbottabad', 
-    'bahawalpur', 'sargodha', 'sukkur', 'jhang', 'sheikhupura', 'larkana', 
+    'karachi', 'lahore', 'islamabad', 'rawalpindi', 'faisalabad', 'peshawar',
+    'multan', 'gujranwala', 'sialkot', 'hyderabad', 'quetta', 'abbottabad',
+    'bahawalpur', 'sargodha', 'sukkur', 'jhang', 'sheikhupura', 'larkana',
     'gujrat', 'sahiwal', 'wah cantt', 'mardan', 'kasur', 'rahim yar khan'
   ];
-  
+
   const lowerText = text.toLowerCase();
   for (const c of pkCities) {
     const cityRegex = new RegExp(`\\b${c}\\b`, 'i');
@@ -213,47 +185,58 @@ const parsePersonalInfo = (text) => {
     country,
     postalCode
   };
-  
+
   console.log('✅ Personal info parsed:', result);
   return result;
 };
 
 const parseEducation = (text) => {
   console.log('🔍 Parsing education...');
-  
+
   const education = [];
-  const educationKeywords = [
-    'university', 'college', 'institute', 'school', 
+  const degreeKeywords = [
     'bachelor', 'master', 'phd', 'b.s', 'm.s', 'b.a', 'm.a',
-    'bsc', 'msc', 'phd', 'btech', 'mtech', 'bcom', 'mcom',
-    'degree', 'diploma', 'certificate'
+    'bsc', 'msc', 'btech', 'mtech', 'bcom', 'mcom', 'mba', 'bba', 'bfa', 'mfa', 'degree', 'diploma', 'matric', 'intermediate'
   ];
+  const schoolKeywords = ['university', 'college', 'institute', 'school', 'academy', 'high school'];
   
   const sectionText = extractSectionText(text, 'Education') || text;
   const lines = sectionText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-  
+
   let currentEducation = null;
-  let foundEducation = false;
-  let educationSectionStarted = false;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const lowerLine = line.toLowerCase();
 
-    // Check if this line contains education keywords
-    const isEducationLine = educationKeywords.some(keyword => lowerLine.includes(keyword));
+    // Check if we hit a new section (if we are parsing the whole text)
+    if (line.match(/^(Experience|Skills|Projects|Certifications|Languages|References|Summary|Objective|Profile|Work|Employment)/i)) {
+      break;
+    }
 
-    if (isEducationLine && !foundEducation) {
-      // If we were already building an education, save it
-      if (currentEducation && currentEducation.institution) {
+    // Skip the section header itself
+    if (lowerLine === 'education' || lowerLine === 'education & certifications' || lowerLine === 'academic background') {
+      continue;
+    }
+
+    // Is it a new education entry?
+    const isSchool = schoolKeywords.some(k => lowerLine.includes(k));
+    const isDegree = degreeKeywords.some(k => {
+      const regex = new RegExp('\\b' + k.replace('.', '\\.') + '\\b', 'i');
+      return regex.test(lowerLine);
+    });
+    
+    const hasDateRange = line.match(/\b(19|20)\d{2}\s*[-–—]\s*(?:(19|20)\d{2}|Present|Current)\b/i);
+
+    if (isSchool || isDegree || (hasDateRange && !currentEducation)) {
+      if (currentEducation && (currentEducation.institution || currentEducation.degree)) {
+        if (!currentEducation.institution) currentEducation.institution = 'Unknown Institution';
         education.push(currentEducation);
+        console.log(`✅ Added education: ${currentEducation.degree} at ${currentEducation.institution}`);
       }
 
-      foundEducation = true;
-      educationSectionStarted = true;
-      
       currentEducation = {
-        institution: line,
+        institution: '',
         degree: '',
         fieldOfStudy: '',
         startDate: null,
@@ -263,13 +246,34 @@ const parseEducation = (text) => {
         description: ''
       };
 
-      // Try to extract degree from the same line
-      const degreeMatch = line.match(/(Bachelor|Master|PhD|B\.S|M\.S|B\.A|M\.A|BSc|MSc|BTech|MTech|BCom|MCom|MBA|BBA|BFA|MFA)/i);
-      if (degreeMatch) {
-        currentEducation.degree = degreeMatch[0];
-        // Remove degree from institution
-        currentEducation.institution = line.replace(degreeMatch[0], '').trim();
-        console.log(`🎓 Found degree: ${currentEducation.degree}`);
+      if (isSchool) {
+        const atIndex = lowerLine.indexOf(' at ');
+        if (atIndex !== -1) {
+          currentEducation.institution = line.substring(atIndex + 4).trim();
+          const degreePart = line.substring(0, atIndex).trim();
+          currentEducation.degree = degreePart;
+        } else {
+          currentEducation.institution = line;
+        }
+      } else {
+        currentEducation.degree = line;
+      }
+    }
+
+    if (currentEducation) {
+      // Try to extract degree if not set
+      if (!currentEducation.degree) {
+        const degreeMatch = line.match(/(Bachelor|Master|PhD|B\.S|M\.S|B\.A|M\.A|BSc|MSc|BTech|MTech|BCom|MCom|MBA|BBA|BFA|MFA)/i);
+        if (degreeMatch) {
+          currentEducation.degree = degreeMatch[0];
+        }
+      }
+
+      // Try to find GPA
+      const gpaMatch = line.match(/GPA[:\s\-]+([0-9]\.[0-9]{1,2})/i) || line.match(/GPA[:\s\-]+([0-9])/i);
+      if (gpaMatch) {
+        currentEducation.gpa = parseFloat(gpaMatch[1]);
+        console.log(`📊 Found GPA: ${currentEducation.gpa}`);
       }
 
       // Try to find dates
@@ -278,69 +282,32 @@ const parseEducation = (text) => {
       if (dates && dates.length >= 2) {
         currentEducation.startDate = new Date(parseInt(dates[0]), 0, 1);
         currentEducation.endDate = new Date(parseInt(dates[1]), 0, 1);
-        console.log(`📅 Found dates: ${dates[0]} - ${dates[1]}`);
-      } else if (dates && dates.length === 1) {
+      } else if (dates && dates.length === 1 && !currentEducation.startDate) {
         currentEducation.startDate = new Date(parseInt(dates[0]), 0, 1);
-        console.log(`📅 Found start date: ${dates[0]}`);
       }
 
-      // Check for "present" or "current"
       if (lowerLine.includes('present') || lowerLine.includes('current')) {
         currentEducation.current = true;
-        console.log('🔄 Currently studying');
       }
 
-    } else if (foundEducation && currentEducation) {
-      // If we're in education section, try to parse more details
-      if (!currentEducation.fieldOfStudy && 
-          line.length > 2 && 
-          !educationKeywords.some(k => lowerLine.includes(k))) {
-        currentEducation.fieldOfStudy = line;
-        console.log(`📚 Found field of study: ${line}`);
-      } else if (!currentEducation.description && 
-                 line.length > 10 && 
-                 !line.match(/^\d{4}/) &&
-                 !educationKeywords.some(k => lowerLine.includes(k))) {
-        currentEducation.description = (currentEducation.description || '') + ' ' + line;
-      }
-
-      // Check for GPA
-      const gpaMatch = line.match(/GPA[:\s]+(\d\.\d{1,2})/i);
-      if (gpaMatch) {
-        currentEducation.gpa = parseFloat(gpaMatch[1]);
-        console.log(`📊 Found GPA: ${currentEducation.gpa}`);
-      }
-
-      // Check for dates in subsequent lines
-      const dateRegex = /\b(19|20)\d{2}\b/g;
-      const dates = line.match(dateRegex);
-      if (dates && dates.length >= 2 && !currentEducation.startDate) {
-        currentEducation.startDate = new Date(parseInt(dates[0]), 0, 1);
-        currentEducation.endDate = new Date(parseInt(dates[1]), 0, 1);
-        console.log(`📅 Found dates: ${dates[0]} - ${dates[1]}`);
-      }
-
-      // If we hit a new section (not education), stop
-      if (line.match(/^(Experience|Skills|Projects|Certifications|Languages|References|Summary|Objective|Profile|Work|Employment)/i)) {
-        foundEducation = false;
-        if (currentEducation && currentEducation.institution) {
-          education.push(currentEducation);
-          console.log(`✅ Added education: ${currentEducation.institution}`);
+      // Field of Study / Description assignment
+      if (line !== currentEducation.institution && line !== currentEducation.degree) {
+        if (!currentEducation.fieldOfStudy && line.length < 50 && !line.match(/\b(19|20)\d{2}\b/) && !line.match(/gpa/i)) {
+          currentEducation.fieldOfStudy = line;
+        } else if (line.length > 5 && !line.match(/gpa/i) && !line.match(/\b(19|20)\d{2}\b/)) {
+          currentEducation.description = (currentEducation.description ? currentEducation.description + ' ' : '') + line;
         }
-        currentEducation = null;
-        educationSectionStarted = false;
       }
     }
   }
 
-  // Don't forget the last education
-  if (currentEducation && currentEducation.institution) {
+  if (currentEducation && (currentEducation.institution || currentEducation.degree)) {
+    if (!currentEducation.institution) currentEducation.institution = 'Unknown Institution';
     education.push(currentEducation);
-    console.log(`✅ Added education: ${currentEducation.institution}`);
+    console.log(`✅ Added final education: ${currentEducation.degree} at ${currentEducation.institution}`);
   }
 
-  // Clean up education entries
-  const filteredEducation = education.filter(e => e.institution && e.institution.length > 2);
+  const filteredEducation = education.filter(e => e.institution && e.institution.toLowerCase() !== 'education');
   console.log(`✅ Found ${filteredEducation.length} education entries`);
   return filteredEducation;
 };
@@ -350,17 +317,17 @@ const parseEducation = (text) => {
  */
 const parseWorkExperience = (text) => {
   console.log('🔍 Parsing work experience...');
-  
+
   const experiences = [];
   const experienceKeywords = [
     'experience', 'work', 'employment', 'job', 'position', 'role',
     'professional experience', 'work history', 'employment history',
     'career', 'occupation'
   ];
-  
+
   const sectionText = extractSectionText(text, 'Experience') || text;
   const lines = sectionText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-  
+
   let currentExperience = null;
   let foundExperience = false;
   let experienceSectionStarted = false;
@@ -383,7 +350,9 @@ const parseWorkExperience = (text) => {
       // Check if we've hit a new section
       if (line.match(/^(Education|Skills|Projects|Certifications|Languages|References|Summary|Objective|Profile)/i)) {
         foundExperience = false;
-        if (currentExperience && currentExperience.company) {
+        if (currentExperience && (currentExperience.company || currentExperience.position)) {
+          if (!currentExperience.company) currentExperience.company = 'Unknown Company';
+          if (!currentExperience.position) currentExperience.position = 'Professional Role';
           experiences.push(currentExperience);
           console.log(`✅ Added experience: ${currentExperience.position} at ${currentExperience.company}`);
         }
@@ -395,6 +364,20 @@ const parseWorkExperience = (text) => {
       // Try to detect company name (often in caps or with certain patterns)
       const companyMatch = line.match(/^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\s+(?:Inc|LLC|Corp|Corporation|Company|Ltd|Limited))/);
       const positionMatch = line.match(/^(Senior|Junior|Lead|Principal|Staff|Associate|Developer|Engineer|Manager|Director|Consultant|Analyst|Architect|Designer|Product|Project|Program|Software|Full[-\s]Stack|Frontend|Backend|DevOps|QA|Test|Data|Machine Learning|AI|Cloud|Network|System|Security|DevSecOps)/i);
+
+      // Check if we need to start a new experience block
+      const hasDateRange = line.match(/\b(19|20)\d{2}\s*[-–—]\s*(?:(19|20)\d{2}|Present|Current)\b/i);
+      const isNewExperienceEntry = (companyMatch || positionMatch || hasDateRange) && (line.length < 80);
+
+      if (currentExperience && isNewExperienceEntry) {
+        if (currentExperience.company || currentExperience.position) {
+          if (!currentExperience.company) currentExperience.company = 'Unknown Company';
+          if (!currentExperience.position) currentExperience.position = 'Professional Role';
+          experiences.push(currentExperience);
+          console.log(`✅ Added experience (transition): ${currentExperience.position} at ${currentExperience.company}`);
+        }
+        currentExperience = null;
+      }
 
       if (!currentExperience) {
         // Start new experience
@@ -419,8 +402,17 @@ const parseWorkExperience = (text) => {
             console.log(`💼 Found position: ${currentExperience.position}`);
           }
         } else if (positionMatch) {
-          currentExperience.position = line;
-          console.log(`💼 Found position: ${currentExperience.position}`);
+          const splitDelim = line.includes(' at ') ? ' at ' : (line.includes(' — ') ? ' — ' : (line.includes(' - ') ? ' - ' : null));
+          if (splitDelim) {
+            const parts = line.split(splitDelim);
+            currentExperience.position = parts[0].trim();
+            const rawCompany = parts[1].split(/\t/)[0].split(/\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|Present|\d{4})\b/i)[0].trim();
+            currentExperience.company = rawCompany.replace(/^[—\-\t\s]+/, '').trim();
+            console.log(`💼 Found split position: ${currentExperience.position} at company: ${currentExperience.company}`);
+          } else {
+            currentExperience.position = line;
+            console.log(`💼 Found position: ${currentExperience.position}`);
+          }
         } else {
           // Try to guess if it's a company
           const words = line.split(' ');
@@ -477,7 +469,9 @@ const parseWorkExperience = (text) => {
   }
 
   // Don't forget the last experience
-  if (currentExperience && currentExperience.company) {
+  if (currentExperience && (currentExperience.company || currentExperience.position)) {
+    if (!currentExperience.company) currentExperience.company = 'Unknown Company';
+    if (!currentExperience.position) currentExperience.position = 'Professional Role';
     experiences.push(currentExperience);
     console.log(`✅ Added experience: ${currentExperience.position} at ${currentExperience.company}`);
   }
@@ -492,16 +486,16 @@ const parseWorkExperience = (text) => {
  */
 const parseSkills = (text) => {
   console.log('🔍 Parsing skills...');
-  
+
   const skills = [];
   const skillsText = extractSectionText(text, 'Skills') || text;
-  
+
   const skillKeywords = [
     'skills', 'technical skills', 'soft skills', 'competencies', 'expertise',
     'core competencies', 'skill set', 'proficiencies', 'technologies',
     'programming languages', 'tools', 'frameworks'
   ];
-  
+
   if (skillsText) {
     const lines = skillsText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
     for (const line of lines) {
@@ -513,16 +507,16 @@ const parseSkills = (text) => {
           cleanLine = parts.slice(1).join(':').trim();
         }
       }
-      
+
       const skillItems = cleanLine.split(/[,;•|/]/)
         .map(s => s.trim())
         .filter(s => s.length > 1 && s.length < 50);
-        
+
       for (const item of skillItems) {
         if (skillKeywords.some(keyword => item.toLowerCase() === keyword)) {
           continue;
         }
-        
+
         const cleanName = item.replace(/^[•\-\*\s]+/, '').replace(/^(Technical|Soft|Language|Other)\s*:?\s*/i, '').trim();
         if (cleanName && cleanName.length > 1 && !skills.some(s => s.name.toLowerCase() === cleanName.toLowerCase())) {
           skills.push({
@@ -534,7 +528,7 @@ const parseSkills = (text) => {
       }
     }
   }
-  
+
   // If no skills found, try to find skills in the text
   if (skills.length === 0) {
     console.log('🔍 Searching for skills in full text...');
@@ -548,7 +542,7 @@ const parseSkills = (text) => {
       'Laravel', 'Swift', 'Kotlin', 'Flutter', 'React Native', 'GraphQL',
       'REST API', 'Microservices', 'CI/CD', 'Jenkins', 'Ansible', 'Terraform'
     ];
-    
+
     for (const skill of commonSkills) {
       const regex = new RegExp(`\\b${skill.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')}\\b`, 'i');
       if (regex.test(text) && !skills.some(s => s.name.toLowerCase() === skill.toLowerCase())) {
@@ -561,7 +555,7 @@ const parseSkills = (text) => {
       }
     }
   }
-  
+
   console.log(`✅ Found ${skills.length} skills`);
   return skills;
 };
@@ -571,26 +565,25 @@ const parseSkills = (text) => {
  */
 const parseCertifications = (text) => {
   console.log('🔍 Parsing certifications...');
-  
+
   const certifications = [];
   const certKeywords = [
     'certification', 'certified', 'certificate', 'credential',
     'aws certified', 'google certified', 'microsoft certified',
     'scrum master', 'pmp', 'project management', 'itil'
   ];
-  
+
   const sections = text.split(/\n\s*\n/);
-  
+
   for (const section of sections) {
     const lowerSection = section.toLowerCase();
     if (certKeywords.some(keyword => lowerSection.includes(keyword))) {
       const lines = section.split('\n').filter(l => l.trim());
-      
+
       for (const line of lines) {
         const certName = line.trim();
-        if (certName.length > 5 && 
-            !certKeywords.some(k => certName.toLowerCase().includes(k)) &&
-            certName.length < 100) {
+        const isHeader = /^(certifications|licenses|credentials|courses|achievements|education|experience|skills|projects|languages|summary|profile)$/i.test(certName) || certName.endsWith(':');
+        if (certName.length > 5 && !isHeader && certName.length < 100) {
           certifications.push({
             name: certName,
             organization: '',
@@ -604,7 +597,7 @@ const parseCertifications = (text) => {
       }
     }
   }
-  
+
   console.log(`✅ Found ${certifications.length} certifications`);
   return certifications;
 };
@@ -614,21 +607,25 @@ const parseCertifications = (text) => {
  */
 const parseProjects = (text) => {
   console.log('🔍 Parsing projects...');
-  
+
   const projects = [];
-  const projectKeywords = ['project', 'portfolio', 'github', 'repository', 'side project'];
-  
+  const projectKeywords = [
+    'project', 'projects', 'portfolio', 'github', 'repository', 
+    'side project', 'academic projects', 'personal projects', 'key projects', 
+    'selected projects', 'open source', 'applications', 'publications', 'case studies'
+  ];
+
   const sections = text.split(/\n\s*\n/);
-  
+
   for (const section of sections) {
     const lowerSection = section.toLowerCase();
     if (projectKeywords.some(keyword => lowerSection.includes(keyword))) {
       const lines = section.split('\n').filter(l => l.trim());
-      
+
       if (lines.length >= 2) {
         const name = lines[0]?.trim() || '';
         const description = lines.slice(1).join(' ').trim();
-        
+
         // Try to find technologies
         const techKeywords = [
           'React', 'Node.js', 'Python', 'Java', 'JavaScript', 'HTML', 'CSS',
@@ -637,7 +634,7 @@ const parseProjects = (text) => {
           'AWS', 'Azure', 'GCP', 'Docker', 'Kubernetes', 'GraphQL', 'REST API'
         ];
         const technologies = techKeywords.filter(tech => description.includes(tech));
-        
+
         if (name && name.length > 2) {
           projects.push({
             name: name,
@@ -653,7 +650,7 @@ const parseProjects = (text) => {
       }
     }
   }
-  
+
   console.log(`✅ Found ${projects.length} projects`);
   return projects;
 };
@@ -663,10 +660,10 @@ const parseProjects = (text) => {
  */
 const parseLanguages = (text) => {
   console.log('🔍 Parsing languages...');
-  
+
   const languages = [];
   const languageKeywords = ['languages', 'language proficiency', 'bilingual', 'multilingual'];
-  
+
   // Common languages
   const commonLanguages = [
     'English', 'Spanish', 'French', 'German', 'Chinese', 'Japanese',
@@ -675,9 +672,9 @@ const parseLanguages = (text) => {
     'Vietnamese', 'Thai', 'Polish', 'Greek', 'Hebrew', 'Swedish',
     'Norwegian', 'Danish', 'Finnish', 'Indonesian', 'Malay'
   ];
-  
+
   const sections = text.split(/\n\s*\n/);
-  
+
   for (const section of sections) {
     const lowerSection = section.toLowerCase();
     if (languageKeywords.some(keyword => lowerSection.includes(keyword))) {
@@ -692,7 +689,7 @@ const parseLanguages = (text) => {
           } else if (section.match(new RegExp(`${lang}.*(Basic|Beginner|Elementary)`, 'i'))) {
             proficiency = 'Basic';
           }
-          
+
           languages.push({
             name: lang,
             proficiency: proficiency
@@ -702,7 +699,7 @@ const parseLanguages = (text) => {
       }
     }
   }
-  
+
   // If no languages found, try to find from common languages
   if (languages.length === 0) {
     console.log('🔍 Searching for languages in full text...');
@@ -716,7 +713,7 @@ const parseLanguages = (text) => {
       }
     }
   }
-  
+
   console.log(`✅ Found ${languages.length} languages`);
   return languages;
 };
@@ -727,12 +724,12 @@ const parseLanguages = (text) => {
 const parseResumePDF = async (filePath, originalName = '') => {
   try {
     console.log('📄 Starting resume parsing for:', filePath);
-    
+
     let ext = path.extname(filePath).toLowerCase();
     if (!ext && originalName) {
       ext = path.extname(originalName).toLowerCase();
     }
-    
+
     let buffer;
     if (filePath.startsWith('http://') || filePath.startsWith('https://')) {
       console.log('🌐 Fetching remote file...');
@@ -741,18 +738,18 @@ const parseResumePDF = async (filePath, originalName = '') => {
     } else {
       buffer = fs.readFileSync(filePath);
     }
-    
+
     let text = '';
     let imageList = [];
     let isScannedPdf = false;
-    
+
     if (ext === '.pdf') {
       console.log('📄 Parsing PDF file...');
       const parser = new PDFParse({ data: buffer });
       const result = await parser.getText();
       text = result.text || '';
       console.log(`✅ Extracted ${text.length} characters from PDF`);
-      
+
       if (!text || text.trim().length < 50) {
         console.log('📸 PDF text is too short. Extracting page images for visual parsing...');
         try {
@@ -770,7 +767,7 @@ const parseResumePDF = async (filePath, originalName = '') => {
           }
           if (imageList.length > 0) {
             isScannedPdf = true;
-            console.log(`📸 Successfully extracted ${imageList.length} page images for visual analysis.`);
+            console.log(`📸 Successfully extracted ${imageList.length} page images for visual parsing`);
           }
         } catch (imgErr) {
           console.error('❌ Failed to extract page images from PDF:', imgErr);
@@ -783,12 +780,12 @@ const parseResumePDF = async (filePath, originalName = '') => {
     } else {
       throw new Error(`Unsupported file format "${ext || 'unknown'}". Please upload PDF or Word document.`);
     }
-    
+
     if (text) {
       text = text.split('\n').map(line => {
         const trimmed = line.trim();
         if (!trimmed) return line;
-        
+
         // If the line consists of single letters separated by spaces
         // E.g. "E D U C A T I O N" or "W O R K   E X P E R I E N C E"
         const parts = trimmed.split(/\s{2,}/);
@@ -801,7 +798,7 @@ const parseResumePDF = async (filePath, originalName = '') => {
         });
         const processedLine = processedParts.join(' ');
         const lowerProcessed = processedLine.toLowerCase();
-        
+
         if (lowerProcessed === 'education') return 'Education';
         if (lowerProcessed.includes('workexperience') || lowerProcessed.includes('experience')) return 'Experience';
         if (lowerProcessed.includes('technicalskills') || lowerProcessed.includes('skills')) return 'Skills';
@@ -809,7 +806,7 @@ const parseResumePDF = async (filePath, originalName = '') => {
         if (lowerProcessed.includes('summary') || lowerProcessed.includes('profile') || lowerProcessed.includes('objective')) return 'Summary';
         if (lowerProcessed.includes('certifications') || lowerProcessed.includes('achievements')) return 'Certifications';
         if (lowerProcessed.includes('languages')) return 'Languages';
-        
+
         return processedLine;
       }).join('\n');
     }
@@ -846,9 +843,9 @@ const parseResumePDF = async (filePath, originalName = '') => {
         rawText: text
       };
     }
-    
+
     console.log('📝 Text length to analyze:', text.length);
-    
+
     // Check if OpenAI API key is set for advanced parsing
     if (process.env.OPENAI_API_KEY) {
       try {
@@ -973,7 +970,7 @@ Schema:
 
         const rawJson = completion.choices[0]?.message?.content || '{}';
         console.log('🤖 OpenAI raw response length:', rawJson.length);
-        
+
         let parsed;
         try {
           parsed = JSON.parse(rawJson);
@@ -981,9 +978,9 @@ Schema:
           console.error('❌ Failed to parse OpenAI JSON response:', jsonError);
           throw new Error('AI parsing returned invalid JSON');
         }
-        
+
         console.log('✅ OpenAI resume parsing successful');
-        
+
         // Ensure default structures are present and validate data
         parsed.personalInfo = parsed.personalInfo || {};
         parsed.professionalSummary = parsed.professionalSummary || {};
@@ -993,7 +990,7 @@ Schema:
         parsed.projects = Array.isArray(parsed.projects) ? parsed.projects : [];
         parsed.certifications = Array.isArray(parsed.certifications) ? parsed.certifications : [];
         parsed.languages = Array.isArray(parsed.languages) ? parsed.languages : [];
-        
+
         // Validate and clean data
         if (!parsed.personalInfo.firstName && !parsed.personalInfo.lastName) {
           // Try to extract name from text
@@ -1004,7 +1001,7 @@ Schema:
             parsed.personalInfo.lastName = lastName.join(' ');
           }
         }
-        
+
         // Store raw text for debugging
         parsed.rawText = text.substring(0, 2000);
 
@@ -1038,12 +1035,12 @@ Schema:
     const certifications = parseCertifications(text);
     const projects = parseProjects(text);
     const languages = parseLanguages(text);
-    
+
     // Create professional summary from first few lines
     const lines = text.split('\n').filter(l => l.trim());
     let summary = '';
     let title = '';
-    
+
     // Try to find a summary section
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i].toLowerCase();
@@ -1061,7 +1058,7 @@ Schema:
         break;
       }
     }
-    
+
     // Try to find professional title
     if (workExperience.length > 0 && workExperience[0].position) {
       title = workExperience[0].position;
@@ -1070,7 +1067,7 @@ Schema:
     } else {
       title = 'Professional';
     }
-    
+
     // Determine experience level based on work history
     let experienceLevel = 'Mid Level';
     if (workExperience.length === 0) {
@@ -1078,23 +1075,23 @@ Schema:
     } else if (workExperience.length >= 3) {
       experienceLevel = 'Senior Level';
     }
-    
+
     if (!summary && lines.length > 3) {
       // Take first non-header line as summary
       for (let i = 1; i < Math.min(lines.length, 10); i++) {
         const line = lines[i].trim();
-        if (line.length > 20 && 
-            !line.match(/^(Education|Experience|Skills|Projects|Certifications|Languages|References|Email|Phone)/i)) {
+        if (line.length > 20 &&
+          !line.match(/^(Education|Experience|Skills|Projects|Certifications|Languages|References|Email|Phone)/i)) {
           summary = line;
           break;
         }
       }
     }
-    
+
     if (!summary) {
       summary = 'Experienced professional with a strong background in the industry.';
     }
-    
+
     const result = {
       personalInfo,
       professionalSummary: {
@@ -1110,7 +1107,7 @@ Schema:
       languages,
       rawText: text.substring(0, 2000)
     };
-    
+
     // Deduplicate skills
     if (result.skills && Array.isArray(result.skills)) {
       const seen = new Set();
@@ -1125,7 +1122,7 @@ Schema:
 
     console.log('✅ Fallback resume parsing completed successfully');
     console.log(`📊 Parsed: ${personalInfo.firstName ? 'Name ✓' : 'Name ✗'} | Skills: ${result.skills.length} | Experience: ${workExperience.length} | Education: ${education.length}`);
-    
+
     return result;
   } catch (error) {
     console.error('❌ Error parsing resume:', error);
@@ -1162,4 +1159,9 @@ Schema:
   }
 };
 
-module.exports = { parseResumePDF };
+module.exports = {
+  parseResumePDF,
+  parseWorkExperience,
+  parseEducation,
+  parseProjects
+};

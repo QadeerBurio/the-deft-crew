@@ -1065,8 +1065,10 @@ function getStatusColor(status) {
 
 // Get job recommendations based on user's primary resume (hybrid AI engine)
 router.get("/recommendations", authMiddleware, async (req, res) => {
+  const startTime = Date.now();
   try {
     const { limit = 10, page = 1 } = req.query;
+    console.log(`[${new Date().toISOString()}] 🔍 Fetching job recommendations for user: ${req.userId}`);
 
     const Resume = require('../models/Resume');
     // Use isPrimary first, fallback to most recent
@@ -1074,9 +1076,12 @@ router.get("/recommendations", authMiddleware, async (req, res) => {
     if (!resume) resume = await Resume.findOne({ user: req.userId }).sort({ updatedAt: -1 });
 
     if (!resume) {
+      console.log(`[${new Date().toISOString()}] ℹ️ No resume found for user: ${req.userId}. Falling back to featured jobs.`);
       // Fallback: featured external internships only, strictly Pakistan
       const featuredJobs = await Job.find({ active: true, type: 'Internship', featured: true, isExternal: true, location: { $regex: 'pakistan|karachi|lahore|islamabad|rawalpindi|faisalabad|multan|peshawar|quetta|sialkot|gujranwala|hyderabad|abbottabad|sargodha|bahawalpur|sukkur|larkana|gujrat|sheikhupura|jhelum|sahiwal|pk|remote', $options: 'i' } })
         .sort({ createdAt: -1 }).limit(parseInt(limit));
+      
+      console.log(`[${new Date().toISOString()}] 🚀 Sent ${featuredJobs.length} fallback featured jobs in ${Date.now() - startTime}ms`);
       return res.json({
         recommendations: featuredJobs.map(j => ({
           ...j.toObject(), matchPercentage: 50, isRecommended: false, matchReasons: ['Featured job']
@@ -1088,13 +1093,17 @@ router.get("/recommendations", authMiddleware, async (req, res) => {
       });
     }
 
+    console.log(`[${new Date().toISOString()}] 📄 User resume found (ID: ${resume._id}). Calculating hybrid recommendations...`);
     const startIndex = (parseInt(page) - 1) * parseInt(limit);
+    
+    const recsStart = Date.now();
     const allRecs = await getHybridRecommendations(resume._id.toString(), req.userId, {
       limit: startIndex + parseInt(limit) + 10,  // fetch a bit extra for pagination
       isExternal: true  // General Jobs recommendations: external jobs only
     });
+    console.log(`[${new Date().toISOString()}] 🟢 Hybrid recommendations computed: found ${allRecs.length} total candidates in ${Date.now() - recsStart}ms`);
 
-    res.json({
+    const result = {
       recommendations: allRecs.slice(startIndex, startIndex + parseInt(limit)),
       total: allRecs.length,
       page: parseInt(page),
@@ -1102,9 +1111,12 @@ router.get("/recommendations", authMiddleware, async (req, res) => {
       hasResume: true,
       engine: resume.careerProfile?.isEnriched ? 'hybrid_vector' : 'hybrid_skill',
       isEnriched: !!resume.careerProfile?.isEnriched
-    });
+    };
+
+    console.log(`[${new Date().toISOString()}] 🚀 Recommendations response sent. Total request duration: ${Date.now() - startTime}ms`);
+    res.json(result);
   } catch (error) {
-    console.error('Recommendations error:', error);
+    console.error(`[${new Date().toISOString()}] ❌ Recommendations error after ${Date.now() - startTime}ms:`, error);
     res.status(500).json({ error: error.message, recommendations: [], message: 'Failed to get recommendations' });
   }
 });

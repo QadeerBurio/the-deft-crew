@@ -195,9 +195,11 @@ async function getHybridRecommendations(resumeId, userId, options = {}) {
       hardQuery.locationType = 'Remote';
     }
 
-    // Fetch candidate jobs (fetch up to 400 to support high ranking accuracy and diversity processing)
+    // Fetch candidate jobs (fetch up to 300 to support high ranking accuracy and diversity processing, preventing event loop blocking)
     const candidateJobs = await Job.find(hardQuery)
       .select('_id title department category location locationType type salary salaryMin salaryMax experienceLevel education skills description requirements companyName companyLogo companyWebsite featured urgent applicationDeadline createdAt totalApplications')
+      .sort({ featured: -1, urgent: -1, createdAt: -1 })
+      .limit(300)
       .lean();
 
     if (candidateJobs.length === 0) return [];

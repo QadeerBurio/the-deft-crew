@@ -13,16 +13,31 @@ const { tailorResume }                   = require('../services/resumeTailorServ
 const { generateResumePDF }              = require('../services/pdfService');
 const { optimizeParsedResume }          = require('../services/resumeIntelligenceService');
 const OpenAI = require('openai');
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+  timeout: 45000,
+  maxRetries: 2
+});
+
+// Middleware to reject guest users on write endpoints
+const rejectGuest = (req, res, next) => {
+  if (req.isGuest || req.user?.isGuest || req.user?.role === 'guest') {
+    return res.status(403).json({
+      success: false,
+      error: 'Guest users cannot perform this action. Please sign up or log in.'
+    });
+  }
+  next();
+};
 
 // Check resume limit
 const checkResumeLimit = async (req, res, next) => {
   try {
     const count = await Resume.countDocuments({ user: req.user._id });
-    if (count >= 2) {
+    if (count >= 10) {
       return res.status(400).json({
         success: false,
-        error: 'Maximum 2 resumes allowed per user'
+        error: 'Maximum 10 resumes allowed per user'
       });
     }
     next();
@@ -32,7 +47,7 @@ const checkResumeLimit = async (req, res, next) => {
 };
 
 // ========== CREATE RESUME ==========
-router.post('/', auth, checkResumeLimit, async (req, res) => {
+router.post('/', auth, rejectGuest, checkResumeLimit, async (req, res) => {
   try {
     console.log('📝 Create resume request received');
     console.log('📊 User ID:', req.user._id);
@@ -165,159 +180,87 @@ router.get('/', auth, async (req, res) => {
   }
 });
 
-// ========== GET SINGLE RESUME ==========
-router.get('/:id', auth, async (req, res) => {
+// ========== GET PRIMARY RESUME (STATIC PATHS FIRST) ==========
+// GET /api/resume/primary
+// Returns the user's primary resume (isPrimary=true, else most recently updated)
+router.get('/primary', auth, async (req, res) => {
   try {
-    const resume = await Resume.findOne({ 
-      _id: req.params.id, 
-      user: req.user._id 
-    });
-
+    let resume = await Resume.findOne({ user: req.user._id, isPrimary: true });
     if (!resume) {
-      return res.status(404).json({
-        success: false,
-        error: 'Resume not found'
-      });
+      resume = await Resume.findOne({ user: req.user._id }).sort({ updatedAt: -1 });
     }
-
-    await resume.trackView();
-
-    res.json({
-      success: true,
-      data: resume
-    });
-  } catch (error) {
-    console.error('Get resume error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message || 'Failed to fetch resume' 
-    });
+    if (!resume) {
+      return res.status(404).json({ success: false, error: 'No resume found' });
+    }
+    res.json({ success: true, data: resume });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// ========== UPDATE RESUME ==========
-router.put('/:id', auth, async (req, res) => {
+// ========== AI ENHANCE TEXT (Lightweight) ==========
+// POST /api/resume/enhance-text
+router.post('/enhance-text', auth, rejectGuest, async (req, res) => {
   try {
-    console.log('📝 Update resume request:', req.params.id);
-
-    const resume = await Resume.findOne({ 
-      _id: req.params.id, 
-      user: req.user._id 
+    const { text, context } = req.body;
+    if (!text || !text.trim()) {
+      return res.status(400).json({ success: false, error: 'text is required' });
+    }
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        {
+          role: 'system',
+          content: 'You are an expert ATS resume writer. Rewrite the given text using strong action verbs, the STAR method, and quantifiable achievements where possible. Return ONLY the rewritten text — no labels, no preamble, no markdown.'
+        },
+        {
+          role: 'user',
+          content: `Context: ${context || 'general resume content'}\n\nText to enhance:\n${text.trim()}`
+        }
+      ],
+      max_tokens: 500,
+      temperature: 0.7
     });
-
-    if (!resume) {
-      return res.status(404).json({
-        success: false,
-        error: 'Resume not found'
-      });
-    }
-
-    if (req.body.personalInfo) {
-      resume.personalInfo = {
-        ...resume.personalInfo,
-        ...req.body.personalInfo
-      };
-    }
-
-    if (req.body.professionalSummary) {
-      resume.professionalSummary = {
-        ...resume.professionalSummary,
-        ...req.body.professionalSummary
-      };
-    }
-
-    if (req.body.targetJob) {
-      resume.targetJob = {
-        ...resume.targetJob,
-        ...req.body.targetJob
-      };
-    }
-
-    if (req.body.targetJobs !== undefined) {
-      resume.targetJobs = req.body.targetJobs;
-    }
-
-    if (req.body.settings) {
-      resume.settings = {
-        ...resume.settings,
-        ...req.body.settings
-      };
-    }
-
-    const arrayFields = ['education', 'skills', 'workExperience', 'certifications', 'projects', 'languages', 'references', 'interests'];
-    arrayFields.forEach(field => {
-      if (req.body[field] !== undefined) {
-        resume[field] = req.body[field];
-      }
-    });
-
-    if (req.body.template) {
-      resume.template = req.body.template;
-    }
-
-    if (req.body.uploadedResume) {
-      resume.uploadedResume = {
-        ...resume.uploadedResume,
-        ...req.body.uploadedResume
-      };
-    }
-
-    await resume.save();
-
-    console.log('✅ Resume updated successfully:', resume._id);
-
-    // 🧠 Fire-and-forget: re-run AI enrichment + invalidate skill gap cache
-    setImmediate(() => {
-      triggerCareerProfileEnrichment(resume._id.toString(), req.user._id.toString());
-      invalidateCacheForResume(resume._id.toString());
-    });
-
-    res.json({
-      success: true,
-      data: resume,
-      message: 'Resume updated successfully'
-    });
+    const enhanced = completion.choices[0]?.message?.content?.trim() || text;
+    res.json({ success: true, enhanced });
   } catch (error) {
-    console.error('❌ Update resume error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message || 'Failed to update resume'
-    });
+    console.error('Enhance text error:', error);
+    res.status(500).json({ success: false, error: error.message || 'Failed to enhance text' });
   }
 });
 
-// ========== DELETE RESUME ==========
-router.delete('/:id', auth, async (req, res) => {
+// ========== AI SKILL SUGGESTIONS (Lightweight) ==========
+// POST /api/resume/suggest-skills
+router.post('/suggest-skills', auth, rejectGuest, async (req, res) => {
   try {
-    const resume = await Resume.findOne({ 
-      _id: req.params.id, 
-      user: req.user._id 
+    const { currentSkills, targetRole } = req.body;
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        {
+          role: 'system',
+          content: 'You are a career advisor. Given the user\'s current skills and their target role, suggest 8-12 highly relevant skills they should add to their resume. Return ONLY a JSON array of skill name strings, no explanation. Example: ["Docker", "Kubernetes", "CI/CD"]'
+        },
+        {
+          role: 'user',
+          content: `Target Role: ${targetRole || 'Software Engineer'}\n\nCurrent Skills: ${(currentSkills || []).join(', ') || 'None listed'}\n\nSuggest additional skills to add:`
+        }
+      ],
+      max_tokens: 300,
+      temperature: 0.7
     });
-
-    if (!resume) {
-      return res.status(404).json({
-        success: false,
-        error: 'Resume not found'
-      });
+    const raw = completion.choices[0]?.message?.content?.trim() || '[]';
+    let suggestions = [];
+    try {
+      const match = raw.match(/\[.*\]/s);
+      suggestions = match ? JSON.parse(match[0]) : [];
+    } catch {
+      suggestions = [];
     }
-
-    // Delete from Cloudinary if exists
-    if (resume.uploadedResume && resume.uploadedResume.publicId) {
-      await deleteFromCloudinary(resume.uploadedResume.publicId, 'raw');
-    }
-
-    await Resume.findByIdAndDelete(req.params.id);
-
-    res.json({
-      success: true,
-      message: 'Resume deleted successfully'
-    });
+    res.json({ success: true, suggestions });
   } catch (error) {
-    console.error('Delete resume error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message || 'Failed to delete resume' 
-    });
+    console.error('Skill suggestions error:', error);
+    res.status(500).json({ success: false, error: error.message || 'Failed to get suggestions' });
   }
 });
 
@@ -326,11 +269,18 @@ router.post('/upload',
   auth, 
   async (req, res, next) => {
     try {
+      console.log(`[${new Date().toISOString()}] 🔑 Authentication successful for user ID: ${req.user._id}`);
+      if (req.isGuest || req.user?.isGuest || req.user?.role === 'guest') {
+        return res.status(403).json({
+          success: false,
+          error: 'Guest users cannot perform this action. Please sign up or log in.'
+        });
+      }
       const count = await Resume.countDocuments({ user: req.user._id });
-      if (count >= 2) {
+      if (count >= 10) {
         return res.status(400).json({
           success: false,
-          error: 'Maximum 2 resumes allowed per user'
+          error: 'Maximum 10 resumes allowed per user'
         });
       }
       next();
@@ -340,48 +290,56 @@ router.post('/upload',
     }
   },
   (req, res, next) => {
+    console.log(`[${new Date().toISOString()}] 📥 File upload request received via Multer`);
     uploadResume.single('resume')(req, res, (err) => {
       if (err) {
+        console.error(`[${new Date().toISOString()}] ❌ File validation/upload failed:`, err);
         return res.status(400).json({
           success: false,
           error: err.message || 'File upload failed'
         });
       }
+      console.log(`[${new Date().toISOString()}] 💾 File validated and stored: ${req.file ? req.file.originalname : 'None'}`);
       next();
     });
   }, 
   async (req, res) => {
+  const startTime = Date.now();
   try {
-    console.log('📤 Starting resume upload process...');
+    console.log(`[${new Date().toISOString()}] 📤 Resume upload processing started`);
     
     if (!req.file) {
+      console.warn(`[${new Date().toISOString()}] ⚠️ No file uploaded in request`);
       return res.status(400).json({
         success: false,
         error: 'No file uploaded'
       });
     }
 
-    console.log('📄 File received:', req.file.originalname);
+    console.log(`[${new Date().toISOString()}] 📄 File details: Name="${req.file.originalname}", Path="${req.file.path}"`);
 
     // Parse the resume
     let parsedData = {};
     let parseError = null;
+    const parseStart = Date.now();
     try {
-      console.log('🔍 Starting resume parsing...');
+      console.log(`[${new Date().toISOString()}] 🔍 Starting PDF/Word text extraction & parsing...`);
       parsedData = await parseResumePDF(req.file.path, req.file.originalname);
-      console.log('✅ Resume parsing completed successfully');
+      console.log(`[${new Date().toISOString()}] 🟢 PDF text extracted and parsed successfully in ${Date.now() - parseStart}ms`);
     } catch (parsingErr) {
-      // Use a different variable name to avoid shadowing the outer parseError
-      console.error('❌ Resume parse error:', parsingErr);
+      console.error(`[${new Date().toISOString()}] ❌ Resume parse error after ${Date.now() - parseStart}ms:`, parsingErr);
       parseError = parsingErr.message || 'Parsing failed';
     }
 
     // Run AI Resume Intelligence Engine Optimization
     let optimizedData = {};
+    const optStart = Date.now();
     try {
+      console.log(`[${new Date().toISOString()}] 🧠 AI processing started: optimizing parsed resume...`);
       optimizedData = await optimizeParsedResume(parsedData);
+      console.log(`[${new Date().toISOString()}] 🟢 AI optimization completed in ${Date.now() - optStart}ms`);
     } catch (optErr) {
-      console.error('❌ Resume optimization error:', optErr);
+      console.error(`[${new Date().toISOString()}] ❌ Resume optimization error after ${Date.now() - optStart}ms:`, optErr);
       optimizedData = parsedData; // Fallback to raw parsed data
     }
 
@@ -492,10 +450,10 @@ router.post('/upload',
       hrRecommendations: optimizedData.hrRecommendations || []
     };
 
+    const dbStart = Date.now();
     const resume = new Resume(resumeData);
     await resume.save();
-
-    console.log('✅ Resume created successfully:', resume._id);
+    console.log(`[${new Date().toISOString()}] 💾 Database updated: Resume saved successfully in ${Date.now() - dbStart}ms (ID: ${resume._id})`);
 
     // Calculate AI parsing confidence score (0-100)
     let scoreCount = 0;
@@ -521,18 +479,25 @@ router.post('/upload',
     };
 
     // Add parsing warnings if any
+    const warnings = [];
     if (parseError) {
-      responseData.warning = `Parsing completed with some issues: ${parseError}`;
+      warnings.push(`Parsing completed with some issues: ${parseError}`);
     }
     if (confidenceScore < 50) {
-      responseData.warning = 'Resume parsing had low confidence. Please review and update the extracted information.';
+      warnings.push('Resume parsing had low confidence. Please review and update the extracted information.');
+    }
+    if (warnings.length > 0) {
+      responseData.warning = warnings.join(' | ');
     }
 
-    console.log(`📊 Parsing confidence score: ${confidenceScore}%`);
+    console.log(`[${new Date().toISOString()}] 📊 Parsing confidence score: ${confidenceScore}%`);
 
+    const totalDuration = Date.now() - startTime;
+    console.log(`[${new Date().toISOString()}] 🚀 Response sent. Total request duration: ${totalDuration}ms`);
     res.json(responseData);
   } catch (error) {
-    console.error('❌ Upload resume error:', error);
+    const totalDuration = Date.now() - startTime;
+    console.error(`[${new Date().toISOString()}] ❌ Upload resume error after ${totalDuration}ms:`, error);
     if (req.file && req.file.filename) {
       await deleteFromCloudinary(req.file.filename, 'raw');
     }
@@ -586,6 +551,160 @@ function determineVersionTag(parsedData) {
   return 'General';
 }
 
+// ========== GET SINGLE RESUME ==========
+router.get('/:id', auth, async (req, res) => {
+  try {
+    const resume = await Resume.findOne({ 
+      _id: req.params.id, 
+      user: req.user._id 
+    });
+
+    if (!resume) {
+      return res.status(404).json({
+        success: false,
+        error: 'Resume not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      data: resume
+    });
+  } catch (error) {
+    console.error('Get resume error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message || 'Failed to fetch resume' 
+    });
+  }
+});
+
+// ========== UPDATE RESUME ==========
+router.put('/:id', auth, rejectGuest, async (req, res) => {
+  try {
+    console.log('📝 Update resume request:', req.params.id);
+
+    const resume = await Resume.findOne({ 
+      _id: req.params.id, 
+      user: req.user._id 
+    });
+
+    if (!resume) {
+      return res.status(404).json({
+        success: false,
+        error: 'Resume not found'
+      });
+    }
+
+    if (req.body.personalInfo) {
+      resume.personalInfo = {
+        ...resume.personalInfo,
+        ...req.body.personalInfo
+      };
+    }
+
+    if (req.body.professionalSummary) {
+      resume.professionalSummary = {
+        ...resume.professionalSummary,
+        ...req.body.professionalSummary
+      };
+    }
+
+    if (req.body.targetJob) {
+      resume.targetJob = {
+        ...resume.targetJob,
+        ...req.body.targetJob
+      };
+    }
+
+    if (req.body.targetJobs !== undefined) {
+      resume.targetJobs = req.body.targetJobs;
+    }
+
+    if (req.body.settings) {
+      resume.settings = {
+        ...resume.settings,
+        ...req.body.settings
+      };
+    }
+
+    const arrayFields = ['education', 'skills', 'workExperience', 'certifications', 'projects', 'languages', 'references', 'interests'];
+    arrayFields.forEach(field => {
+      if (req.body[field] !== undefined) {
+        resume[field] = req.body[field];
+      }
+    });
+
+    if (req.body.template) {
+      resume.template = req.body.template;
+    }
+
+    if (req.body.uploadedResume) {
+      resume.uploadedResume = {
+        ...resume.uploadedResume,
+        ...req.body.uploadedResume
+      };
+    }
+
+    await resume.save();
+
+    console.log('✅ Resume updated successfully:', resume._id);
+
+    // 🧠 Fire-and-forget: re-run AI enrichment + invalidate skill gap cache
+    setImmediate(() => {
+      triggerCareerProfileEnrichment(resume._id.toString(), req.user._id.toString());
+      invalidateCacheForResume(resume._id.toString());
+    });
+
+    res.json({
+      success: true,
+      data: resume,
+      message: 'Resume updated successfully'
+    });
+  } catch (error) {
+    console.error('❌ Update resume error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message || 'Failed to update resume'
+    });
+  }
+});
+
+// ========== DELETE RESUME ==========
+router.delete('/:id', auth, rejectGuest, async (req, res) => {
+  try {
+    const resume = await Resume.findOne({ 
+      _id: req.params.id, 
+      user: req.user._id 
+    });
+
+    if (!resume) {
+      return res.status(404).json({
+        success: false,
+        error: 'Resume not found'
+      });
+    }
+
+    // Delete from Cloudinary if exists
+    if (resume.uploadedResume && resume.uploadedResume.publicId) {
+      await deleteFromCloudinary(resume.uploadedResume.publicId, 'raw');
+    }
+
+    await Resume.findByIdAndDelete(req.params.id);
+
+    res.json({
+      success: true,
+      message: 'Resume deleted successfully'
+    });
+  } catch (error) {
+    console.error('Delete resume error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message || 'Failed to delete resume' 
+    });
+  }
+});
+
 // ========== GET RECOMMENDATIONS ==========
 router.get('/:id/recommendations', auth, async (req, res) => {
   try {
@@ -617,7 +736,7 @@ router.get('/:id/recommendations', auth, async (req, res) => {
 });
 
 // ========== UPDATE TEMPLATE ==========
-router.put('/:id/template', auth, async (req, res) => {
+router.put('/:id/template', auth, rejectGuest, async (req, res) => {
   try {
     const { template } = req.body;
     // Synced with Resume.js model enum — all 13 templates allowed
@@ -843,22 +962,8 @@ router.get('/:id/debug', auth, async (req, res) => {
 // after. The real fix is that /primary was previously AFTER /:id causing 404s.
 // The routing bug is resolved: module.exports is now at the very bottom.
 
-// GET /api/resume/primary
-// Returns the user's primary resume (isPrimary=true, else most recently updated)
-router.get('/primary', auth, async (req, res) => {
-  try {
-    let resume = await Resume.findOne({ user: req.user._id, isPrimary: true });
-    if (!resume) {
-      resume = await Resume.findOne({ user: req.user._id }).sort({ updatedAt: -1 });
-    }
-    if (!resume) {
-      return res.status(404).json({ success: false, error: 'No resume found' });
-    }
-    res.json({ success: true, data: resume });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
+// GET /api/resume/primary - MOVED TO TOP OF FILE TO PREVENT SHADOWING BY /:id
+// (Duplicate placeholder removed)
 
 // GET /api/resume/:id/career-profile
 // Returns the AI-generated career profile for a specific resume
@@ -913,7 +1018,7 @@ router.get('/:id/career-profile', auth, async (req, res) => {
 
 // POST /api/resume/:id/career-profile/refresh
 // Manually re-trigger the AI enrichment pipeline for a resume
-router.post('/:id/career-profile/refresh', auth, async (req, res) => {
+router.post('/:id/career-profile/refresh', auth, rejectGuest, async (req, res) => {
   try {
     const resume = await Resume.findOne({ _id: req.params.id, user: req.user._id }).select('_id');
     if (!resume) {
@@ -938,7 +1043,7 @@ router.post('/:id/career-profile/refresh', auth, async (req, res) => {
 
 // PATCH /api/resume/:id/version-tag
 // Update version tag and isPrimary flags (no AI needed — pure data)
-router.patch('/:id/version-tag', auth, async (req, res) => {
+router.patch('/:id/version-tag', auth, rejectGuest, async (req, res) => {
   try {
     const { versionTag, versionNotes, isPrimary } = req.body;
     const validTags = ['General', 'Backend', 'Frontend', 'AI/ML', 'Data Science',
@@ -982,7 +1087,7 @@ router.patch('/:id/version-tag', auth, async (req, res) => {
 // ========== DUPLICATE RESUME ==========
 // POST /api/resume/:id/duplicate
 // Duplicates an existing resume (creates a copy with "Copy of [FirstName]")
-router.post('/:id/duplicate', auth, checkResumeLimit, async (req, res) => {
+router.post('/:id/duplicate', auth, rejectGuest, checkResumeLimit, async (req, res) => {
   try {
     const original = await Resume.findOne({ _id: req.params.id, user: req.user._id });
     if (!original) {
@@ -1023,7 +1128,7 @@ router.post('/:id/duplicate', auth, checkResumeLimit, async (req, res) => {
 // POST /api/resume/:id/tailor
 // Duplicates the source resume, tailors it to target job requirements using GPT-4o-mini,
 // saves it as a new version draft, and triggers asynchronous career intelligence enrichment.
-router.post('/:id/tailor', auth, checkResumeLimit, async (req, res) => {
+router.post('/:id/tailor', auth, rejectGuest, checkResumeLimit, async (req, res) => {
   try {
     const { jobId, jobDescription } = req.body;
     if (!jobId && !jobDescription) {
@@ -1068,6 +1173,9 @@ router.get('/:id/pdf', auth, async (req, res) => {
     if (!resume) {
       return res.status(404).json({ success: false, error: 'Resume not found' });
     }
+
+    // Track download
+    await resume.trackDownload();
 
     const filename = `${resume.personalInfo?.firstName || 'resume'}_${resume.versionTag || 'version'}.pdf`.toLowerCase().replace(/\s+/g, '_');
 
@@ -1138,7 +1246,7 @@ router.post('/:id/check-fit', auth, async (req, res) => {
 // ========== OPTIMIZE RESUME (FLOW C - INSTANT AI MATCH) ==========
 // POST /api/resume/:id/optimize
 // Optimizes and tailors an existing parsed resume for a target job role & template.
-router.post('/:id/optimize', auth, checkResumeLimit, async (req, res) => {
+router.post('/:id/optimize', auth, rejectGuest, checkResumeLimit, async (req, res) => {
   try {
     const { jobTitle, jobDescription, jobId, template, industry, jobType } = req.body;
     if (!jobTitle) {
@@ -1190,71 +1298,204 @@ router.post('/:id/optimize', auth, checkResumeLimit, async (req, res) => {
   }
 });
 
-// ========== AI ENHANCE TEXT (Lightweight) ==========
-// POST /api/resume/enhance-text
-// Simple, fast GPT call for AI Enhance buttons in Work, Projects, Skills, Summary.
-router.post('/enhance-text', auth, async (req, res) => {
+// POST /api/resume/enhance-text and /suggest-skills - MOVED TO TOP OF FILE TO PREVENT SHADOWING
+// (Duplicate placeholders removed)
+
+// ========== AI RESUME INTELLIGENCE ENGINE - FULL OPTIMIZATION ==========
+// POST /api/resume/:id/ai-optimize
+// Implements the MASTER PROMPT requirements for world-class AI resume optimization
+router.post('/:id/ai-optimize', auth, rejectGuest, async (req, res) => {
   try {
-    const { text, context } = req.body;
-    if (!text || !text.trim()) {
-      return res.status(400).json({ success: false, error: 'text is required' });
+    const resume = await Resume.findOne({ _id: req.params.id, user: req.user._id });
+    if (!resume) {
+      return res.status(404).json({ success: false, error: 'Resume not found' });
     }
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [
-        {
-          role: 'system',
-          content: 'You are an expert ATS resume writer. Rewrite the given text using strong action verbs, the STAR method, and quantifiable achievements where possible. Return ONLY the rewritten text — no labels, no preamble, no markdown.'
-        },
-        {
-          role: 'user',
-          content: `Context: ${context || 'general resume content'}\n\nText to enhance:\n${text.trim()}`
-        }
-      ],
-      max_tokens: 500,
-      temperature: 0.7
+
+    console.log('🧠 AI Resume Intelligence Engine: Starting comprehensive optimization...');
+
+    // Create structured resume data for AI processing
+    const resumeForAI = {
+      personalInfo: resume.personalInfo || {},
+      professionalSummary: resume.professionalSummary || {},
+      workExperience: resume.workExperience || [],
+      education: resume.education || [],
+      skills: resume.skills || [],
+      projects: resume.projects || [],
+      certifications: resume.certifications || [],
+      languages: resume.languages || [],
+      targetJob: resume.targetJob || {},
+      targetJobs: resume.targetJobs || []
+    };
+
+    // Run the Master AI Resume Intelligence Engine
+    const { optimizeParsedResume } = require('../services/resumeIntelligenceService');
+    const optimizedData = await optimizeParsedResume(resumeForAI);
+
+    // Update resume with AI-optimized content
+    resume.careerLevel = optimizedData.careerLevel || resume.careerLevel;
+    resume.industry = optimizedData.industry || resume.industry;
+    resume.targetRole = optimizedData.targetRole || resume.targetRole;
+    resume.professionalBrand = optimizedData.professionalBrand || resume.professionalBrand;
+    
+    resume.personalBranding = {
+      ...(resume.personalBranding || {}),
+      ...(optimizedData.personalBranding || {})
+    };
+    
+    resume.careerHighlights = optimizedData.careerHighlights || resume.careerHighlights || [];
+    resume.coreCompetencies = optimizedData.coreCompetencies || resume.coreCompetencies || [];
+    resume.atsKeywords = optimizedData.atsKeywords || resume.atsKeywords || [];
+    resume.missingKeywords = optimizedData.missingKeywords || resume.missingKeywords || [];
+    resume.keywordMatchPercentage = optimizedData.keywordMatchPercentage || resume.keywordMatchPercentage || 0;
+    
+    resume.resumeScores = {
+      ...(resume.resumeScores || {}),
+      ...(optimizedData.resumeScores || {})
+    };
+    
+    resume.hrScorecard = {
+      ...(resume.hrScorecard || {}),
+      ...(optimizedData.hrScorecard || {})
+    };
+    
+    resume.hiringDecision = {
+      ...(resume.hiringDecision || {}),
+      ...(optimizedData.hiringDecision || {})
+    };
+    
+    resume.industryBenchmarking = {
+      ...(resume.industryBenchmarking || {}),
+      ...(optimizedData.industryBenchmarking || {})
+    };
+    
+    resume.prioritizedImprovementPlan = optimizedData.prioritizedImprovementPlan || resume.prioritizedImprovementPlan || [];
+    resume.missingSkills = optimizedData.missingSkills || resume.missingSkills || [];
+    resume.strengths = optimizedData.strengths || resume.strengths || [];
+    resume.weaknesses = optimizedData.weaknesses || resume.weaknesses || [];
+    
+    // Store AI-optimized versions
+    resume.optimizedSummary = optimizedData.optimizedSummary || resume.optimizedSummary;
+    resume.optimizedExperience = optimizedData.optimizedExperience || resume.optimizedExperience;
+    resume.optimizedProjects = optimizedData.optimizedProjects || resume.optimizedProjects;
+    resume.optimizedSkills = optimizedData.optimizedSkills || resume.optimizedSkills;
+    resume.hrRecommendations = optimizedData.hrRecommendations || resume.hrRecommendations || [];
+
+    await resume.save();
+
+    console.log('✅ AI Resume Intelligence Engine: Optimization completed successfully');
+
+    res.json({
+      success: true,
+      data: {
+        careerLevel: resume.careerLevel,
+        industry: resume.industry,
+        targetRole: resume.targetRole,
+        professionalBrand: resume.professionalBrand,
+        personalBranding: resume.personalBranding,
+        careerHighlights: resume.careerHighlights,
+        coreCompetencies: resume.coreCompetencies,
+        atsKeywords: resume.atsKeywords,
+        missingKeywords: resume.missingKeywords,
+        keywordMatchPercentage: resume.keywordMatchPercentage,
+        resumeScores: resume.resumeScores,
+        hrScorecard: resume.hrScorecard,
+        hiringDecision: resume.hiringDecision,
+        industryBenchmarking: resume.industryBenchmarking,
+        prioritizedImprovementPlan: resume.prioritizedImprovementPlan,
+        missingSkills: resume.missingSkills,
+        strengths: resume.strengths,
+        weaknesses: resume.weaknesses,
+        optimizedSummary: resume.optimizedSummary,
+        optimizedExperience: resume.optimizedExperience,
+        optimizedProjects: resume.optimizedProjects,
+        optimizedSkills: resume.optimizedSkills,
+        hrRecommendations: resume.hrRecommendations,
+        hasOptimizations: !!(resume.optimizedSummary || resume.optimizedExperience || resume.optimizedSkills)
+      },
+      message: 'Resume optimized using AI Resume Intelligence Engine'
     });
-    const enhanced = completion.choices[0]?.message?.content?.trim() || text;
-    res.json({ success: true, enhanced });
   } catch (error) {
-    console.error('Enhance text error:', error);
-    res.status(500).json({ success: false, error: error.message || 'Failed to enhance text' });
+    console.error('❌ AI Resume Intelligence Engine error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message || 'Failed to optimize resume with AI' 
+    });
   }
 });
 
-// ========== AI SKILL SUGGESTIONS (Lightweight) ==========
-// POST /api/resume/suggest-skills
-router.post('/suggest-skills', auth, async (req, res) => {
+// ========== AI-ENHANCED PDF GENERATION ==========
+// GET /api/resume/:id/ai-pdf
+// Generates a Fortune 500-level PDF using AI-optimized content
+router.get('/:id/ai-pdf', auth, async (req, res) => {
   try {
-    const { currentSkills, targetRole } = req.body;
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [
-        {
-          role: 'system',
-          content: 'You are a career advisor. Given the user\'s current skills and their target role, suggest 8-12 highly relevant skills they should add to their resume. Return ONLY a JSON array of skill name strings, no explanation. Example: ["Docker", "Kubernetes", "CI/CD"]'
-        },
-        {
-          role: 'user',
-          content: `Target Role: ${targetRole || 'Software Engineer'}\n\nCurrent Skills: ${(currentSkills || []).join(', ') || 'None listed'}\n\nSuggest additional skills to add:`
-        }
-      ],
-      max_tokens: 300,
-      temperature: 0.7
-    });
-    const raw = completion.choices[0]?.message?.content?.trim() || '[]';
-    let suggestions = [];
-    try {
-      // Extract JSON array from response
-      const match = raw.match(/\[.*\]/s);
-      suggestions = match ? JSON.parse(match[0]) : [];
-    } catch {
-      suggestions = [];
+    const resume = await Resume.findOne({ _id: req.params.id, user: req.user._id });
+    if (!resume) {
+      return res.status(404).json({ success: false, error: 'Resume not found' });
     }
-    res.json({ success: true, suggestions });
+
+    // Check if resume has AI optimizations
+    const hasOptimizations = !!(resume.optimizedSummary || resume.optimizedExperience || resume.optimizedSkills);
+    
+    if (!hasOptimizations) {
+      // If no AI optimizations exist, run them first
+      console.log('🧠 No AI optimizations found. Running AI Intelligence Engine first...');
+      
+      const resumeForAI = {
+        personalInfo: resume.personalInfo || {},
+        professionalSummary: resume.professionalSummary || {},
+        workExperience: resume.workExperience || [],
+        education: resume.education || [],
+        skills: resume.skills || [],
+        projects: resume.projects || [],
+        certifications: resume.certifications || [],
+        languages: resume.languages || [],
+        targetJob: resume.targetJob || {},
+        targetJobs: resume.targetJobs || []
+      };
+
+      const { optimizeParsedResume } = require('../services/resumeIntelligenceService');
+      const optimizedData = await optimizeParsedResume(resumeForAI);
+
+      // Update resume with AI-optimized content
+      resume.optimizedSummary = optimizedData.optimizedSummary || resume.professionalSummary?.summary;
+      resume.optimizedExperience = optimizedData.optimizedExperience || resume.workExperience;
+      resume.optimizedProjects = optimizedData.optimizedProjects || resume.projects;
+      resume.optimizedSkills = optimizedData.optimizedSkills || resume.skills;
+      resume.personalBranding = optimizedData.personalBranding || {};
+      resume.coreCompetencies = optimizedData.coreCompetencies || [];
+      
+      await resume.save();
+      console.log('✅ AI optimizations applied and saved');
+    }
+
+    // Track download
+    await resume.trackDownload();
+
+    // Generate AI-enhanced filename
+    const firstName = resume.personalInfo?.firstName || 'Professional';
+    const targetRole = resume.targetRole || resume.professionalSummary?.title || 'Candidate';
+    const cleanTargetRole = targetRole.replace(/[^a-zA-Z0-9]/g, '_');
+    const filename = `${firstName}_${cleanTargetRole}_AI_Enhanced_Resume.pdf`.toLowerCase();
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('X-AI-Enhanced', 'true');
+    res.setHeader('X-Resume-Version', resume.versionTag || 'General');
+
+    // Generate the AI-enhanced PDF
+    generateResumePDF(resume, res);
+
   } catch (error) {
-    console.error('Skill suggestions error:', error);
-    res.status(500).json({ success: false, error: error.message || 'Failed to get suggestions' });
+    console.error('❌ AI-Enhanced PDF generation error:', error);
+    
+    // Only send error json if headers haven't been sent yet
+    if (!res.headersSent) {
+      res.status(500).json({
+        success: false,
+        error: error.message || 'Failed to generate AI-enhanced PDF'
+      });
+    }
   }
 });
 

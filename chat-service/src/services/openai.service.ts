@@ -23,6 +23,7 @@ export class OpenAIService {
       this.openaiClient = new OpenAI({
         apiKey: env.OPENAI_API_KEY,
         timeout: 25000, // 25s timeout for resilient production handling
+        maxRetries: 0,
       });
     }
   }

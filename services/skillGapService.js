@@ -20,7 +20,13 @@ const SkillGapCache = require('../models/SkillGapCache');
 
 let openai;
 function getOpenAI() {
-  if (!openai) openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  if (!openai) {
+    openai = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+      timeout: 10000,
+      maxRetries: 0
+    });
+  }
   return openai;
 }
 
