@@ -1,46 +1,81 @@
+// models/Chat.js
 const mongoose = require("mongoose");
 
 const messageSchema = new mongoose.Schema({
-  conversationId:{
+  conversationId: {
     type: mongoose.Schema.Types.ObjectId,
-    ref:"Conversation"
+    ref: "Conversation",
+    required: true
   },
-  sender:{
+  sender: {
     type: mongoose.Schema.Types.ObjectId,
-    ref:"User"
+    ref: "User",
+    required: true
   },
-  text:String,
-  messageType: { 
-    type: String, 
-    enum: ['text', 'image', 'video', 'audio', 'document', 'location', 'call_log'], // Added 'call_log'
-    default: 'text' 
+  text: String,
+  messageType: {
+    type: String,
+    enum: ['text', 'image', 'video', 'audio', 'document', 'location', 'call_log'],
+    default: 'text'
   },
-  mediaUrl: String, // URL from Cloudinary/S3
+  mediaUrl: String,
+  mediaMetadata: {
+    fileName: String,
+    fileSize: Number,
+    fileType: String,
+    duration: Number // For audio/video
+  },
   location: {
     latitude: Number,
     longitude: Number
   },
-  duration: { type: Number }, // For voice messages
-  createdAt:{
-    type:Date,
-    default:Date.now
+  isRead: {
+    type: Boolean,
+    default: false
+  },
+  readAt: Date,
+  createdAt: {
+    type: Date,
+    default: Date.now
   }
 });
 
 const conversationSchema = new mongoose.Schema({
-  participants:[{
+  participants: [{
     type: mongoose.Schema.Types.ObjectId,
-    ref:"User"
+    ref: "User",
+    required: true
   }],
-  lastMessage:String,
-  
-  updatedAt:{
-    type:Date,
-    default:Date.now
+  lastMessage: {
+    text: String,
+    sender: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User"
+    },
+    createdAt: Date,
+    messageType: String
+  },
+  unreadCount: {
+    type: Number,
+    default: 0
+  },
+  lastActivity: {
+    type: Date,
+    default: Date.now
+  },
+  createdAt: {
+    type: Date,
+    default: Date.now
   }
 });
 
+// Index for faster queries
+conversationSchema.index({ participants: 1 });
+conversationSchema.index({ updatedAt: -1 });
+messageSchema.index({ conversationId: 1, createdAt: -1 });
+messageSchema.index({ conversationId: 1, isRead: 1 });
+
 module.exports = {
-  Message:mongoose.model("Message",messageSchema),
-  Conversation:mongoose.model("Conversation",conversationSchema)
+  Message: mongoose.model("Message", messageSchema),
+  Conversation: mongoose.model("Conversation", conversationSchema)
 };

@@ -6,7 +6,7 @@ module.exports = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
     
-    // FIX 1: Allow guest access without token
+    // If no token, user is guest
     if (!authHeader) {
       req.user = {
         id: 'guest-user',
@@ -29,7 +29,10 @@ module.exports = async (req, res, next) => {
     const token = parts[1];
     
     if (!token || token === "undefined" || token === "null") {
-      return res.status(401).json({ message: "Token is missing or null" });
+      req.isGuest = true;
+      req.userId = 'guest-user';
+      req.userRole = 'guest';
+      return next();
     }
     
     // Handle guest token
@@ -47,21 +50,54 @@ module.exports = async (req, res, next) => {
       return next();
     }
 
+    // Verify JWT
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     
+    // Get user from database
     const user = await User.findById(decoded.id).select('-password');
     if (!user) {
       return res.status(401).json({ message: "User not found" });
     }
     
+    // Set user data on request
     req.user = user;
     req.userId = decoded.id;
-    req.userRole = decoded.role;
+    req.userRole = user.role || decoded.role || 'student';
     req.isGuest = false;
     next();
     
   } catch (err) {
-    // FIX 2: Allow expired/invalid tokens as guest
+    // If token is invalid but not expired, treat as guest
+    if (err.name === 'JsonWebTokenError') {
+      req.user = {
+        id: 'guest-user',
+        role: 'guest',
+        email: 'guest@example.com',
+        name: 'Guest User',
+        isGuest: true
+      };
+      req.isGuest = true;
+      req.userId = 'guest-user';
+      req.userRole = 'guest';
+      return next();
+    }
+    
+    // If token is expired, treat as guest
+    if (err.name === 'TokenExpiredError') {
+      req.user = {
+        id: 'guest-user',
+        role: 'guest',
+        email: 'guest@example.com',
+        name: 'Guest User',
+        isGuest: true
+      };
+      req.isGuest = true;
+      req.userId = 'guest-user';
+      req.userRole = 'guest';
+      return next();
+    }
+    
+    // Other errors - treat as guest
     req.user = {
       id: 'guest-user',
       role: 'guest',

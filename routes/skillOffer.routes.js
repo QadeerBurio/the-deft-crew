@@ -1,0 +1,254 @@
+const express = require('express');
+const router = express.Router();
+const SkillOffer = require('../models/SkillOffer');
+const Listing = require('../models/Listing');
+const Match = require('../models/Match');
+const auth = require('../middleware/auth.middleware');
+const { Conversation } = require('../models/Chat');
+
+// ==================== CREATE OFFER ====================
+router.post('/', auth, async (req, res) => {
+  try {
+    const { listingId, message, offeredSkillName, offeredSkillLevel, proposedPrice, applicationNotes } = req.body;
+    const offerorId = req.userId || req.user?._id || req.user?.id;
+
+    if (!offerorId) {
+      return res.status(401).json({ error: 'User ID required' });
+    }
+
+    // Check if listing exists
+    const listing = await Listing.findById(listingId);
+    if (!listing) {
+      return res.status(404).json({ error: 'Listing not found' });
+    }
+
+    // Check if listing is open
+    if (listing.status !== 'open') {
+      return res.status(400).json({ error: 'This listing is no longer accepting offers' });
+    }
+
+    // Check if user is the owner
+    if (listing.ownerId === offerorId) {
+      return res.status(400).json({ error: 'You cannot offer on your own listing' });
+    }
+
+    // Check for existing pending offer
+    const existingOffer = await SkillOffer.findOne({
+      listingId,
+      offerorId,
+      status: { $in: ['pending', 'accepted'] }
+    });
+
+    if (existingOffer) {
+      return res.status(409).json({ error: 'You already have a pending offer for this listing' });
+    }
+
+    // Create the offer
+    const offer = new SkillOffer({
+      listingId,
+      offerorId,
+      message,
+      offeredSkillName,
+      offeredSkillLevel,
+      proposedPrice,
+      applicationNotes
+    });
+
+    await offer.save();
+
+    res.status(201).json({
+      success: true,
+      message: 'Offer submitted successfully',
+      offer
+    });
+
+  } catch (err) {
+    console.error('Error creating offer:', err);
+    res.status(500).json({ error: err.message || 'Failed to create offer' });
+  }
+});
+
+// ==================== GET OFFERS FOR LISTING ====================
+router.get('/listing/:listingId', auth, async (req, res) => {
+  try {
+    const { listingId } = req.params;
+    const userId = req.userId || req.user?._id || req.user?.id;
+
+    const listing = await Listing.findById(listingId);
+    if (!listing) {
+      return res.status(404).json({ error: 'Listing not found' });
+    }
+
+    // Only listing owner can view all offers
+    if (listing.ownerId !== userId) {
+      return res.status(403).json({ error: 'Unauthorized: Only the listing owner can view offers' });
+    }
+
+    const offers = await SkillOffer.find({ listingId })
+      .sort({ createdAt: -1 })
+      .populate('offerorId', 'name email profileImage');
+
+    res.json({
+      success: true,
+      offers
+    });
+
+  } catch (err) {
+    console.error('Error fetching offers:', err);
+    res.status(500).json({ error: 'Failed to fetch offers' });
+  }
+});
+
+// ==================== GET USER'S OFFERS ====================
+router.get('/my-offers', auth, async (req, res) => {
+  try {
+    const userId = req.userId || req.user?._id || req.user?.id;
+
+    if (!userId) {
+      return res.status(401).json({ error: 'User ID required' });
+    }
+
+    const offers = await SkillOffer.find({ offerorId: userId })
+      .sort({ createdAt: -1 })
+      .populate('listingId', 'title type status ownerId skillOffered skillWanted')
+      .populate('matchId');
+
+    res.json({
+      success: true,
+      offers
+    });
+
+  } catch (err) {
+    console.error('Error fetching my offers:', err);
+    res.status(500).json({ error: 'Failed to fetch your offers' });
+  }
+});
+
+// ==================== UPDATE OFFER STATUS ====================
+router.patch('/:offerId/status', auth, async (req, res) => {
+  try {
+    const { offerId } = req.params;
+    const { status } = req.body;
+    const userId = req.userId || req.user?._id || req.user?.id;
+
+    if (!['accepted', 'rejected'].includes(status)) {
+      return res.status(400).json({ error: 'Invalid status. Must be "accepted" or "rejected"' });
+    }
+
+    const offer = await SkillOffer.findById(offerId);
+    if (!offer) {
+      return res.status(404).json({ error: 'Offer not found' });
+    }
+
+    // Check if offer is still pending
+    if (offer.status !== 'pending') {
+      return res.status(400).json({ error: 'This offer has already been processed' });
+    }
+
+    // Get the listing
+    const listing = await Listing.findById(offer.listingId);
+    if (!listing) {
+      return res.status(404).json({ error: 'Listing not found' });
+    }
+
+    // Verify user is listing owner
+    if (listing.ownerId !== userId) {
+      return res.status(403).json({ error: 'Unauthorized: You are not the listing owner' });
+    }
+
+    // Update offer status
+    offer.status = status;
+    await offer.save();
+
+    // If accepted, create a match
+    let match = null;
+    if (status === 'accepted') {
+      // Create a chat conversation
+      const conversation = new Conversation({
+        participants: [listing.ownerId, offer.offerorId],
+        lastMessage: 'Match created!',
+        unreadCount: 0,
+        lastActivity: new Date()
+      });
+      await conversation.save();
+
+      // Create the match
+      match = new Match({
+        listingId: listing._id,
+        offerId: offer._id,
+        listingOwnerId: listing.ownerId,
+        offerorId: offer.offerorId,
+        conversationId: conversation._id,
+        status: 'active',
+        acceptedAt: new Date()
+      });
+      await match.save();
+
+      // Update offer with matchId
+      offer.matchId = match._id;
+      await offer.save();
+
+      // Update listing status to matched
+      listing.status = 'matched';
+      await listing.save();
+
+      // Reject all other pending offers for this listing
+      await SkillOffer.updateMany(
+        { 
+          listingId: listing._id, 
+          _id: { $ne: offerId },
+          status: 'pending' 
+        },
+        { status: 'rejected' }
+      );
+    }
+
+    res.json({
+      success: true,
+      message: `Offer ${status}`,
+      offer,
+      match
+    });
+
+  } catch (err) {
+    console.error('Error updating offer:', err);
+    res.status(500).json({ error: err.message || 'Failed to update offer' });
+  }
+});
+
+// ==================== WITHDRAW OFFER ====================
+router.patch('/:offerId/withdraw', auth, async (req, res) => {
+  try {
+    const { offerId } = req.params;
+    const userId = req.userId || req.user?._id || req.user?.id;
+
+    const offer = await SkillOffer.findById(offerId);
+    if (!offer) {
+      return res.status(404).json({ error: 'Offer not found' });
+    }
+
+    // Only the offeror can withdraw
+    if (offer.offerorId !== userId) {
+      return res.status(403).json({ error: 'Unauthorized: You are not the offeror' });
+    }
+
+    if (offer.status !== 'pending') {
+      return res.status(400).json({ error: 'This offer cannot be withdrawn' });
+    }
+
+    offer.status = 'withdrawn';
+    await offer.save();
+
+    res.json({
+      success: true,
+      message: 'Offer withdrawn successfully',
+      offer
+    });
+
+  } catch (err) {
+    console.error('Error withdrawing offer:', err);
+    res.status(500).json({ error: 'Failed to withdraw offer' });
+  }
+});
+
+module.exports = router;

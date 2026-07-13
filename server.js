@@ -86,6 +86,13 @@ app.use("/api/traveler", require("./routes/traveler.routes"));
 app.use("/api/resume", require("./routes/resume.routes"));
 app.use("/api/v1", require("./chat-service/dist/routes/index").default);
 
+
+// // ============ SKILLSWAP ROUTES ============
+// ============ SKILLSWAP ROUTES ============
+app.use('/api/listings', require('./routes/listing.routes'));
+app.use('/api/skill-offers', require('./routes/skillOffer.routes'));
+app.use('/api/chat', require('./routes/chat.routes'));
+app.use('/api/inquiries', require('./routes/inquiry.routes'));
 // ---------------- SOCKET.IO CHAT & CALL HANDLER ----------------
 const { Message, Conversation } = require('./models/Chat');
 
