@@ -1,3 +1,4 @@
+// routes/skillOffer.routes.js
 const express = require('express');
 const router = express.Router();
 const SkillOffer = require('../models/SkillOffer');
@@ -5,12 +6,18 @@ const Listing = require('../models/Listing');
 const Match = require('../models/Match');
 const auth = require('../middleware/auth.middleware');
 const { Conversation } = require('../models/Chat');
+const mongoose = require('mongoose');
+
+// Helper to get user ID consistently
+const getUserId = (req) => {
+  return req.userId || req.user?._id || req.user?.id || req.user?.userId;
+};
 
 // ==================== CREATE OFFER ====================
 router.post('/', auth, async (req, res) => {
   try {
     const { listingId, message, offeredSkillName, offeredSkillLevel, proposedPrice, applicationNotes } = req.body;
-    const offerorId = req.userId || req.user?._id || req.user?.id;
+    const offerorId = getUserId(req);
 
     if (!offerorId) {
       return res.status(401).json({ error: 'User ID required' });
@@ -27,15 +34,15 @@ router.post('/', auth, async (req, res) => {
       return res.status(400).json({ error: 'This listing is no longer accepting offers' });
     }
 
-    // Check if user is the owner
-    if (listing.ownerId === offerorId) {
+    // Check if user is the owner - FIXED comparison
+    if (listing.ownerId.toString() === offerorId.toString()) {
       return res.status(400).json({ error: 'You cannot offer on your own listing' });
     }
 
     // Check for existing pending offer
     const existingOffer = await SkillOffer.findOne({
       listingId,
-      offerorId,
+      offerorId: offerorId.toString(),
       status: { $in: ['pending', 'accepted'] }
     });
 
@@ -46,7 +53,7 @@ router.post('/', auth, async (req, res) => {
     // Create the offer
     const offer = new SkillOffer({
       listingId,
-      offerorId,
+      offerorId: offerorId.toString(),
       message,
       offeredSkillName,
       offeredSkillLevel,
@@ -72,18 +79,31 @@ router.post('/', auth, async (req, res) => {
 router.get('/listing/:listingId', auth, async (req, res) => {
   try {
     const { listingId } = req.params;
-    const userId = req.userId || req.user?._id || req.user?.id;
+    const userId = getUserId(req);
+
+    if (!userId) {
+      return res.status(401).json({ error: 'User ID required' });
+    }
 
     const listing = await Listing.findById(listingId);
     if (!listing) {
       return res.status(404).json({ error: 'Listing not found' });
     }
 
+    // FIXED: Convert both to strings for comparison
+    const listingOwnerId = listing.ownerId.toString();
+    const currentUserId = userId.toString();
+
     // Only listing owner can view all offers
-    if (listing.ownerId !== userId) {
-      return res.status(403).json({ error: 'Unauthorized: Only the listing owner can view offers' });
+    if (listingOwnerId !== currentUserId) {
+      console.log('Auth failed - Listing owner:', listingOwnerId, 'Current user:', currentUserId);
+      return res.status(403).json({ 
+        error: 'Unauthorized: Only the listing owner can view offers',
+        debug: { listingOwnerId, currentUserId }
+      });
     }
 
+    // Fetch offers with populated data
     const offers = await SkillOffer.find({ listingId })
       .sort({ createdAt: -1 })
       .populate('offerorId', 'name email profileImage');
@@ -102,13 +122,13 @@ router.get('/listing/:listingId', auth, async (req, res) => {
 // ==================== GET USER'S OFFERS ====================
 router.get('/my-offers', auth, async (req, res) => {
   try {
-    const userId = req.userId || req.user?._id || req.user?.id;
+    const userId = getUserId(req);
 
     if (!userId) {
       return res.status(401).json({ error: 'User ID required' });
     }
 
-    const offers = await SkillOffer.find({ offerorId: userId })
+    const offers = await SkillOffer.find({ offerorId: userId.toString() })
       .sort({ createdAt: -1 })
       .populate('listingId', 'title type status ownerId skillOffered skillWanted')
       .populate('matchId');
@@ -129,7 +149,11 @@ router.patch('/:offerId/status', auth, async (req, res) => {
   try {
     const { offerId } = req.params;
     const { status } = req.body;
-    const userId = req.userId || req.user?._id || req.user?.id;
+    const userId = getUserId(req);
+
+    if (!userId) {
+      return res.status(401).json({ error: 'User ID required' });
+    }
 
     if (!['accepted', 'rejected'].includes(status)) {
       return res.status(400).json({ error: 'Invalid status. Must be "accepted" or "rejected"' });
@@ -151,8 +175,8 @@ router.patch('/:offerId/status', auth, async (req, res) => {
       return res.status(404).json({ error: 'Listing not found' });
     }
 
-    // Verify user is listing owner
-    if (listing.ownerId !== userId) {
+    // FIXED: Convert both to strings for comparison
+    if (listing.ownerId.toString() !== userId.toString()) {
       return res.status(403).json({ error: 'Unauthorized: You are not the listing owner' });
     }
 
@@ -165,7 +189,7 @@ router.patch('/:offerId/status', auth, async (req, res) => {
     if (status === 'accepted') {
       // Create a chat conversation
       const conversation = new Conversation({
-        participants: [listing.ownerId, offer.offerorId],
+        participants: [listing.ownerId.toString(), offer.offerorId.toString()],
         lastMessage: 'Match created!',
         unreadCount: 0,
         lastActivity: new Date()
@@ -176,8 +200,8 @@ router.patch('/:offerId/status', auth, async (req, res) => {
       match = new Match({
         listingId: listing._id,
         offerId: offer._id,
-        listingOwnerId: listing.ownerId,
-        offerorId: offer.offerorId,
+        listingOwnerId: listing.ownerId.toString(),
+        offerorId: offer.offerorId.toString(),
         conversationId: conversation._id,
         status: 'active',
         acceptedAt: new Date()
@@ -220,15 +244,15 @@ router.patch('/:offerId/status', auth, async (req, res) => {
 router.patch('/:offerId/withdraw', auth, async (req, res) => {
   try {
     const { offerId } = req.params;
-    const userId = req.userId || req.user?._id || req.user?.id;
+    const userId = getUserId(req);
 
     const offer = await SkillOffer.findById(offerId);
     if (!offer) {
       return res.status(404).json({ error: 'Offer not found' });
     }
 
-    // Only the offeror can withdraw
-    if (offer.offerorId !== userId) {
+    // FIXED: Convert both to strings for comparison
+    if (offer.offerorId.toString() !== userId.toString()) {
       return res.status(403).json({ error: 'Unauthorized: You are not the offeror' });
     }
 
