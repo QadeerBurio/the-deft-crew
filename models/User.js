@@ -41,6 +41,30 @@ const userSchema = new mongoose.Schema(
     idCardBack: { type: String, default: "" },
     livePicture: { type: String, default: "" },
 
+    // --- BRAND/EMPLOYEE LOGO ---
+    logo: { 
+      type: String, 
+      default: "" 
+    }, // For brand and employee company logo
+    brandName: { type: String }, // For brand role
+    companyName: { type: String }, // For employee role
+// In User model - add category field for brands
+category: { 
+  type: String, 
+  default: "General" 
+},
+isOnline: { 
+  type: Boolean, 
+  default: false 
+},
+isInStore: { 
+  type: Boolean, 
+  default: false 
+},
+address: { 
+  type: String, 
+  default: "" 
+},
     // --- STUDENT SPECIFICS ---
     rollNo: { type: String },
     phone: { type: String },
@@ -124,7 +148,7 @@ const userSchema = new mongoose.Schema(
     savedJobs: [{
       jobId: { type: mongoose.Schema.Types.ObjectId, ref: 'Job' },
       savedAt: { type: Date, default: Date.now },
-      tag: { type: String, default: '' }  // e.g. "Apply Later", "Dream Job"
+      tag: { type: String, default: '' }
     }],
     careerProfileId: {
       type: mongoose.Schema.Types.ObjectId,
@@ -143,12 +167,11 @@ const userSchema = new mongoose.Schema(
 );
 
 // ==================== PERFORMANCE INDEXES ====================
-userSchema.index({ role: 1, status: 1 });         // Admin user management queries
-userSchema.index({ university: 1, role: 1 });     // University-scoped filters
+userSchema.index({ role: 1, status: 1 });
+userSchema.index({ university: 1, role: 1 });
 
 // --- PRE-SAVE HOOK: AUTOMATIC REFERRAL CODE GENERATION ---
 userSchema.pre("save", async function () {
-  // Only generate a code for students who don't have one yet
   if (this.role === "student" && !this.referralCode) {
     let isUnique = false;
     let newCode = "";
@@ -170,10 +193,9 @@ userSchema.pre("save", async function () {
     if (isUnique) {
       this.referralCode = newCode;
     } else {
-      return next(new Error("Failed to generate a unique referral code."));
+      throw new Error("Failed to generate a unique referral code.");
     }
   }
-  // next();
 });
 
 module.exports = mongoose.model("User", userSchema);

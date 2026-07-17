@@ -46,22 +46,77 @@ const isAdmin = async (req, res, next) => {
   }
 };
 
-// --- USER MANAGEMENT ROUTES ---
+// ==================== USER MANAGEMENT ROUTES ====================
 
-// Get users by role (Used by AdminUserList.js)
+// ✅ Get users by ANY role (Student, Brand, Employee, Traveler)
 router.get("/users/:role", auth, isAdmin, async (req, res) => {
   try {
     const { role } = req.params;
+    // Validate role
+    const validRoles = ["student", "brand", "employee", "traveler", "admin"];
+    if (!validRoles.includes(role)) {
+      return res.status(400).json({ message: "Invalid role specified" });
+    }
+
     const users = await User.find({ role })
       .populate("university", "name")
-      .select("-password");
+      .populate("referredBy", "name email")
+      .select("-password")
+      .sort({ createdAt: -1 });
+
     res.json(users);
   } catch (err) {
+    console.error("Error fetching users:", err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// Toggle Verification (Approve/Revoke)
+// ✅ Get ALL users (for super admin)
+router.get("/users/all", auth, isAdmin, async (req, res) => {
+  try {
+    const users = await User.find()
+      .populate("university", "name")
+      .populate("referredBy", "name email")
+      .select("-password")
+      .sort({ createdAt: -1 });
+
+    // Group by role for statistics
+    const stats = {
+      total: users.length,
+      students: users.filter(u => u.role === "student").length,
+      brands: users.filter(u => u.role === "brand").length,
+      employees: users.filter(u => u.role === "employee").length,
+      travelers: users.filter(u => u.role === "traveler").length,
+      admins: users.filter(u => u.role === "admin").length,
+    };
+
+    res.json({ users, stats });
+  } catch (err) {
+    console.error("Error fetching all users:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ✅ Get single user details (with full profile)
+router.get("/users/details/:id", auth, isAdmin, async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id)
+      .populate("university", "name location")
+      .populate("referredBy", "name email role")
+      .select("-password");
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    res.json(user);
+  } catch (err) {
+    console.error("Error fetching user details:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ✅ Toggle User Verification (Approve/Revoke)
 router.post("/approve-user/:id", auth, isAdmin, async (req, res) => {
   try {
     const user = await User.findById(req.params.id);
@@ -69,8 +124,168 @@ router.post("/approve-user/:id", auth, isAdmin, async (req, res) => {
 
     user.status = user.status === "Verified" ? "Not Verified" : "Verified";
     await user.save();
-    res.json({ message: "Status Updated", user });
+
+    // Send notification to user
+    if (user.status === "Verified") {
+      await Notification.create({
+        recipient: user._id,
+        title: "Account Verified! ✅",
+        description: "Your account has been verified by the admin.",
+        type: "System",
+        icon: "checkmark-circle",
+      });
+    }
+
+    res.json({ message: "Status Updated", user: { ...user.toObject(), password: undefined } });
   } catch (err) {
+    console.error("Error toggling verification:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ✅ Update user role (Admin only)
+router.put("/users/role/:id", auth, isAdmin, async (req, res) => {
+  try {
+    const { role } = req.body;
+    const validRoles = ["student", "brand", "employee", "traveler", "admin"];
+    
+    if (!validRoles.includes(role)) {
+      return res.status(400).json({ message: "Invalid role" });
+    }
+
+    const user = await User.findByIdAndUpdate(
+      req.params.id,
+      { role },
+      { new: true }
+    ).select("-password");
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    res.json({ message: "Role updated successfully", user });
+  } catch (err) {
+    console.error("Error updating role:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ✅ Delete user (Admin only)
+router.delete("/users/:id", auth, isAdmin, async (req, res) => {
+  try {
+    const user = await User.findByIdAndDelete(req.params.id);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    res.json({ message: "User deleted successfully" });
+  } catch (err) {
+    console.error("Error deleting user:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ✅ Create user (Admin only - for adding brands/employees)
+router.post("/users/create", auth, isAdmin, async (req, res) => {
+  try {
+    const { name, email, password, role, phone, address, company, designation } = req.body;
+
+    // Check if user exists
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      return res.status(400).json({ message: "User with this email already exists" });
+    }
+
+    // Hash password
+    const bcrypt = require("bcryptjs");
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const newUser = new User({
+      name,
+      email,
+      password: hashedPassword,
+      role: role || "employee",
+      phone: phone || "",
+      address: address || "",
+      // Brand-specific fields
+      company: company || "",
+      designation: designation || "",
+      // Auto-verify if created by admin
+      status: "Verified",
+    });
+
+    await newUser.save();
+
+    // Send welcome email/notification
+    await Notification.create({
+      recipient: newUser._id,
+      title: `Welcome to TechDegree Club! 🎉`,
+      description: `Your account has been created. You can now login with your email: ${email}`,
+      type: "System",
+      icon: "sparkles",
+    });
+
+    res.status(201).json({
+      message: "User created successfully",
+      user: { ...newUser.toObject(), password: undefined }
+    });
+  } catch (err) {
+    console.error("Error creating user:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ✅ Get employee and brand users with credentials (show emails)
+router.get("/users/credentials/:role", auth, isAdmin, async (req, res) => {
+  try {
+    const { role } = req.params;
+    if (!["brand", "employee"].includes(role)) {
+      return res.status(400).json({ message: "Invalid role. Use 'brand' or 'employee'" });
+    }
+
+    const users = await User.find({ role })
+      .select("name email phone role status company designation createdAt")
+      .sort({ createdAt: -1 });
+
+    res.json(users);
+  } catch (err) {
+    console.error("Error fetching credentials:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ✅ Reset user password (Admin only)
+router.post("/users/reset-password/:id", auth, isAdmin, async (req, res) => {
+  try {
+    const { newPassword } = req.body;
+    if (!newPassword || newPassword.length < 6) {
+      return res.status(400).json({ message: "Password must be at least 6 characters" });
+    }
+
+    const bcrypt = require("bcryptjs");
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    const user = await User.findByIdAndUpdate(
+      req.params.id,
+      { password: hashedPassword },
+      { new: true }
+    ).select("-password");
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // Notify user
+    await Notification.create({
+      recipient: user._id,
+      title: "Password Reset 🔐",
+      description: "Your password has been reset by the admin.",
+      type: "System",
+      icon: "key",
+    });
+
+    res.json({ message: "Password reset successfully", user });
+  } catch (err) {
+    console.error("Error resetting password:", err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -857,299 +1072,6 @@ router.delete("/bookings/:id", auth, isAdmin, async (req, res) => {
 
 
 
-// ==================== COURSE MANAGEMENT ROUTES ====================
-
-// GET ALL COURSES (For Admin)
-router.get('/courses', auth, isAdmin, async (req, res) => {
-  try {
-    const courses = await Course.find().sort({ createdAt: -1 });
-    res.json(courses);
-  } catch (error) {
-    console.error('Error fetching courses:', error);
-    res.status(500).json({ message: 'Failed to fetch courses', error: error.message });
-  }
-});
-
-// GET SINGLE COURSE (For Admin)
-router.get('/courses/:id', auth, isAdmin, async (req, res) => {
-  try {
-    const course = await Course.findOne({ id: req.params.id });
-    if (!course) {
-      return res.status(404).json({ message: 'Course not found' });
-    }
-    res.json(course);
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-});
-
-// CREATE COURSE
-router.post('/courses/create', auth, isAdmin, courseUpload.single('courseImage'), async (req, res) => {
-  try {
-    const { 
-      id, title, category, provider, description, level, 
-      duration, color, courseUrl, instructorName, instructorRole, 
-      instructorBio, skills 
-    } = req.body;
-
-    const existingCourse = await Course.findOne({ id });
-    if (existingCourse) {
-      return res.status(400).json({ message: 'Course ID already exists. Please use a unique ID.' });
-    }
-
-    if (!id || !title || !description || !duration) {
-      return res.status(400).json({ message: 'Please provide all required fields: id, title, description, duration' });
-    }
-
-    let imagePath = '';
-    if (req.file) {
-      imagePath = req.file.path; // Cloudinary URL
-    } else {
-      imagePath = 'https://via.placeholder.com/800x450?text=Course+Image';
-    }
-
-    const skillsArray = skills ? skills.split(',').map(s => s.trim()).filter(s => s) : [];
-
-    const newCourse = new Course({
-      id,
-      title,
-      category,
-      provider: provider || 'TechDegree Club',
-      instructor: {
-        name: instructorName || 'TechDegree Team',
-        role: instructorRole || 'Instructor',
-        bio: instructorBio || ''
-      },
-      level,
-      duration,
-      image: imagePath,
-      color: color || '#3b82f6',
-      skills: skillsArray,
-      description,
-      courseUrl: courseUrl || '',
-      modules: [],
-      isActive: true
-    });
-
-    await newCourse.save();
-
-    res.status(201).json({ 
-      success: true, 
-      message: 'Course created successfully', 
-      data: newCourse 
-    });
-  } catch (error) {
-    console.error('Error creating course:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Failed to create course', 
-      error: error.message 
-    });
-  }
-});
-
-// UPDATE COURSE
-router.put('/courses/:id', auth, isAdmin, courseUpload.single('courseImage'), async (req, res) => {
-  try {
-    const courseId = req.params.id;
-    
-    const existingCourse = await Course.findOne({ id: courseId });
-    if (!existingCourse) {
-      return res.status(404).json({ message: 'Course not found' });
-    }
-
-    const updateData = {
-      title: req.body.title,
-      category: req.body.category,
-      provider: req.body.provider,
-      level: req.body.level,
-      duration: req.body.duration,
-      color: req.body.color,
-      description: req.body.description,
-      courseUrl: req.body.courseUrl,
-      updatedAt: Date.now()
-    };
-
-    if (req.body.instructorName || req.body.instructorRole || req.body.instructorBio) {
-      updateData.instructor = {
-        name: req.body.instructorName || existingCourse.instructor?.name,
-        role: req.body.instructorRole || existingCourse.instructor?.role,
-        bio: req.body.instructorBio || existingCourse.instructor?.bio
-      };
-    }
-
-    if (req.body.skills) {
-      updateData.skills = req.body.skills.split(',').map(s => s.trim()).filter(s => s);
-    }
-
-    if (req.file) {
-      // Delete old image from Cloudinary if it's not a placeholder
-      if (existingCourse.image && !existingCourse.image.includes('placeholder')) {
-        const publicId = existingCourse.image.split('/').slice(-2).join('/').split('.')[0];
-        await cloudinary.uploader.destroy(publicId);
-      }
-      updateData.image = req.file.path; // Cloudinary URL
-    }
-
-    const updatedCourse = await Course.findOneAndUpdate(
-      { id: courseId },
-      { $set: updateData },
-      { new: true, runValidators: true }
-    );
-
-    res.json({ 
-      success: true, 
-      message: 'Course updated successfully', 
-      data: updatedCourse 
-    });
-  } catch (error) {
-    console.error('Error updating course:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Failed to update course', 
-      error: error.message 
-    });
-  }
-});
-
-// DELETE COURSE
-router.delete('/courses/:id', auth, isAdmin, async (req, res) => {
-  try {
-    const courseId = req.params.id;
-    
-    const course = await Course.findOne({ id: courseId });
-    if (!course) {
-      return res.status(404).json({ message: 'Course not found' });
-    }
-
-    // Delete image from Cloudinary if it's not a placeholder
-    if (course.image && !course.image.includes('placeholder')) {
-      const publicId = course.image.split('/').slice(-2).join('/').split('.')[0];
-      await cloudinary.uploader.destroy(publicId);
-    }
-
-    await Course.findOneAndDelete({ id: courseId });
-
-    res.json({ 
-      success: true, 
-      message: 'Course deleted successfully' 
-    });
-  } catch (error) {
-    console.error('Error deleting course:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Failed to delete course', 
-      error: error.message 
-    });
-  }
-});
-
-// TOGGLE COURSE ACTIVE STATUS
-router.patch('/courses/:id/toggle', auth, isAdmin, async (req, res) => {
-  try {
-    const course = await Course.findOne({ id: req.params.id });
-    if (!course) {
-      return res.status(404).json({ message: 'Course not found' });
-    }
-
-    course.isActive = !course.isActive;
-    await course.save();
-
-    res.json({ 
-      success: true, 
-      message: `Course ${course.isActive ? 'activated' : 'deactivated'} successfully`,
-      isActive: course.isActive 
-    });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-});
-// ==================== GET COURSE ENROLLMENTS ====================
-router.get('/courses/:courseId/enrollments', auth, isAdmin, async (req, res) => {
-  try {
-    const { courseId } = req.params;
-    
-    // Find all users enrolled in this course
-    const users = await User.find({
-      'enrolledCourses.courseId': courseId
-    }).select('name email enrolledCourses');
-    
-    // Extract enrollment data for this specific course
-    const enrollments = users.map(user => {
-      const enrollment = user.enrolledCourses.find(e => e.courseId === courseId);
-      return {
-        userId: user._id,
-        userName: user.name,
-        userEmail: user.email,
-        progress: enrollment?.progress || 0,
-        currentModule: enrollment?.currentModule,
-        completed: enrollment?.completed || false,
-        enrolledAt: enrollment?.enrolledAt,
-        completedLessons: enrollment?.completedLessons || [],
-        lastAccessed: enrollment?.lastAccessed
-      };
-    });
-    
-    res.json({
-      success: true,
-      count: enrollments.length,
-      enrollments
-    });
-  } catch (error) {
-    console.error('Error fetching enrollments:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Failed to fetch enrollments', 
-      error: error.message 
-    });
-  }
-});
-
-// ==================== SEND RESPONSE TO STUDENT ====================
-router.post('/courses/:courseId/respond/:userId', auth, isAdmin, async (req, res) => {
-  try {
-    const { courseId, userId } = req.params;
-    const { message, courseTitle } = req.body;
-
-    if (!message) {
-      return res.status(400).json({ message: 'Response message is required' });
-    }
-
-    // Find the user
-    const user = await User.findById(userId);
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-
-    // Create notification for the user
-    await Notification.create({
-      recipient: userId,
-      title: `Response from Admin: ${courseTitle || 'Course Update'}`,
-      description: message,
-      type: "Course",
-      icon: "message-circle",
-      link: `/courses/${courseId}`
-    });
-
-    // Optional: Send push notification if FCM token exists
-    if (user.fcmToken) {
-      // You can implement push notification here
-      console.log(`Push notification would be sent to ${user.fcmToken}`);
-    }
-
-    res.json({ 
-      success: true, 
-      message: 'Response sent successfully to student' 
-    });
-  } catch (error) {
-    console.error('Error sending response:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Failed to send response', 
-      error: error.message 
-    });
-  }
-});
 
 
 module.exports = router;

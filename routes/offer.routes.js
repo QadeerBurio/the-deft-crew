@@ -214,27 +214,29 @@ router.post("/redeem-payment", auth, async (req, res) => {
 });
 
 // GET: View specific brand's offers (with caching)
+// In offers.js route file - update the /brand/:brandId endpoint
 router.get("/brand/:brandId", auth, async (req, res) => {
   try {
     const cacheKey = `offers:brand:${req.params.brandId}`;
     
-    // Try cache first
     const cached = await cache.get(cacheKey);
     if (cached) {
       return res.json(JSON.parse(cached));
     }
 
+    // Always return an array, even if empty
     const offers = await Offer.find({ brand: req.params.brandId })
       .populate("brand", "name logo category")
       .lean()
       .exec();
 
-    // Cache the results
-    await cache.set(cacheKey, JSON.stringify(offers), CACHE_TTL);
+    // Cache even empty results to prevent repeated queries
+    await cache.set(cacheKey, JSON.stringify(offers || []), CACHE_TTL);
 
-    res.json(offers);
+    res.json(offers || []);
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    // Return empty array on error
+    res.json([]);
   }
 });
 
@@ -400,6 +402,34 @@ router.get("/savings-report", auth, async (req, res) => {
     }, []);
 
     res.json(report);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+
+// GET: Fetch only offer image by offer ID
+router.get("/:offerId/image", auth, async (req, res) => {
+  try {
+    const offer = await Offer.findById(req.params.offerId)
+      .select('image title brand')
+      .lean()
+      .exec();
+
+    if (!offer) {
+      return res.status(404).json({ message: "Offer not found" });
+    }
+
+    // Check if user has access to this offer
+    // (Optional: Add authorization logic if needed)
+    // For example, check if user is the brand owner or has claimed the offer
+    
+    res.json({
+      offerId: offer._id,
+      title: offer.title,
+      image: offer.image,
+      brand: offer.brand
+    });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

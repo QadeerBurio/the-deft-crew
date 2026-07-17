@@ -5,11 +5,29 @@ const auth = require("../middleware/auth.middleware"); // JWT middleware
 
 const router = express.Router();
 
-// Get all brands
+// In brands.js route file - update the GET / endpoint
 router.get("/", auth, async (req, res) => {
   try {
-    const brands = await User.find({ role: "brand" }).select("name email");
-    res.json(brands);
+    // Include more fields and handle the response better
+    const brands = await User.find({ role: "brand" })
+      .select("name email logo category brandName address isOnline isInStore")  // Added more fields
+      .lean()
+      .exec();
+    
+    // If no authentication or guest, still return brands with basic info
+    // But make sure all brands have a logo field
+    const formattedBrands = brands.map(brand => ({
+      _id: brand._id,
+      name: brand.brandName || brand.name,
+      logo: brand.logo || null,
+      category: brand.category || "General",
+      email: brand.email,
+      isOnline: brand.isOnline || false,
+      isInStore: brand.isInStore || false,
+      address: brand.address || "",
+    }));
+    
+    res.json(formattedBrands);
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Server error" });

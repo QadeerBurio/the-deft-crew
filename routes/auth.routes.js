@@ -5,8 +5,7 @@ const jwt = require("jsonwebtoken");
 const nodemailer = require("nodemailer");
 const { body, validationResult } = require("express-validator");
 const multer = require("multer");
-const { storage } = require("../config/cloudinary");
-const upload = multer({ storage });
+const { storage, uploadLogo, hasCloudinary, deleteFromCloudinary } = require("../config/cloudinary");
 const User = require("../models/User");
 const University = require("../models/University");
 const Notification = require("../models/Notification");
@@ -14,6 +13,7 @@ const Application = require("../models/Application");
 const path = require("path");
 const mongoose = require("mongoose");
 const Package = require("../models/Package");
+const fs = require("fs");
 const router = express.Router();
 
 // --- ADD THIS LINE ---
@@ -35,7 +35,29 @@ transporter.verify(function (error, success) {
   }
 });
 
-router.post("/signup", async (req, res) => {
+// Helper function to cleanup uploaded files
+const cleanupFile = async (file) => {
+  if (!file) return;
+  
+  try {
+    if (hasCloudinary && file.filename) {
+      // Delete from Cloudinary
+      await deleteFromCloudinary(file.filename);
+      console.log(`🗑️ Deleted Cloudinary file: ${file.filename}`);
+    } else if (file.path) {
+      // Delete local file
+      if (fs.existsSync(file.path)) {
+        fs.unlinkSync(file.path);
+        console.log(`🗑️ Deleted local file: ${file.path}`);
+      }
+    }
+  } catch (error) {
+    console.error("Error cleaning up file:", error);
+  }
+};
+
+// Updated signup route with logo upload
+router.post("/signup", uploadLogo.single('logo'), async (req, res) => {
   try {
     const {
       role,
@@ -54,12 +76,19 @@ router.post("/signup", async (req, res) => {
 
     // 1. Validate required fields
     if (!email || !password || !role) {
+      // Clean up uploaded file if validation fails
+      if (req.file) {
+        await cleanupFile(req.file);
+      }
       return res.status(400).json({ error: "Missing required fields" });
     }
 
     // 2. Check if user already exists
     const existingUser = await User.findOne({ email });
     if (existingUser) {
+      if (req.file) {
+        await cleanupFile(req.file);
+      }
       return res.status(400).json({ error: "Email already used" });
     }
 
@@ -68,10 +97,27 @@ router.post("/signup", async (req, res) => {
 
     let universityId = null;
     let name = "";
+    let logoUrl = "";
+    let logoPublicId = "";
+
+    // Handle logo upload
+    if (req.file) {
+      if (hasCloudinary) {
+        // Cloudinary file - get URL and public_id
+        logoUrl = req.file.path; // Cloudinary URL
+        logoPublicId = req.file.filename; // Cloudinary public ID
+      } else {
+        // Local file - store path
+        logoUrl = req.file.path.replace(/\\/g, '/');
+      }
+    }
 
     // 4. Role Logic
     if (role === "student") {
       if (!fullName || !universityName) {
+        if (req.file) {
+          await cleanupFile(req.file);
+        }
         return res.status(400).json({ error: "Name and university required" });
       }
       name = fullName;
@@ -80,22 +126,36 @@ router.post("/signup", async (req, res) => {
       universityId = uni._id;
     } else if (role === "brand") {
       if (!brandName) {
+        if (req.file) {
+          await cleanupFile(req.file);
+        }
         return res.status(400).json({ error: "Brand name required" });
       }
       name = brandName;
-      } else if (role === "traveler") {
-  if (!fullName) {
-    return res.status(400).json({ error: "Full name required" });
-  }
-  name = fullName;
-
-} else if (role === "employee") {
-  if (!fullName) {
-    return res.status(400).json({ error: "Employee name required" });
-  }
-  name = fullName;
-
-
+      // Brand logo is required
+      if (!req.file) {
+        return res.status(400).json({ error: "Brand logo is required" });
+      }
+    } else if (role === "traveler") {
+      if (!fullName) {
+        if (req.file) {
+          await cleanupFile(req.file);
+        }
+        return res.status(400).json({ error: "Full name required" });
+      }
+      name = fullName;
+    } else if (role === "employee") {
+      if (!fullName) {
+        if (req.file) {
+          await cleanupFile(req.file);
+        }
+        return res.status(400).json({ error: "Employee name required" });
+      }
+      name = fullName;
+      // Company logo is required for employees
+      if (!req.file) {
+        return res.status(400).json({ error: "Company logo is required" });
+      }
     } else if (role === "admin") {
       name = fullName || "Admin";
     }
@@ -109,7 +169,7 @@ router.post("/signup", async (req, res) => {
     }
 
     // 6. Create the User
-    const user = await User.create({
+    const userData = {
       name,
       email,
       password: hashedPassword,
@@ -122,7 +182,23 @@ router.post("/signup", async (req, res) => {
       instagram,
       status: role === "admin" ? "Verified" : "Not Verified",
       referredBy: referrer ? referrer._id : null,
-    });
+    };
+
+    // Add logo fields if uploaded
+    if (logoUrl) {
+      userData.logo = logoUrl;
+      userData.logoPublicId = logoPublicId;
+    }
+
+    // Add role-specific fields
+    if (role === "brand") {
+      userData.brandName = brandName;
+      userData.companyName = brandName;
+    } else if (role === "employee") {
+      userData.companyName = fullName;
+    }
+
+    const user = await User.create(userData);
 
     // 7. Update referral count
     if (referrer) {
@@ -166,12 +242,29 @@ router.post("/signup", async (req, res) => {
       }
     }
 
-    res.status(201).json({ message: "Signup successful", user });
+    // Return success response without password
+    const userResponse = user.toObject();
+    delete userResponse.password;
+
+    res.status(201).json({ 
+      message: "Signup successful", 
+      user: userResponse,
+      logoUploaded: !!req.file 
+    });
+
   } catch (err) {
-    console.error(err);
+    console.error("Signup Error:", err);
+    
+    // Clean up uploaded file if there was an error
+    if (req.file) {
+      await cleanupFile(req.file);
+    }
+    
     res.status(500).json({ error: err.message });
   }
 });
+
+// ... rest of your routes (login, verify-otp, etc.)
 
 // -------------------- LOGIN --------------------
 router.post("/login", async (req, res) => {
@@ -603,5 +696,30 @@ router.get("/student/:id", authMiddleware, async (req, res) => {
   }
 });
 
+// -------------------- GET CURRENT USER (ME) --------------------
+router.get("/me", authMiddleware, async (req, res) => {
+  try {
+    const user = await User.findById(req.userId)
+      .select("-password")
+      .populate("university");
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // Ensure logo and companyName are included
+    const userData = {
+      ...user.toObject(),
+      logo: user.logo || "",
+      companyName: user.companyName || user.brandName || "",
+      brandName: user.brandName || "",
+    };
+
+    res.json(userData);
+  } catch (err) {
+    console.error("Error fetching user data:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 module.exports = router;

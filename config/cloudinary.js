@@ -15,6 +15,7 @@ if (hasCloudinary) {
     api_key: process.env.CLOUDINARY_KEY,
     api_secret: process.env.CLOUDINARY_SECRET,
   });
+  console.log("✅ Cloudinary configured successfully");
 } else {
   console.log("⚠️ [Cloudinary] Credentials missing. Falling back to local disk storage.");
 }
@@ -86,14 +87,22 @@ const jobResumeStorage = hasCloudinary
     })
   : createLocalStorage("job_resumes");
 
-// Storage for company logos
+// Storage for company logos - UPDATED with better config
 const logoStorage = hasCloudinary
   ? new CloudinaryStorage({
       cloudinary: cloudinary,
       params: {
         folder: "TDC_CompanyLogos",
-        allowed_formats: ["jpg", "png", "jpeg", "webp"],
-        transformation: [{ width: 200, height: 200, crop: "limit", quality: "auto" }],
+        allowed_formats: ["jpg", "png", "jpeg", "webp", "svg"],
+        transformation: [
+          { width: 300, height: 300, crop: "limit", quality: "auto" }
+        ],
+        // Use original filename to make it unique
+        public_id: (req, file) => {
+          const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+          const originalName = file.originalname.split('.')[0].replace(/[^a-zA-Z0-9]/g, '_');
+          return `logo_${originalName}_${uniqueSuffix}`;
+        },
       },
     })
   : createLocalStorage("logos");
@@ -128,7 +137,22 @@ const uploadJobResume = multer({
     fileSize: 10 * 1024 * 1024 // 10MB limit
   }
 });
-const uploadLogo = multer({ storage: logoStorage });
+
+// Logo upload with specific config
+const uploadLogo = multer({ 
+  storage: logoStorage,
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml'];
+    if (allowedTypes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only JPEG, PNG, GIF, WEBP, and SVG images are allowed'), false);
+    }
+  },
+  limits: {
+    fileSize: 5 * 1024 * 1024 // 5MB limit
+  }
+});
 
 // Helper function to delete file from Cloudinary
 const deleteFromCloudinary = async (publicId, resourceType = 'image') => {
@@ -186,5 +210,6 @@ module.exports = {
   uploadJobResume,
   uploadLogo,
   deleteFromCloudinary,
-  getCloudinaryUrl
+  getCloudinaryUrl,
+  hasCloudinary
 };
