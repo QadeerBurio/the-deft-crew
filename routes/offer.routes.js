@@ -435,4 +435,55 @@ router.get("/:offerId/image", auth, async (req, res) => {
   }
 });
 
+// GET: Fetch offer images with filters
+router.get("/images/all", auth, async (req, res) => {
+  try {
+    const { brandId, category, limit = 50 } = req.query;
+    
+    // Build filter
+    const filter = { image: { $ne: null } };
+    if (brandId) filter.brand = brandId;
+    if (category) filter.category = category;
+
+    const cacheKey = `offers:images:filter:${JSON.stringify(filter)}`;
+    
+    // Try cache
+    const cached = await cache.get(cacheKey);
+    if (cached) {
+      return res.json(JSON.parse(cached));
+    }
+
+    const offers = await Offer.find(filter)
+      .select('_id title image brand discountPercentage category isOnline isInStore')
+      .populate('brand', 'name logo')
+      .limit(parseInt(limit))
+      .lean()
+      .exec();
+
+    const response = {
+      count: offers.length,
+      offers: offers.map(offer => ({
+        offerId: offer._id,
+        title: offer.title,
+        image: offer.image,
+        brand: {
+          id: offer.brand?._id,
+          name: offer.brand?.name,
+          logo: offer.brand?.logo
+        },
+        discountPercentage: offer.discountPercentage,
+        category: offer.category,
+        isOnline: offer.isOnline,
+        isInStore: offer.isInStore
+      }))
+    };
+
+    await cache.set(cacheKey, JSON.stringify(response), 300);
+
+    res.json(response);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
 module.exports = router;

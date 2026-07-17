@@ -16,141 +16,24 @@ const Package = require("../models/Package");
 const fs = require("fs");
 const router = express.Router();
 
-// ============ OTP STORE WITH EXPIRY CLEANUP ============
+// --- ADD THIS LINE ---
 const otpStore = {};
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: process.env.EMAIL_USER || "abdulqadeerburiro110@gmail.com",
+    pass: process.env.EMAIL_PASS || "lhefzozqsdmubawi",
+  },
+});
 
-// Cleanup expired OTPs every minute
-setInterval(() => {
-  const now = Date.now();
-  for (const [userId, record] of Object.entries(otpStore)) {
-    if (record.expires < now) {
-      delete otpStore[userId];
-      console.log(`🗑️ Cleaned expired OTP for user ${userId}`);
-    }
+// Verify transporter on startup
+transporter.verify(function (error, success) {
+  if (error) {
+    console.log("❌ Email transporter error:", error.message);
+  } else {
+    console.log("✅ Email server is ready");
   }
-}, 60000);
-
-// ============ EMAIL TRANSPORTER WITH RETRY ============
-let transporter;
-
-const createTransporter = () => {
-  return nodemailer.createTransport({
-    service: "gmail",
-    auth: {
-      user: process.env.EMAIL_USER || "abdulqadeerburiro110@gmail.com",
-      pass: process.env.EMAIL_PASS || "lhefzozqsdmubawi",
-    },
-    // Add timeout and retry settings for live app
-    pool: true,
-    maxConnections: 1,
-    rateDelta: 1000,
-    rateLimit: 5,
-    socketTimeout: 30000,
-  });
-};
-
-// Initialize transporter
-const initTransporter = () => {
-  try {
-    transporter = createTransporter();
-    
-    // Verify transporter with retry
-    const verifyTransporter = (retries = 3) => {
-      transporter.verify((error, success) => {
-        if (error) {
-          console.log(`❌ Email transporter error (${retries} retries left):`, error.message);
-          if (retries > 0) {
-            setTimeout(() => verifyTransporter(retries - 1), 5000);
-          } else {
-            console.log("⚠️ Using backup email configuration");
-            // Use a simpler transport as fallback
-            transporter = nodemailer.createTransport({
-              service: "gmail",
-              auth: {
-                user: "abdulqadeerburiro110@gmail.com",
-                pass: "lhefzozqsdmubawi",
-              },
-            });
-          }
-        } else {
-          console.log("✅ Email server is ready for live app");
-        }
-      });
-    };
-    
-    verifyTransporter();
-  } catch (error) {
-    console.log("⚠️ Email setup failed, using backup configuration");
-    transporter = nodemailer.createTransport({
-      service: "gmail",
-      auth: {
-        user: "abdulqadeerburiro110@gmail.com",
-        pass: "lhefzozqsdmubawi",
-      },
-    });
-  }
-};
-
-initTransporter();
-
-// ============ SEND OTP FUNCTION ============
-const sendOtpEmail = async (email, otp, name) => {
-  try {
-    const mailOptions = {
-      from: `"The Deft Crew" <${process.env.EMAIL_USER || "abdulqadeerburiro110@gmail.com"}>`,
-      to: email,
-      subject: "🔐 Password Reset OTP - The Deft Crew",
-      html: `
-        <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 30px; background: #ffffff; border-radius: 20px; box-shadow: 0 10px 40px rgba(0,0,0,0.1);">
-          <div style="text-align: center; margin-bottom: 30px;">
-            <h1 style="color: #1a1a1a; font-size: 28px; margin: 0;">🔐 Password Reset</h1>
-            <div style="width: 60px; height: 3px; background: #f9c349; margin: 10px auto;"></div>
-          </div>
-          
-          <p style="color: #333; font-size: 16px; line-height: 1.6;">Hello ${name || 'User'},</p>
-          <p style="color: #555; font-size: 15px; line-height: 1.6;">We received a request to reset your password for your The Deft Crew account. Use the verification code below to proceed:</p>
-          
-          <div style="background: linear-gradient(135deg, #f9c349 0%, #f5a623 100%); padding: 25px; text-align: center; border-radius: 12px; margin: 25px 0; box-shadow: 0 4px 15px rgba(249, 195, 73, 0.3);">
-            <h1 style="color: #1a1a1a; font-size: 42px; letter-spacing: 8px; margin: 0; font-weight: 900;">${otp}</h1>
-          </div>
-          
-          <div style="background: #f8f9fa; padding: 15px 20px; border-radius: 8px; margin: 20px 0;">
-            <p style="color: #666; font-size: 14px; margin: 0; text-align: center;">
-              ⏰ This code will expire in <strong style="color: #1a1a1a;">5 minutes</strong>
-            </p>
-          </div>
-          
-          <p style="color: #888; font-size: 13px; text-align: center; border-top: 1px solid #eee; padding-top: 20px; margin-top: 20px;">
-            If you didn't request this, please ignore this email or contact support.
-            <br>
-            <span style="color: #aaa;">© 2026 The Deft Crew. All rights reserved.</span>
-          </p>
-        </div>
-      `,
-    };
-
-    // Try sending with retry logic
-    const sendWithRetry = async (retries = 3) => {
-      try {
-        const info = await transporter.sendMail(mailOptions);
-        console.log(`✅ OTP email sent to ${email} | MessageId: ${info.messageId}`);
-        return { success: true, info };
-      } catch (error) {
-        if (retries > 0) {
-          console.log(`⚠️ Email send failed, retrying... (${retries} attempts left)`);
-          await new Promise(resolve => setTimeout(resolve, 2000));
-          return sendWithRetry(retries - 1);
-        }
-        throw error;
-      }
-    };
-
-    return await sendWithRetry();
-  } catch (error) {
-    console.error("❌ Email send error:", error.message);
-    return { success: false, error: error.message };
-  }
-};
+});
 
 // Helper function to cleanup uploaded files
 const cleanupFile = async (file) => {
@@ -158,9 +41,11 @@ const cleanupFile = async (file) => {
   
   try {
     if (hasCloudinary && file.filename) {
+      // Delete from Cloudinary
       await deleteFromCloudinary(file.filename);
       console.log(`🗑️ Deleted Cloudinary file: ${file.filename}`);
     } else if (file.path) {
+      // Delete local file
       if (fs.existsSync(file.path)) {
         fs.unlinkSync(file.path);
         console.log(`🗑️ Deleted local file: ${file.path}`);
@@ -170,7 +55,6 @@ const cleanupFile = async (file) => {
     console.error("Error cleaning up file:", error);
   }
 };
-
 
 
 
@@ -412,7 +296,7 @@ router.post("/login", async (req, res) => {
   }
 });
 
-// ==================== FORGOT PASSWORD (FIXED FOR LIVE APP) ====================
+// -------------------- FORGOT PASSWORD (SEND OTP) - FIXED --------------------
 router.post("/forgot-password", async (req, res) => {
   const { emailOrPhone } = req.body;
 
@@ -421,7 +305,6 @@ router.post("/forgot-password", async (req, res) => {
   }
 
   try {
-    // Find user by email or phone
     const user = await User.findOne({
       $or: [
         { email: emailOrPhone.toLowerCase().trim() },
@@ -433,30 +316,41 @@ router.post("/forgot-password", async (req, res) => {
       return res.status(404).json({ message: "No account found with this email or phone" });
     }
 
-    // Generate OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
-    // Store OTP with expiry
-    otpStore[user._id.toString()] = {
+    // ✅ Now otpStore is defined
+    otpStore[user._id] = {
       otp,
-      expires: Date.now() + 5 * 60 * 1000, // 5 minutes
-      email: user.email,
+      expires: Date.now() + 5 * 60 * 1000,
     };
 
-    console.log(`🔑 OTP generated for ${user.email}: ${otp}`);
+    console.log(`🔑 OTP for ${user.email}: ${otp}`);
 
-    // Send OTP via email with retry logic
-    const emailResult = await sendOtpEmail(user.email, otp, user.name);
+    try {
+      await transporter.sendMail({
+        from: `"The Deft Crew" <abdulqadeerburiro110@gmail.com>`,
+        to: user.email,
+        subject: "Password Reset OTP - The Deft Crew",
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 20px;">
+            <h2 style="color: #1a1a1a;">Password Reset Request</h2>
+            <p>Hello ${user.name || 'User'},</p>
+            <p>Use the following OTP code:</p>
+            <div style="background: #f9c349; padding: 20px; text-align: center; border-radius: 10px; margin: 20px 0;">
+              <h1 style="color: #1a1a1a; font-size: 36px; letter-spacing: 5px; margin: 0;">${otp}</h1>
+            </div>
+            <p style="color: #666;">This OTP expires in <strong>5 minutes</strong>.</p>
+          </div>
+        `,
+      });
+      console.log(`✅ OTP email sent to ${user.email}`);
+    } catch (mailError) {
+      console.log("⚠️ Email failed but OTP generated:", otp);
+    }
 
-    // Even if email fails, we still want to return the OTP for testing
-    // But for production, we should indicate if email was sent
     return res.json({
-      message: emailResult.success ? "OTP sent successfully to your email" : "OTP generated. Please check your email (check spam folder)",
+      message: "OTP sent successfully to your email",
       userId: user._id,
-      otpSent: emailResult.success,
-      // In development, we might return the OTP for testing
-      // Remove this in production
-      ...(process.env.NODE_ENV === 'development' && { debugOtp: otp }),
     });
 
   } catch (err) {
@@ -465,47 +359,7 @@ router.post("/forgot-password", async (req, res) => {
   }
 });
 
-// ==================== RESEND OTP ====================
-router.post("/resend-otp", async (req, res) => {
-  const { userId } = req.body;
-
-  if (!userId) {
-    return res.status(400).json({ message: "User ID required" });
-  }
-
-  try {
-    const user = await User.findById(userId);
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
-
-    // Generate new OTP
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-
-    // Update OTP store
-    otpStore[userId.toString()] = {
-      otp,
-      expires: Date.now() + 5 * 60 * 1000,
-      email: user.email,
-    };
-
-    console.log(`🔄 OTP resent for ${user.email}: ${otp}`);
-
-    // Send OTP email
-    const emailResult = await sendOtpEmail(user.email, otp, user.name);
-
-    return res.json({
-      message: emailResult.success ? "OTP resent successfully" : "OTP generated. Please check your email",
-      otpSent: emailResult.success,
-    });
-
-  } catch (err) {
-    console.error("❌ Resend OTP error:", err);
-    return res.status(500).json({ message: "Failed to resend OTP" });
-  }
-});
-
-// ==================== VERIFY OTP ====================
+// -------------------- VERIFY OTP --------------------
 router.post("/verify-otp", async (req, res) => {
   const { userId, otp } = req.body;
 
@@ -513,38 +367,29 @@ router.post("/verify-otp", async (req, res) => {
     return res.status(400).json({ message: "User ID and OTP are required" });
   }
 
-  const record = otpStore[userId.toString()];
+  const record = otpStore[userId];
 
-  if (!record) {
-    return res.status(400).json({ message: "No OTP request found. Please request a new OTP." });
-  }
-
+  if (!record) return res.status(400).json({ message: "No OTP request found. Please request a new OTP." });
   if (record.expires < Date.now()) {
-    delete otpStore[userId.toString()];
+    delete otpStore[userId];
     return res.status(400).json({ message: "OTP has expired. Please request a new one." });
   }
-
   if (record.otp !== otp.trim()) {
     return res.status(400).json({ message: "Invalid OTP. Please check and try again." });
   }
 
-  // Generate reset token
-  const resetToken = jwt.sign(
+  const tempToken = jwt.sign(
     { id: userId, purpose: 'password-reset' },
     process.env.JWT_SECRET || "abdulqadeer11111",
     { expiresIn: "10m" }
   );
 
-  // Clean up OTP
-  delete otpStore[userId.toString()];
+  delete otpStore[userId];
 
-  res.json({ 
-    message: "OTP verified successfully", 
-    resetToken 
-  });
+  res.json({ message: "OTP verified", resetToken: tempToken });
 });
 
-// ==================== RESET PASSWORD ====================
+// -------------------- RESET PASSWORD --------------------
 router.post("/reset-password", async (req, res) => {
   const { resetToken, newPassword } = req.body;
 
@@ -552,35 +397,21 @@ router.post("/reset-password", async (req, res) => {
     return res.status(400).json({ message: "Token and new password required" });
   }
 
-  if (newPassword.length < 6) {
-    return res.status(400).json({ message: "Password must be at least 6 characters long" });
-  }
-
   try {
     const decoded = jwt.verify(resetToken, process.env.JWT_SECRET || "abdulqadeer11111");
-    
     const user = await User.findById(decoded.id);
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
+    if (!user) return res.status(404).json({ message: "User not found" });
 
     user.password = await bcrypt.hash(newPassword, 10);
     await user.save();
 
-    // Clean up any remaining OTP
     delete otpStore[decoded.id];
 
     res.json({ message: "Password reset successfully" });
-
   } catch (err) {
-    console.error("Reset password error:", err);
-    if (err.name === 'TokenExpiredError') {
-      return res.status(400).json({ message: "Reset token expired. Please request a new OTP." });
-    }
-    res.status(400).json({ message: "Invalid or expired reset token" });
+    res.status(400).json({ message: "Session expired. Please request a new OTP." });
   }
 });
-
 
 // ---------------- AUTH MIDDLEWARE ----------------
 const authMiddleware = (req, res, next) => {
