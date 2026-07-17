@@ -1,3 +1,4 @@
+// ==================== auth.routes.js (COMPLETE FIXED VERSION) ====================
 require("dotenv").config();
 const express = require("express");
 const bcrypt = require("bcryptjs");
@@ -16,7 +17,9 @@ const Package = require("../models/Package");
 const fs = require("fs");
 const router = express.Router();
 
-// --- ADD THIS LINE ---
+// ==========================================
+// OTP STORE & EMAIL TRANSPORTER
+// ==========================================
 const otpStore = {};
 const transporter = nodemailer.createTransport({
   service: "gmail",
@@ -26,7 +29,6 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-// Verify transporter on startup
 transporter.verify(function (error, success) {
   if (error) {
     console.log("❌ Email transporter error:", error.message);
@@ -38,14 +40,11 @@ transporter.verify(function (error, success) {
 // Helper function to cleanup uploaded files
 const cleanupFile = async (file) => {
   if (!file) return;
-  
   try {
     if (hasCloudinary && file.filename) {
-      // Delete from Cloudinary
       await deleteFromCloudinary(file.filename);
       console.log(`🗑️ Deleted Cloudinary file: ${file.filename}`);
     } else if (file.path) {
-      // Delete local file
       if (fs.existsSync(file.path)) {
         fs.unlinkSync(file.path);
         console.log(`🗑️ Deleted local file: ${file.path}`);
@@ -56,9 +55,30 @@ const cleanupFile = async (file) => {
   }
 };
 
+// ==========================================
+// AUTH MIDDLEWARE
+// ==========================================
+const authMiddleware = (req, res, next) => {
+  try {
+    const token = req.headers.authorization?.split(" ")[1];
+    if (!token) {
+      return res.status(401).json({ message: "No token provided" });
+    }
 
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || "abdulqadeer11111");
+    req.userId = decoded.id;
+    req.userRole = decoded.role;
 
+    next();
+  } catch (err) {
+    console.error("Auth middleware error:", err);
+    return res.status(401).json({ message: "Invalid token" });
+  }
+};
 
+// ==========================================
+// SIGNUP ROUTE
+// ==========================================
 router.post("/signup", uploadLogo.single('logo'), async (req, res) => {
   try {
     const {
@@ -78,7 +98,6 @@ router.post("/signup", uploadLogo.single('logo'), async (req, res) => {
 
     // 1. Validate required fields
     if (!email || !password || !role) {
-      // Clean up uploaded file if validation fails
       if (req.file) {
         await cleanupFile(req.file);
       }
@@ -105,11 +124,9 @@ router.post("/signup", uploadLogo.single('logo'), async (req, res) => {
     // Handle logo upload
     if (req.file) {
       if (hasCloudinary) {
-        // Cloudinary file - get URL and public_id
-        logoUrl = req.file.path; // Cloudinary URL
-        logoPublicId = req.file.filename; // Cloudinary public ID
+        logoUrl = req.file.path;
+        logoPublicId = req.file.filename;
       } else {
-        // Local file - store path
         logoUrl = req.file.path.replace(/\\/g, '/');
       }
     }
@@ -134,7 +151,6 @@ router.post("/signup", uploadLogo.single('logo'), async (req, res) => {
         return res.status(400).json({ error: "Brand name required" });
       }
       name = brandName;
-      // Brand logo is required
       if (!req.file) {
         return res.status(400).json({ error: "Brand logo is required" });
       }
@@ -154,7 +170,6 @@ router.post("/signup", uploadLogo.single('logo'), async (req, res) => {
         return res.status(400).json({ error: "Employee name required" });
       }
       name = fullName;
-      // Company logo is required for employees
       if (!req.file) {
         return res.status(400).json({ error: "Company logo is required" });
       }
@@ -162,7 +177,7 @@ router.post("/signup", uploadLogo.single('logo'), async (req, res) => {
       name = fullName || "Admin";
     }
 
-    // 5. Handle Referrer lookup (One time only)
+    // 5. Handle Referrer lookup
     let referrer = null;
     if (referralCodeInput) {
       referrer = await User.findOne({
@@ -186,13 +201,11 @@ router.post("/signup", uploadLogo.single('logo'), async (req, res) => {
       referredBy: referrer ? referrer._id : null,
     };
 
-    // Add logo fields if uploaded
     if (logoUrl) {
       userData.logo = logoUrl;
       userData.logoPublicId = logoPublicId;
     }
 
-    // Add role-specific fields
     if (role === "brand") {
       userData.brandName = brandName;
       userData.companyName = brandName;
@@ -202,7 +215,9 @@ router.post("/signup", uploadLogo.single('logo'), async (req, res) => {
 
     const user = await User.create(userData);
 
-    // 7. Update referral count
+    // ============================================
+    // 7. UPDATE REFERRER - AUTO ACTIVATE VIP
+    // ============================================
     if (referrer) {
       const updatedReferrer = await User.findByIdAndUpdate(
         referrer._id,
@@ -210,16 +225,60 @@ router.post("/signup", uploadLogo.single('logo'), async (req, res) => {
         { new: true }
       );
 
-      if (
-        updatedReferrer.referralCount >= 10 &&
-        !updatedReferrer.canApplyForTdcCard
-      ) {
+      // Check if referrer has reached 10 referrals
+      if (updatedReferrer.referralCount >= 10) {
+        // Auto-activate VIP
+        updatedReferrer.isVip = true;
         updatedReferrer.canApplyForTdcCard = true;
+        updatedReferrer.paymentStatus = "Verified";
+        updatedReferrer.cardStatus = "Active";
+        
+        // Set VIP expiry to 1 year from now
+        const expiryDate = new Date();
+        expiryDate.setFullYear(expiryDate.getFullYear() + 1);
+        updatedReferrer.vipExpiry = expiryDate;
+        
         await updatedReferrer.save();
+
+        console.log(`✅ VIP Activated for user: ${updatedReferrer.email} (${updatedReferrer.referralCount} referrals)`);
+
+        // Send notification about VIP activation
+        try {
+          await Notification.create({
+            recipient: updatedReferrer._id,
+            title: "🎉 TDC Privilege Card Activated!",
+            description: `Congratulations! You've reached 10 referrals and your TDC Privilege Card is now active. Tap "View My TDC Card" to see your digital card.`,
+            type: "System",
+            icon: "card-account-details-star",
+            readBy: [],
+          });
+
+          // Send email notification
+          await transporter.sendMail({
+            from: `"The Deft Crew" <${process.env.EMAIL_USER}>`,
+            to: updatedReferrer.email,
+            subject: "🎉 TDC Privilege Card Activated!",
+            html: `
+              <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+                <h2 style="color: #f9c349;">🎉 TDC Privilege Card Activated!</h2>
+                <p>Congratulations <b>${updatedReferrer.name}</b>!</p>
+                <p>You've reached <b>10 referrals</b> and your TDC Privilege Card is now active.</p>
+                <div style="background: #f9c349; padding: 20px; text-align: center; border-radius: 10px; margin: 20px 0;">
+                  <h3 style="color: #1a1a1a;">✨ TDC PRIVILEGE CARD ✨</h3>
+                  <p style="color: #1a1a1a;">Valid until: ${expiryDate.toLocaleDateString()}</p>
+                </div>
+                <p>Open the app and tap "View My TDC Card" to see your digital card.</p>
+              </div>
+            `,
+          }).catch(err => console.log("Email Error:", err.message));
+          
+        } catch (nError) {
+          console.error("Notification Error:", nError.message);
+        }
       }
     }
 
-    // 8. Notification for student
+    // 8. Notification for new user
     if (role === "student") {
       try {
         await Notification.create({
@@ -230,21 +289,11 @@ router.post("/signup", uploadLogo.single('logo'), async (req, res) => {
           icon: "party-popper",
           readBy: [],
         });
-
-        transporter
-          .sendMail({
-            from: `"The Deft Crew" <${process.env.EMAIL_USER}>`,
-            to: email,
-            subject: "Welcome to the Crew! 🚀",
-            html: `<p>Welcome <b>${name}</b>! Your account is now active.</p>`,
-          })
-          .catch((err) => console.log("Mail Error:", err.message));
       } catch (nError) {
-        console.error("Notification/Email Error:", nError.message);
+        console.error("Notification Error:", nError.message);
       }
     }
 
-    // Return success response without password
     const userResponse = user.toObject();
     delete userResponse.password;
 
@@ -256,19 +305,16 @@ router.post("/signup", uploadLogo.single('logo'), async (req, res) => {
 
   } catch (err) {
     console.error("Signup Error:", err);
-    
-    // Clean up uploaded file if there was an error
     if (req.file) {
       await cleanupFile(req.file);
     }
-    
     res.status(500).json({ error: err.message });
   }
 });
 
-// ... rest of your routes (login, verify-otp, etc.)
-
-// -------------------- LOGIN --------------------
+// ==========================================
+// LOGIN ROUTE
+// ==========================================
 router.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -283,7 +329,7 @@ router.post("/login", async (req, res) => {
 
     const token = jwt.sign(
       { id: user._id, role: user.role },
-      process.env.JWT_SECRET,
+      process.env.JWT_SECRET || "abdulqadeer11111",
       { expiresIn: "180d" }
     );
 
@@ -296,7 +342,142 @@ router.post("/login", async (req, res) => {
   }
 });
 
-// -------------------- FORGOT PASSWORD (SEND OTP) - FIXED --------------------
+// ==========================================
+// GET PROFILE (ME) - UPDATED
+// ==========================================
+router.get("/profile/me", authMiddleware, async (req, res) => {
+  try {
+    const user = await User.findById(req.userId)
+      .select("-password")
+      .populate("university");
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // Ensure VIP fields are included
+    const userData = {
+      ...user.toObject(),
+      isVip: user.isVip || false,
+      canApplyForTdcCard: user.canApplyForTdcCard || false,
+      paymentStatus: user.paymentStatus || "None",
+      cardStatus: user.cardStatus || "Inactive",
+      vipExpiry: user.vipExpiry || null,
+      referralCount: user.referralCount || 0,
+      referralCode: user.referralCode || "GENERATING...",
+    };
+
+    res.json(userData);
+  } catch (err) {
+    console.error("Error fetching profile:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ==========================================
+// ACTIVATE VIP - UPDATED WITH MORE LOGGING
+// ==========================================
+router.post("/activate-vip/:userId", authMiddleware, async (req, res) => {
+  try {
+    const userId = req.params.userId;
+    
+    console.log(`🔍 VIP Activation requested for user: ${userId}`);
+    
+    // Check if the requesting user is the same as the target or is admin
+    const requestingUser = await User.findById(req.userId);
+    const targetUser = await User.findById(userId);
+    
+    if (!targetUser) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // Allow if user is activating their own VIP or is admin
+    if (req.userId !== userId && requestingUser.role !== 'admin') {
+      return res.status(403).json({ message: "Unauthorized" });
+    }
+
+    console.log(`📊 User ${targetUser.email} has ${targetUser.referralCount} referrals, isVip: ${targetUser.isVip}`);
+
+    // Check if user has 10+ referrals
+    if (targetUser.referralCount >= 10) {
+      // Activate VIP
+      targetUser.isVip = true;
+      targetUser.canApplyForTdcCard = true;
+      targetUser.paymentStatus = "Verified";
+      targetUser.cardStatus = "Active";
+      
+      const expiryDate = new Date();
+      expiryDate.setFullYear(expiryDate.getFullYear() + 1);
+      targetUser.vipExpiry = expiryDate;
+      
+      await targetUser.save();
+
+      console.log(`✅ VIP Activated successfully for ${targetUser.email}`);
+
+      // Create notification
+      await Notification.create({
+        recipient: targetUser._id,
+        title: "🎉 TDC Privilege Card Activated!",
+        description: `Your TDC Privilege Card is now active! Tap "View My TDC Card" to see your digital card.`,
+        type: "System",
+        icon: "card-account-details-star",
+        readBy: [],
+      });
+
+      res.json({ 
+        success: true, 
+        message: "VIP activated successfully",
+        user: {
+          isVip: targetUser.isVip,
+          canApplyForTdcCard: targetUser.canApplyForTdcCard,
+          paymentStatus: targetUser.paymentStatus,
+          vipExpiry: targetUser.vipExpiry,
+          referralCount: targetUser.referralCount
+        }
+      });
+    } else {
+      console.log(`❌ User ${targetUser.email} only has ${targetUser.referralCount} referrals, needs 10`);
+      res.status(400).json({ 
+        message: `Need ${10 - targetUser.referralCount} more referrals to activate VIP`,
+        referralCount: targetUser.referralCount,
+        needed: 10 - targetUser.referralCount
+      });
+    }
+  } catch (error) {
+    console.error("VIP activation error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ==========================================
+// CHECK VIP STATUS
+// ==========================================
+router.get("/check-vip-status", authMiddleware, async (req, res) => {
+  try {
+    const user = await User.findById(req.userId);
+    
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const canActivate = user.referralCount >= 10 && !user.isVip;
+    
+    res.json({
+      referralCount: user.referralCount,
+      isVip: user.isVip,
+      canActivate: canActivate,
+      canApplyForTdcCard: user.canApplyForTdcCard,
+      paymentStatus: user.paymentStatus,
+      vipExpiry: user.vipExpiry
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ==========================================
+// FORGOT PASSWORD (SEND OTP)
+// ==========================================
 router.post("/forgot-password", async (req, res) => {
   const { emailOrPhone } = req.body;
 
@@ -318,7 +499,6 @@ router.post("/forgot-password", async (req, res) => {
 
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
-    // ✅ Now otpStore is defined
     otpStore[user._id] = {
       otp,
       expires: Date.now() + 5 * 60 * 1000,
@@ -359,7 +539,9 @@ router.post("/forgot-password", async (req, res) => {
   }
 });
 
-// -------------------- VERIFY OTP --------------------
+// ==========================================
+// VERIFY OTP
+// ==========================================
 router.post("/verify-otp", async (req, res) => {
   const { userId, otp } = req.body;
 
@@ -389,7 +571,9 @@ router.post("/verify-otp", async (req, res) => {
   res.json({ message: "OTP verified", resetToken: tempToken });
 });
 
-// -------------------- RESET PASSWORD --------------------
+// ==========================================
+// RESET PASSWORD
+// ==========================================
 router.post("/reset-password", async (req, res) => {
   const { resetToken, newPassword } = req.body;
 
@@ -413,22 +597,9 @@ router.post("/reset-password", async (req, res) => {
   }
 });
 
-// ---------------- AUTH MIDDLEWARE ----------------
-const authMiddleware = (req, res, next) => {
-  try {
-    const token = req.headers.authorization?.split(" ")[1];
-    if (!token) return res.status(401).json({ message: "No token" });
-
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.userId = decoded.id;
-
-    next();
-  } catch (err) {
-    res.status(401).json({ message: "Invalid token" });
-  }
-};
-
-// ADMIN ONLY: APPROVE USER
+// ==========================================
+// ADMIN: APPROVE USER
+// ==========================================
 router.post("/approve-user/:id", authMiddleware, async (req, res) => {
   try {
     const user = await User.findByIdAndUpdate(
@@ -442,6 +613,9 @@ router.post("/approve-user/:id", authMiddleware, async (req, res) => {
   }
 });
 
+// ==========================================
+// ADMIN: VERIFY USER
+// ==========================================
 router.patch("/verify-user/:targetUserId", authMiddleware, async (req, res) => {
   try {
     const updatedUser = await User.findByIdAndUpdate(
@@ -453,8 +627,7 @@ router.patch("/verify-user/:targetUserId", authMiddleware, async (req, res) => {
     await Notification.create({
       recipient: updatedUser._id,
       title: "Account Verified! ✅",
-      description:
-        "Welcome to the elite club! Your student status is verified. Enjoy premium discounts.",
+      description: "Welcome to the elite club! Your student status is verified. Enjoy premium discounts.",
       type: "System",
       icon: "sparkles",
     });
@@ -465,30 +638,13 @@ router.patch("/verify-user/:targetUserId", authMiddleware, async (req, res) => {
   }
 });
 
-// ---------------- GET LOGGED-IN USER PROFILE (Dynamic) ----------------
-router.get("/profile/me", authMiddleware, async (req, res) => {
-  try {
-    const user = await User.findById(req.userId).populate("university");
-
-    if (!user) return res.status(404).json({ message: "User not found" });
-
-    if (!user.referralCode && user.role === "student") {
-      await user.save();
-    }
-
-    res.json(user);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// --- UPDATE THIS ROUTE IN YOUR BACKEND ---
-// POST: Apply for exchange
+// ==========================================
+// EXCHANGE APPLICATION
+// ==========================================
 router.post("/exchange/apply", authMiddleware, async (req, res) => {
   try {
     const { programId, formData, experiences } = req.body;
 
-    // 1. Check if user already applied (Prevention)
     const existingApp = await Application.findOne({
       programId,
       userId: req.userId,
@@ -500,7 +656,6 @@ router.post("/exchange/apply", authMiddleware, async (req, res) => {
         .json({ message: "You have already applied for this program." });
     }
 
-    // 2. Create Application
     const newApp = new Application({
       programId,
       userId: req.userId,
@@ -510,12 +665,10 @@ router.post("/exchange/apply", authMiddleware, async (req, res) => {
 
     await newApp.save();
 
-    // 3. Optional: Notify Admin or User
     await Notification.create({
       recipient: req.userId,
       title: "Application Received",
-      description:
-        "We've received your exchange application and are reviewing it!",
+      description: "We've received your exchange application and are reviewing it!",
       type: "System",
       icon: "clipboard-check",
     });
@@ -526,7 +679,9 @@ router.post("/exchange/apply", authMiddleware, async (req, res) => {
   }
 });
 
-// ✅ 1. PUBLIC PACKAGES ROUTE
+// ==========================================
+// PUBLIC PACKAGES
+// ==========================================
 router.get("/packages/public", async (req, res) => {
   try {
     const packages = await Package.find().sort({ createdAt: -1 });
@@ -536,14 +691,13 @@ router.get("/packages/public", async (req, res) => {
   }
 });
 
-// -------------------- DYNAMIC ROUTES (MUST BE LAST) --------------------
-
-// ✅ 2. GET USER BY ID (With ObjectId Validation)
+// ==========================================
+// GET USER BY ID
+// ==========================================
 router.get("/:id", authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Check if the ID is a valid MongoDB ObjectId
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
         message: "Invalid User ID format or route not found.",
@@ -561,48 +715,39 @@ router.get("/:id", authMiddleware, async (req, res) => {
   }
 });
 
-
-// ==================== DELETE ACCOUNT (Apple Required) ====================
-// DELETE /api/auth/delete-account - Delete user account permanently
+// ==========================================
+// DELETE ACCOUNT
+// ==========================================
 router.delete("/delete-account", authMiddleware, async (req, res) => {
   try {
     const userId = req.userId;
 
-    // Find the user first
     const user = await User.findById(userId);
     
     if (!user) {
       return res.status(404).json({ error: "User not found" });
     }
 
-    // Delete all notifications for this user
     await Notification.deleteMany({ recipient: userId });
-
-    // Delete all applications by this user
     await Application.deleteMany({ userId: userId });
 
-    // Remove user from other users' connections
     await User.updateMany(
       { connections: userId },
       { $pull: { connections: userId } }
     );
 
-    // Remove user from other users' sentRequests
     await User.updateMany(
       { sentRequests: userId },
       { $pull: { sentRequests: userId } }
     );
 
-    // Remove user from other users' referredBy
     await User.updateMany(
       { referredBy: userId },
       { $unset: { referredBy: "" } }
     );
 
-    // Finally, delete the user
     await User.findByIdAndDelete(userId);
 
-    // Clear OTP store if exists
     if (otpStore[userId]) {
       delete otpStore[userId];
     }
@@ -619,18 +764,18 @@ router.delete("/delete-account", authMiddleware, async (req, res) => {
   }
 });
 
-// ==================== UPDATE USER (Admin only) ====================
+// ==========================================
+// UPDATE USER (Admin only)
+// ==========================================
 router.put("/update/:id", authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
     
-    // Check if user is admin
     const requestingUser = await User.findById(req.userId);
     if (requestingUser.role !== 'admin') {
       return res.status(403).json({ message: "Admin access required" });
     }
 
-    // Fields that can be updated
     const allowedFields = [
       'name', 'email', 'phone', 'address', 'location', 
       'headline', 'bio', 'rollNo', 'instagram', 'skills',
@@ -665,12 +810,13 @@ router.put("/update/:id", authMiddleware, async (req, res) => {
   }
 });
 
-// ==================== GET STUDENT WITH FULL DETAILS ====================
+// ==========================================
+// GET STUDENT WITH FULL DETAILS
+// ==========================================
 router.get("/student/:id", authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
     
-    // Check if valid ObjectId
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({ message: "Invalid User ID format" });
     }
@@ -683,7 +829,6 @@ router.get("/student/:id", authMiddleware, async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    // Get student's applications
     const applications = await Application.find({ userId: id })
       .populate('programId');
 
@@ -698,7 +843,9 @@ router.get("/student/:id", authMiddleware, async (req, res) => {
   }
 });
 
-// -------------------- GET CURRENT USER (ME) --------------------
+// ==========================================
+// GET CURRENT USER (ME)
+// ==========================================
 router.get("/me", authMiddleware, async (req, res) => {
   try {
     const user = await User.findById(req.userId)
@@ -709,7 +856,6 @@ router.get("/me", authMiddleware, async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    // Ensure logo and companyName are included
     const userData = {
       ...user.toObject(),
       logo: user.logo || "",
@@ -724,4 +870,7 @@ router.get("/me", authMiddleware, async (req, res) => {
   }
 });
 
+// ==========================================
+// EXPORT
+// ==========================================
 module.exports = router;

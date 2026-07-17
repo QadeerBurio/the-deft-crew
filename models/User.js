@@ -97,7 +97,7 @@ address: {
     // --- PHYSICAL TDC CARD LOGIC ---
     cardStatus: {
       type: String,
-      enum: ["None", "Ordered", "Printing", "Shipped", "Delivered"],
+       enum: ["None", "Ordered", "Printing", "Shipped", "Delivered", "Active"], // ✅ Added "Active"
       default: "None",
     },
     shippingDetails: {
