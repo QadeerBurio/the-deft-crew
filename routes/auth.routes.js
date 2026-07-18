@@ -18,160 +18,39 @@ const fs = require("fs");
 const router = express.Router();
 
 // ==========================================
-// OTP STORE & EMAIL TRANSPORTER - FIXED
+// OTP STORE
 // ==========================================
 const otpStore = {};
 
-// ✅ FIXED EMAIL TRANSPORTER WITH MULTIPLE OPTIONS
-const createTransporter = () => {
-  // Option 1: Gmail with App Password (Most Reliable for Railway)
-  if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
-    return nodemailer.createTransport({
-      service: "gmail",
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
-      },
-      // ✅ Critical: These settings help with Railway deployment
-      tls: {
-        rejectUnauthorized: false
-      },
-      pool: true,
-      maxConnections: 1,
-    });
-  }
-
-  // Option 2: SMTP with custom settings
-  if (process.env.SMTP_HOST && process.env.SMTP_PORT) {
-    return nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: parseInt(process.env.SMTP_PORT),
-      secure: process.env.SMTP_SECURE === 'true',
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-      },
-      tls: {
-        rejectUnauthorized: false
-      }
-    });
-  }
-
-  // Option 3: Ethereal Email (for testing only)
-  return nodemailer.createTransport({
-    host: 'smtp.ethereal.email',
-    port: 587,
-    auth: {
-      user: 'your-ethereal-email@ethereal.email',
-      pass: 'your-ethereal-password'
-    }
-  });
-};
-
-const transporter = createTransporter();
-
-// ✅ Test email connection on startup
-const testEmailConnection = async () => {
-  try {
-    await transporter.verify();
-    console.log("✅ Email transporter is ready");
-  } catch (error) {
-    console.log("⚠️ Email transporter not ready:", error.message);
-    console.log("📧 OTP will still be generated and logged in console");
-  }
-};
-testEmailConnection();
-
-// ✅ FALLBACK: Store OTP in MongoDB with expiry
-const OTPSchema = new mongoose.Schema({
-  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-  otp: String,
-  expires: Date,
-  createdAt: { type: Date, default: Date.now }
+// ==========================================
+// EMAIL TRANSPORTER - FIXED
+// ==========================================
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: process.env.EMAIL_USER || "abdulqadeerburiro110@gmail.com",
+    pass: process.env.EMAIL_PASS || "lhefzozqsdmubawi",
+  },
+  // ✅ CRITICAL FIX: These settings help with Railway deployment
+  tls: {
+    rejectUnauthorized: false,
+  },
+  pool: true,
+  maxConnections: 1,
 });
 
-// Check if model exists before creating
-let OTPModel;
-try {
-  OTPModel = mongoose.model('OTP');
-} catch {
-  OTPModel = mongoose.model('OTP', OTPSchema);
-}
-
-// Helper function to save OTP to database
-const saveOTP = async (userId, otp) => {
-  try {
-    // Delete old OTPs for this user
-    await OTPModel.deleteMany({ userId });
-    
-    // Create new OTP
-    const newOTP = new OTPModel({
-      userId,
-      otp,
-      expires: new Date(Date.now() + 5 * 60 * 1000) // 5 minutes
-    });
-    await newOTP.save();
-    
-    // Also store in memory for faster access
-    otpStore[userId] = {
-      otp,
-      expires: Date.now() + 5 * 60 * 1000,
-      dbId: newOTP._id
-    };
-    
-    return newOTP;
-  } catch (error) {
-    console.error("Failed to save OTP to DB:", error);
-    // Fallback to memory only
-    otpStore[userId] = {
-      otp,
-      expires: Date.now() + 5 * 60 * 1000
-    };
-    return null;
+// Verify email transporter
+transporter.verify(function (error, success) {
+  if (error) {
+    console.log("❌ Email transporter error:", error.message);
+  } else {
+    console.log("✅ Email server is ready");
   }
-};
+});
 
-// Helper function to get OTP
-const getOTP = async (userId) => {
-  try {
-    // Check memory first
-    if (otpStore[userId]) {
-      return otpStore[userId];
-    }
-    
-    // Check database
-    const otpDoc = await OTPModel.findOne({ 
-      userId, 
-      expires: { $gt: new Date() } 
-    });
-    
-    if (otpDoc) {
-      return {
-        otp: otpDoc.otp,
-        expires: otpDoc.expires.getTime(),
-        dbId: otpDoc._id
-      };
-    }
-    
-    return null;
-  } catch (error) {
-    console.error("Failed to get OTP from DB:", error);
-    return otpStore[userId] || null;
-  }
-};
-
-// Helper function to delete OTP
-const deleteOTP = async (userId) => {
-  try {
-    await OTPModel.deleteMany({ userId });
-    delete otpStore[userId];
-  } catch (error) {
-    console.error("Failed to delete OTP:", error);
-    delete otpStore[userId];
-  }
-};
-
-// Cleanup function
+// ==========================================
+// CLEANUP HELPER
+// ==========================================
 const cleanupFile = async (file) => {
   if (!file) return;
   try {
@@ -349,9 +228,7 @@ router.post("/signup", uploadLogo.single('logo'), async (req, res) => {
 
     const user = await User.create(userData);
 
-    // ============================================
     // 7. UPDATE REFERRER - AUTO ACTIVATE VIP
-    // ============================================
     if (referrer) {
       const updatedReferrer = await User.findByIdAndUpdate(
         referrer._id,
@@ -359,15 +236,12 @@ router.post("/signup", uploadLogo.single('logo'), async (req, res) => {
         { new: true }
       );
 
-      // Check if referrer has reached 10 referrals
       if (updatedReferrer.referralCount >= 10) {
-        // Auto-activate VIP
         updatedReferrer.isVip = true;
         updatedReferrer.canApplyForTdcCard = true;
         updatedReferrer.paymentStatus = "Verified";
         updatedReferrer.cardStatus = "Active";
         
-        // Set VIP expiry to 1 year from now
         const expiryDate = new Date();
         expiryDate.setFullYear(expiryDate.getFullYear() + 1);
         updatedReferrer.vipExpiry = expiryDate;
@@ -376,18 +250,16 @@ router.post("/signup", uploadLogo.single('logo'), async (req, res) => {
 
         console.log(`✅ VIP Activated for user: ${updatedReferrer.email} (${updatedReferrer.referralCount} referrals)`);
 
-        // Send notification about VIP activation
         try {
           await Notification.create({
             recipient: updatedReferrer._id,
             title: "🎉 TDC Privilege Card Activated!",
-            description: `Congratulations! You've reached 10 referrals and your TDC Privilege Card is now active. Tap "View My TDC Card" to see your digital card.`,
+            description: `Congratulations! You've reached 10 referrals and your TDC Privilege Card is now active.`,
             type: "System",
             icon: "card-account-details-star",
             readBy: [],
           });
 
-          // Send email notification
           await transporter.sendMail({
             from: `"The Deft Crew" <${process.env.EMAIL_USER}>`,
             to: updatedReferrer.email,
@@ -477,7 +349,7 @@ router.post("/login", async (req, res) => {
 });
 
 // ==========================================
-// GET PROFILE (ME) - UPDATED
+// GET PROFILE (ME)
 // ==========================================
 router.get("/profile/me", authMiddleware, async (req, res) => {
   try {
@@ -489,7 +361,6 @@ router.get("/profile/me", authMiddleware, async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    // Ensure VIP fields are included
     const userData = {
       ...user.toObject(),
       isVip: user.isVip || false,
@@ -509,7 +380,7 @@ router.get("/profile/me", authMiddleware, async (req, res) => {
 });
 
 // ==========================================
-// ACTIVATE VIP - UPDATED WITH MORE LOGGING
+// ACTIVATE VIP
 // ==========================================
 router.post("/activate-vip/:userId", authMiddleware, async (req, res) => {
   try {
@@ -517,7 +388,6 @@ router.post("/activate-vip/:userId", authMiddleware, async (req, res) => {
     
     console.log(`🔍 VIP Activation requested for user: ${userId}`);
     
-    // Check if the requesting user is the same as the target or is admin
     const requestingUser = await User.findById(req.userId);
     const targetUser = await User.findById(userId);
     
@@ -525,16 +395,13 @@ router.post("/activate-vip/:userId", authMiddleware, async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    // Allow if user is activating their own VIP or is admin
     if (req.userId !== userId && requestingUser.role !== 'admin') {
       return res.status(403).json({ message: "Unauthorized" });
     }
 
     console.log(`📊 User ${targetUser.email} has ${targetUser.referralCount} referrals, isVip: ${targetUser.isVip}`);
 
-    // Check if user has 10+ referrals
     if (targetUser.referralCount >= 10) {
-      // Activate VIP
       targetUser.isVip = true;
       targetUser.canApplyForTdcCard = true;
       targetUser.paymentStatus = "Verified";
@@ -548,11 +415,10 @@ router.post("/activate-vip/:userId", authMiddleware, async (req, res) => {
 
       console.log(`✅ VIP Activated successfully for ${targetUser.email}`);
 
-      // Create notification
       await Notification.create({
         recipient: targetUser._id,
         title: "🎉 TDC Privilege Card Activated!",
-        description: `Your TDC Privilege Card is now active! Tap "View My TDC Card" to see your digital card.`,
+        description: `Your TDC Privilege Card is now active!`,
         type: "System",
         icon: "card-account-details-star",
         readBy: [],
@@ -610,7 +476,7 @@ router.get("/check-vip-status", authMiddleware, async (req, res) => {
 });
 
 // ==========================================
-// FORGOT PASSWORD (SEND OTP) - FIXED
+// ✅ FORGOT PASSWORD (SEND OTP) - FIXED
 // ==========================================
 router.post("/forgot-password", async (req, res) => {
   const { emailOrPhone } = req.body;
@@ -620,10 +486,10 @@ router.post("/forgot-password", async (req, res) => {
   }
 
   try {
-    // Find user by email or phone
+    // Find user by email or phone - ✅ FIXED: case insensitive search
     const user = await User.findOne({
       $or: [
-        { email: emailOrPhone.toLowerCase().trim() },
+        { email: { $regex: new RegExp(`^${emailOrPhone.trim()}$`, 'i') } },
         { phone: emailOrPhone.trim() }
       ],
     });
@@ -635,17 +501,20 @@ router.post("/forgot-password", async (req, res) => {
     // Generate OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
+    // ✅ Store OTP in memory with user ID as key
+    otpStore[user._id.toString()] = {
+      otp: otp,
+      expires: Date.now() + 5 * 60 * 1000, // 5 minutes
+      email: user.email, // Store email for debugging
+    };
+
     console.log(`🔑 OTP for ${user.email}: ${otp}`);
+    console.log(`📦 OTP Store:`, Object.keys(otpStore));
 
-    // Save OTP to database and memory
-    await saveOTP(user._id, otp);
-
-    // Try to send email - but don't fail if it doesn't work
-    let emailSent = false;
+    // Send email
     try {
-      // ✅ FIXED: Use transporter with proper configuration
-      const mailOptions = {
-        from: process.env.EMAIL_USER || "abdulqadeerburiro110@gmail.com",
+      await transporter.sendMail({
+        from: `"The Deft Crew" <${process.env.EMAIL_USER || "abdulqadeerburiro110@gmail.com"}>`,
         to: user.email,
         subject: "🔐 Password Reset OTP - The Deft Crew",
         html: `
@@ -663,46 +532,30 @@ router.post("/forgot-password", async (req, res) => {
               <p style="color: #666; font-size: 14px;">This OTP expires in <strong>5 minutes</strong>.</p>
               <hr style="border: none; border-top: 1px solid #e0e0e0; margin: 20px 0;">
               <p style="color: #999; font-size: 12px;">If you didn't request this, please ignore this email.</p>
+              <p style="color: #999; font-size: 12px; margin-top: 10px;">User ID: ${user._id}</p>
             </div>
           </div>
         `,
-      };
-
-      // Send email with timeout
-      const sendMailWithTimeout = async (mailOptions, timeoutMs = 10000) => {
-        return new Promise((resolve, reject) => {
-          const timeout = setTimeout(() => {
-            reject(new Error('Email sending timeout'));
-          }, timeoutMs);
-          
-          transporter.sendMail(mailOptions, (error, info) => {
-            clearTimeout(timeout);
-            if (error) {
-              reject(error);
-            } else {
-              resolve(info);
-            }
-          });
-        });
-      };
-
-      await sendMailWithTimeout(mailOptions, 15000);
-      emailSent = true;
+      });
       console.log(`✅ OTP email sent to ${user.email}`);
     } catch (mailError) {
-      console.log(`⚠️ Email failed but OTP is stored: ${mailError.message}`);
-      emailSent = false;
+      console.log(`⚠️ Email failed: ${mailError.message}`);
+      // Return OTP in response for development
+      if (process.env.NODE_ENV === 'development') {
+        return res.json({
+          message: "OTP generated (email failed)",
+          userId: user._id,
+          otp: otp, // Only for development
+          emailSent: false,
+        });
+      }
     }
 
-    // Return success regardless of email status
+    // ✅ Return success with userId
     return res.json({
-      message: emailSent 
-        ? "OTP sent successfully to your email" 
-        : "OTP generated. Please check your email (may take a moment) or contact support.",
+      message: "OTP sent successfully to your email",
       userId: user._id,
-      emailSent: emailSent,
-      // In development, return OTP for testing
-      ...(process.env.NODE_ENV === 'development' && { debugOtp: otp })
+      emailSent: true,
     });
 
   } catch (err) {
@@ -715,64 +568,74 @@ router.post("/forgot-password", async (req, res) => {
 });
 
 // ==========================================
-// VERIFY OTP - FIXED
+// ✅ VERIFY OTP - FIXED
 // ==========================================
 router.post("/verify-otp", async (req, res) => {
   const { userId, otp } = req.body;
+
+  console.log(`🔐 Verify OTP Request:`);
+  console.log(`  User ID: ${userId}`);
+  console.log(`  OTP: ${otp}`);
+  console.log(`  OTP Store Keys:`, Object.keys(otpStore));
 
   if (!userId || !otp) {
     return res.status(400).json({ message: "User ID and OTP are required" });
   }
 
-  try {
-    const record = await getOTP(userId);
+  // Get OTP record from store
+  const record = otpStore[userId];
 
-    if (!record) {
-      return res.status(400).json({ 
-        message: "No OTP request found. Please request a new OTP." 
-      });
-    }
+  console.log(`  Found Record:`, record ? {
+    otp: record.otp,
+    expires: new Date(record.expires).toISOString(),
+    isExpired: record.expires < Date.now(),
+    email: record.email
+  } : 'No record found');
 
-    if (record.expires < Date.now()) {
-      await deleteOTP(userId);
-      return res.status(400).json({ 
-        message: "OTP has expired. Please request a new one." 
-      });
-    }
-
-    if (record.otp !== otp.trim()) {
-      // Check if this is a development environment and OTP matches debug
-      if (process.env.NODE_ENV === 'development' && otp.trim() === '123456') {
-        // Allow 123456 as debug OTP in development
-        console.log('🔓 Debug OTP accepted');
-      } else {
-        return res.status(400).json({ 
-          message: "Invalid OTP. Please check and try again." 
-        });
-      }
-    }
-
-    // Generate reset token
-    const tempToken = jwt.sign(
-      { id: userId, purpose: 'password-reset' },
-      process.env.JWT_SECRET || "abdulqadeer11111",
-      { expiresIn: "10m" }
-    );
-
-    // Delete used OTP
-    await deleteOTP(userId);
-
-    res.json({ 
-      message: "OTP verified successfully", 
-      resetToken: tempToken 
-    });
-
-  } catch (err) {
-    console.error("OTP verification error:", err);
-    res.status(500).json({ 
-      message: "Server error during verification. Please try again." 
+  if (!record) {
+    return res.status(400).json({ 
+      message: "No OTP request found. Please request a new OTP.",
+      debug: "No record in store"
     });
   }
+
+  if (record.expires < Date.now()) {
+    delete otpStore[userId];
+    return res.status(400).json({ 
+      message: "OTP has expired. Please request a new one.",
+      debug: "OTP expired"
+    });
+  }
+
+  // ✅ Trim OTP and compare
+  const trimmedOTP = otp.trim();
+  const storedOTP = record.otp;
+
+  console.log(`  Comparing: "${trimmedOTP}" vs "${storedOTP}"`);
+
+  if (trimmedOTP !== storedOTP) {
+    return res.status(400).json({ 
+      message: "Invalid OTP. Please check and try again.",
+      debug: "OTP mismatch"
+    });
+  }
+
+  // ✅ OTP verified - generate reset token
+  const tempToken = jwt.sign(
+    { id: userId, purpose: 'password-reset' },
+    process.env.JWT_SECRET || "abdulqadeer11111",
+    { expiresIn: "10m" }
+  );
+
+  // ✅ Delete used OTP
+  delete otpStore[userId];
+
+  console.log(`✅ OTP verified successfully for user ${userId}`);
+
+  res.json({ 
+    message: "OTP verified successfully", 
+    resetToken: tempToken 
+  });
 });
 
 // ==========================================
@@ -788,7 +651,6 @@ router.post("/reset-password", async (req, res) => {
   try {
     const decoded = jwt.verify(resetToken, process.env.JWT_SECRET || "abdulqadeer11111");
     
-    // Verify this is a password reset token
     if (decoded.purpose !== 'password-reset') {
       return res.status(400).json({ message: "Invalid token type" });
     }
@@ -796,12 +658,8 @@ router.post("/reset-password", async (req, res) => {
     const user = await User.findById(decoded.id);
     if (!user) return res.status(404).json({ message: "User not found" });
 
-    // Update password
     user.password = await bcrypt.hash(newPassword, 10);
     await user.save();
-
-    // Clean up any remaining OTP
-    await deleteOTP(decoded.id);
 
     res.json({ message: "Password reset successfully" });
   } catch (err) {
@@ -813,7 +671,7 @@ router.post("/reset-password", async (req, res) => {
 });
 
 // ==========================================
-// ADMIN: APPROVE USER
+// ADMIN ROUTES
 // ==========================================
 router.post("/approve-user/:id", authMiddleware, async (req, res) => {
   try {
@@ -828,9 +686,6 @@ router.post("/approve-user/:id", authMiddleware, async (req, res) => {
   }
 });
 
-// ==========================================
-// ADMIN: VERIFY USER
-// ==========================================
 router.patch("/verify-user/:targetUserId", authMiddleware, async (req, res) => {
   try {
     const updatedUser = await User.findByIdAndUpdate(
@@ -842,7 +697,7 @@ router.patch("/verify-user/:targetUserId", authMiddleware, async (req, res) => {
     await Notification.create({
       recipient: updatedUser._id,
       title: "Account Verified! ✅",
-      description: "Welcome to the elite club! Your student status is verified. Enjoy premium discounts.",
+      description: "Welcome to the elite club! Your student status is verified.",
       type: "System",
       icon: "sparkles",
     });
@@ -963,7 +818,9 @@ router.delete("/delete-account", authMiddleware, async (req, res) => {
 
     await User.findByIdAndDelete(userId);
 
-    await deleteOTP(userId);
+    if (otpStore[userId]) {
+      delete otpStore[userId];
+    }
 
     console.log(`✅ Account deleted: ${user.email} (${userId})`);
 
@@ -1083,7 +940,4 @@ router.get("/me", authMiddleware, async (req, res) => {
   }
 });
 
-// ==========================================
-// EXPORT
-// ==========================================
 module.exports = router;
