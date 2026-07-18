@@ -38,7 +38,9 @@ const NotificationSchema = new mongoose.Schema({
       "Booking",
       "Card",
       "Payment",
-      "Jobs"
+      "Jobs",
+      "Update",
+      "Promotion"
     ],
     default: "System"
   },

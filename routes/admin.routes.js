@@ -291,41 +291,104 @@ router.post("/users/reset-password/:id", auth, isAdmin, async (req, res) => {
 });
 
 // 1. CREATE: Add new Slider or Offer
+// 1. CREATE: Add new Slider or Offer
 router.post("/add", auth, isAdmin, upload.single("image"), async (req, res) => {
   try {
+    console.log("=== ADMIN ADD ROUTE HIT ===");
+    console.log("Request body:", req.body);
+    console.log("Request file:", req.file);
+    
     const { type, title, description, link } = req.body;
-    if (!req.file)
+    
+    // Validate required fields
+    if (!req.file) {
       return res.status(400).json({ message: "Image is required" });
+    }
+    
+    if (!type || !title) {
+      return res.status(400).json({ message: "Type and title are required" });
+    }
 
-    const newEntry = new Slider({
-      type, // 'slider' or 'offer'
-      title,
-      description,
-      link,
-      // image: `/uploads/${req.file.filename}`,
+    // Build the slider object
+    const sliderData = {
+      type: type || 'slider',
+      title: title || 'Untitled',
+      description: description || '',
+      link: link || '',
       image: req.file.path,
       active: true,
-    });
+    };
 
+    console.log("Creating slider with data:", sliderData);
+
+    const newEntry = new Slider(sliderData);
     await newEntry.save();
 
-    res.status(201).json({ message: "Content published!", data: newEntry });
-    // BROADCAST NOTIFICATION - Fixed variable names
-    // BROADCAST NOTIFICATION
-    try {
-      await Notification.create({
-        recipient: null, // Public broadcast
-        title: "New Exclusive Offer! 🔥",
-        description: `A new deal has been posted: ${newEntry.title}! Check it out now.`,
-        type: "Offers",
-        icon: "megaphone",
-        link: newEntry._id.toString(),
-      });
-    } catch (nError) {
-      console.error("Notification failed to send:", nError);
+    console.log("Slider created successfully:", newEntry);
+
+    // ✅ SEND NOTIFICATION HERE - BEFORE RESPONSE
+    if (type === 'offer') {
+      try {
+        console.log("Attempting to send notification for offer...");
+        
+        const notificationData = {
+          recipient: null, // Public broadcast
+          title: "New Exclusive Offer! 🔥",
+          description: `A new deal has been posted: ${newEntry.title}! Check it out now.`,
+          type: "System", // Changed from "Offers" to "System" - more likely to be valid
+          icon: "megaphone",
+          link: newEntry._id.toString(),
+        };
+        
+        console.log("Notification data:", notificationData);
+        
+        const notification = await Notification.create(notificationData);
+        console.log("Notification sent successfully:", notification);
+        
+      } catch (nError) {
+        console.error("Notification failed:", nError);
+        // Don't fail the request if notification fails
+        console.error("Error details:", {
+          name: nError.name,
+          message: nError.message,
+          code: nError.code
+        });
+      }
     }
+
+    // ✅ NOW SEND THE RESPONSE
+    res.status(201).json({ 
+      message: "Content published successfully!", 
+      data: newEntry 
+    });
+
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error("=== ERROR IN ADMIN ADD ROUTE ===");
+    console.error("Error name:", error.name);
+    console.error("Error message:", error.message);
+    console.error("Error stack:", error.stack);
+    
+    // Check for validation errors
+    if (error.name === 'ValidationError') {
+      const errors = Object.values(error.errors).map(e => e.message);
+      return res.status(400).json({ 
+        message: "Validation failed", 
+        errors: errors 
+      });
+    }
+    
+    // Check for duplicate key errors
+    if (error.code === 11000) {
+      return res.status(400).json({ 
+        message: "Duplicate entry", 
+        field: Object.keys(error.keyPattern)[0] 
+      });
+    }
+    
+    res.status(500).json({ 
+      message: "Server error occurred", 
+      error: error.message 
+    });
   }
 });
 
