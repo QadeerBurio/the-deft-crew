@@ -18,28 +18,17 @@ const fs = require("fs");
 const router = express.Router();
 
 // ==========================================
-// OTP STORE
+// OTP STORE & EMAIL TRANSPORTER
 // ==========================================
 const otpStore = {};
-
-// ==========================================
-// EMAIL TRANSPORTER - FIXED
-// ==========================================
 const transporter = nodemailer.createTransport({
   service: "gmail",
   auth: {
     user: process.env.EMAIL_USER || "abdulqadeerburiro110@gmail.com",
     pass: process.env.EMAIL_PASS || "lhefzozqsdmubawi",
   },
-  // ✅ CRITICAL FIX: These settings help with Railway deployment
-  tls: {
-    rejectUnauthorized: false,
-  },
-  pool: true,
-  maxConnections: 1,
 });
 
-// Verify email transporter
 transporter.verify(function (error, success) {
   if (error) {
     console.log("❌ Email transporter error:", error.message);
@@ -48,9 +37,7 @@ transporter.verify(function (error, success) {
   }
 });
 
-// ==========================================
-// CLEANUP HELPER
-// ==========================================
+// Helper function to cleanup uploaded files
 const cleanupFile = async (file) => {
   if (!file) return;
   try {
@@ -228,7 +215,9 @@ router.post("/signup", uploadLogo.single('logo'), async (req, res) => {
 
     const user = await User.create(userData);
 
+    // ============================================
     // 7. UPDATE REFERRER - AUTO ACTIVATE VIP
+    // ============================================
     if (referrer) {
       const updatedReferrer = await User.findByIdAndUpdate(
         referrer._id,
@@ -236,12 +225,15 @@ router.post("/signup", uploadLogo.single('logo'), async (req, res) => {
         { new: true }
       );
 
+      // Check if referrer has reached 10 referrals
       if (updatedReferrer.referralCount >= 10) {
+        // Auto-activate VIP
         updatedReferrer.isVip = true;
         updatedReferrer.canApplyForTdcCard = true;
         updatedReferrer.paymentStatus = "Verified";
         updatedReferrer.cardStatus = "Active";
         
+        // Set VIP expiry to 1 year from now
         const expiryDate = new Date();
         expiryDate.setFullYear(expiryDate.getFullYear() + 1);
         updatedReferrer.vipExpiry = expiryDate;
@@ -250,16 +242,18 @@ router.post("/signup", uploadLogo.single('logo'), async (req, res) => {
 
         console.log(`✅ VIP Activated for user: ${updatedReferrer.email} (${updatedReferrer.referralCount} referrals)`);
 
+        // Send notification about VIP activation
         try {
           await Notification.create({
             recipient: updatedReferrer._id,
             title: "🎉 TDC Privilege Card Activated!",
-            description: `Congratulations! You've reached 10 referrals and your TDC Privilege Card is now active.`,
+            description: `Congratulations! You've reached 10 referrals and your TDC Privilege Card is now active. Tap "View My TDC Card" to see your digital card.`,
             type: "System",
             icon: "card-account-details-star",
             readBy: [],
           });
 
+          // Send email notification
           await transporter.sendMail({
             from: `"The Deft Crew" <${process.env.EMAIL_USER}>`,
             to: updatedReferrer.email,
@@ -349,7 +343,7 @@ router.post("/login", async (req, res) => {
 });
 
 // ==========================================
-// GET PROFILE (ME)
+// GET PROFILE (ME) - UPDATED
 // ==========================================
 router.get("/profile/me", authMiddleware, async (req, res) => {
   try {
@@ -361,6 +355,7 @@ router.get("/profile/me", authMiddleware, async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
+    // Ensure VIP fields are included
     const userData = {
       ...user.toObject(),
       isVip: user.isVip || false,
@@ -380,7 +375,7 @@ router.get("/profile/me", authMiddleware, async (req, res) => {
 });
 
 // ==========================================
-// ACTIVATE VIP
+// ACTIVATE VIP - UPDATED WITH MORE LOGGING
 // ==========================================
 router.post("/activate-vip/:userId", authMiddleware, async (req, res) => {
   try {
@@ -388,6 +383,7 @@ router.post("/activate-vip/:userId", authMiddleware, async (req, res) => {
     
     console.log(`🔍 VIP Activation requested for user: ${userId}`);
     
+    // Check if the requesting user is the same as the target or is admin
     const requestingUser = await User.findById(req.userId);
     const targetUser = await User.findById(userId);
     
@@ -395,13 +391,16 @@ router.post("/activate-vip/:userId", authMiddleware, async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
+    // Allow if user is activating their own VIP or is admin
     if (req.userId !== userId && requestingUser.role !== 'admin') {
       return res.status(403).json({ message: "Unauthorized" });
     }
 
     console.log(`📊 User ${targetUser.email} has ${targetUser.referralCount} referrals, isVip: ${targetUser.isVip}`);
 
+    // Check if user has 10+ referrals
     if (targetUser.referralCount >= 10) {
+      // Activate VIP
       targetUser.isVip = true;
       targetUser.canApplyForTdcCard = true;
       targetUser.paymentStatus = "Verified";
@@ -415,10 +414,11 @@ router.post("/activate-vip/:userId", authMiddleware, async (req, res) => {
 
       console.log(`✅ VIP Activated successfully for ${targetUser.email}`);
 
+      // Create notification
       await Notification.create({
         recipient: targetUser._id,
         title: "🎉 TDC Privilege Card Activated!",
-        description: `Your TDC Privilege Card is now active!`,
+        description: `Your TDC Privilege Card is now active! Tap "View My TDC Card" to see your digital card.`,
         type: "System",
         icon: "card-account-details-star",
         readBy: [],
@@ -476,7 +476,7 @@ router.get("/check-vip-status", authMiddleware, async (req, res) => {
 });
 
 // ==========================================
-// ✅ FORGOT PASSWORD (SEND OTP) - FIXED
+// FORGOT PASSWORD (SEND OTP)
 // ==========================================
 router.post("/forgot-password", async (req, res) => {
   const { emailOrPhone } = req.body;
@@ -486,10 +486,9 @@ router.post("/forgot-password", async (req, res) => {
   }
 
   try {
-    // Find user by email or phone - ✅ FIXED: case insensitive search
     const user = await User.findOne({
       $or: [
-        { email: { $regex: new RegExp(`^${emailOrPhone.trim()}$`, 'i') } },
+        { email: emailOrPhone.toLowerCase().trim() },
         { phone: emailOrPhone.trim() }
       ],
     });
@@ -498,144 +497,78 @@ router.post("/forgot-password", async (req, res) => {
       return res.status(404).json({ message: "No account found with this email or phone" });
     }
 
-    // Generate OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
-    // ✅ Store OTP in memory with user ID as key
-    otpStore[user._id.toString()] = {
-      otp: otp,
-      expires: Date.now() + 5 * 60 * 1000, // 5 minutes
-      email: user.email, // Store email for debugging
+    otpStore[user._id] = {
+      otp,
+      expires: Date.now() + 5 * 60 * 1000,
     };
 
     console.log(`🔑 OTP for ${user.email}: ${otp}`);
-    console.log(`📦 OTP Store:`, Object.keys(otpStore));
 
-    // Send email
     try {
       await transporter.sendMail({
-        from: `"The Deft Crew" <${process.env.EMAIL_USER || "abdulqadeerburiro110@gmail.com"}>`,
+        from: `"The Deft Crew" <abdulqadeerburiro110@gmail.com>`,
         to: user.email,
-        subject: "🔐 Password Reset OTP - The Deft Crew",
+        subject: "Password Reset OTP - The Deft Crew",
         html: `
-          <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 10px;">
-            <div style="text-align: center; margin-bottom: 20px;">
-              <h1 style="color: #1a1a1a; margin: 0;">🔐 The Deft Crew</h1>
-              <p style="color: #666; margin: 5px 0;">Password Reset</p>
+          <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 20px;">
+            <h2 style="color: #1a1a1a;">Password Reset Request</h2>
+            <p>Hello ${user.name || 'User'},</p>
+            <p>Use the following OTP code:</p>
+            <div style="background: #f9c349; padding: 20px; text-align: center; border-radius: 10px; margin: 20px 0;">
+              <h1 style="color: #1a1a1a; font-size: 36px; letter-spacing: 5px; margin: 0;">${otp}</h1>
             </div>
-            <div style="background: #f9f9f9; padding: 20px; border-radius: 8px; text-align: center;">
-              <p style="color: #333; font-size: 16px;">Hello <strong>${user.name || 'User'}</strong>,</p>
-              <p style="color: #666;">Use the following OTP code to reset your password:</p>
-              <div style="background: #1a1a1a; padding: 20px; text-align: center; border-radius: 10px; margin: 20px 0;">
-                <h1 style="color: #f9c349; font-size: 40px; letter-spacing: 8px; margin: 0; font-weight: 900;">${otp}</h1>
-              </div>
-              <p style="color: #666; font-size: 14px;">This OTP expires in <strong>5 minutes</strong>.</p>
-              <hr style="border: none; border-top: 1px solid #e0e0e0; margin: 20px 0;">
-              <p style="color: #999; font-size: 12px;">If you didn't request this, please ignore this email.</p>
-              <p style="color: #999; font-size: 12px; margin-top: 10px;">User ID: ${user._id}</p>
-            </div>
+            <p style="color: #666;">This OTP expires in <strong>5 minutes</strong>.</p>
           </div>
         `,
       });
       console.log(`✅ OTP email sent to ${user.email}`);
     } catch (mailError) {
-      console.log(`⚠️ Email failed: ${mailError.message}`);
-      // Return OTP in response for development
-      if (process.env.NODE_ENV === 'development') {
-        return res.json({
-          message: "OTP generated (email failed)",
-          userId: user._id,
-          otp: otp, // Only for development
-          emailSent: false,
-        });
-      }
+      console.log("⚠️ Email failed but OTP generated:", otp);
     }
 
-    // ✅ Return success with userId
     return res.json({
       message: "OTP sent successfully to your email",
       userId: user._id,
-      emailSent: true,
     });
 
   } catch (err) {
     console.error("❌ Forgot password error:", err);
-    return res.status(500).json({ 
-      message: "Server error. Please try again.",
-      error: process.env.NODE_ENV === 'development' ? err.message : undefined
-    });
+    return res.status(500).json({ message: "Server error. Please try again." });
   }
 });
 
 // ==========================================
-// ✅ VERIFY OTP - FIXED
+// VERIFY OTP
 // ==========================================
 router.post("/verify-otp", async (req, res) => {
   const { userId, otp } = req.body;
-
-  console.log(`🔐 Verify OTP Request:`);
-  console.log(`  User ID: ${userId}`);
-  console.log(`  OTP: ${otp}`);
-  console.log(`  OTP Store Keys:`, Object.keys(otpStore));
 
   if (!userId || !otp) {
     return res.status(400).json({ message: "User ID and OTP are required" });
   }
 
-  // Get OTP record from store
   const record = otpStore[userId];
 
-  console.log(`  Found Record:`, record ? {
-    otp: record.otp,
-    expires: new Date(record.expires).toISOString(),
-    isExpired: record.expires < Date.now(),
-    email: record.email
-  } : 'No record found');
-
-  if (!record) {
-    return res.status(400).json({ 
-      message: "No OTP request found. Please request a new OTP.",
-      debug: "No record in store"
-    });
-  }
-
+  if (!record) return res.status(400).json({ message: "No OTP request found. Please request a new OTP." });
   if (record.expires < Date.now()) {
     delete otpStore[userId];
-    return res.status(400).json({ 
-      message: "OTP has expired. Please request a new one.",
-      debug: "OTP expired"
-    });
+    return res.status(400).json({ message: "OTP has expired. Please request a new one." });
+  }
+  if (record.otp !== otp.trim()) {
+    return res.status(400).json({ message: "Invalid OTP. Please check and try again." });
   }
 
-  // ✅ Trim OTP and compare
-  const trimmedOTP = otp.trim();
-  const storedOTP = record.otp;
-
-  console.log(`  Comparing: "${trimmedOTP}" vs "${storedOTP}"`);
-
-  if (trimmedOTP !== storedOTP) {
-    return res.status(400).json({ 
-      message: "Invalid OTP. Please check and try again.",
-      debug: "OTP mismatch"
-    });
-  }
-
-  // ✅ OTP verified - generate reset token
   const tempToken = jwt.sign(
     { id: userId, purpose: 'password-reset' },
     process.env.JWT_SECRET || "abdulqadeer11111",
     { expiresIn: "10m" }
   );
 
-  // ✅ Delete used OTP
   delete otpStore[userId];
 
-  console.log(`✅ OTP verified successfully for user ${userId}`);
-
-  res.json({ 
-    message: "OTP verified successfully", 
-    resetToken: tempToken 
-  });
+  res.json({ message: "OTP verified", resetToken: tempToken });
 });
 
 // ==========================================
@@ -650,28 +583,22 @@ router.post("/reset-password", async (req, res) => {
 
   try {
     const decoded = jwt.verify(resetToken, process.env.JWT_SECRET || "abdulqadeer11111");
-    
-    if (decoded.purpose !== 'password-reset') {
-      return res.status(400).json({ message: "Invalid token type" });
-    }
-    
     const user = await User.findById(decoded.id);
     if (!user) return res.status(404).json({ message: "User not found" });
 
     user.password = await bcrypt.hash(newPassword, 10);
     await user.save();
 
+    delete otpStore[decoded.id];
+
     res.json({ message: "Password reset successfully" });
   } catch (err) {
-    console.error("Password reset error:", err);
-    res.status(400).json({ 
-      message: "Session expired. Please request a new OTP." 
-    });
+    res.status(400).json({ message: "Session expired. Please request a new OTP." });
   }
 });
 
 // ==========================================
-// ADMIN ROUTES
+// ADMIN: APPROVE USER
 // ==========================================
 router.post("/approve-user/:id", authMiddleware, async (req, res) => {
   try {
@@ -686,6 +613,9 @@ router.post("/approve-user/:id", authMiddleware, async (req, res) => {
   }
 });
 
+// ==========================================
+// ADMIN: VERIFY USER
+// ==========================================
 router.patch("/verify-user/:targetUserId", authMiddleware, async (req, res) => {
   try {
     const updatedUser = await User.findByIdAndUpdate(
@@ -697,7 +627,7 @@ router.patch("/verify-user/:targetUserId", authMiddleware, async (req, res) => {
     await Notification.create({
       recipient: updatedUser._id,
       title: "Account Verified! ✅",
-      description: "Welcome to the elite club! Your student status is verified.",
+      description: "Welcome to the elite club! Your student status is verified. Enjoy premium discounts.",
       type: "System",
       icon: "sparkles",
     });
@@ -940,4 +870,7 @@ router.get("/me", authMiddleware, async (req, res) => {
   }
 });
 
+// ==========================================
+// EXPORT
+// ==========================================
 module.exports = router;
