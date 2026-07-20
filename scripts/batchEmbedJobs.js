@@ -19,6 +19,7 @@ async function main() {
     await mongoose.connect(process.env.MONGO_URI);
     console.log('✅ Connected to MongoDB\n');
 
+    
     console.log('🚀 Starting batch job embedding pipeline...');
     console.log('   Model:', process.env.OPENAI_EMBEDDING_MODEL || 'text-embedding-3-small');
     console.log('   Batch size: 10 jobs, 500ms delay between batches\n');
