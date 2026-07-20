@@ -130,6 +130,7 @@ class JobIngestionService {
     }
 
     console.log(`📊 [Ingestion] Complete. Fetched: ${totalFetched}, Created: ${totalSaved}, Updated: ${totalUpdated}, Errors: ${errors.length}`);
+    await this.cleanupExpiredJobs();
     return {
       success: errors.length < this.adapters.length,
       totalFetched,
@@ -137,6 +138,26 @@ class JobIngestionService {
       updated: totalUpdated,
       errors
     };
+  }
+
+  /**
+   * Automatically deactivates listings whose applicationDeadline has passed.
+   */
+  async cleanupExpiredJobs() {
+    try {
+      const now = new Date();
+      const result = await Job.updateMany(
+        { active: true, applicationDeadline: { $lt: now } },
+        { $set: { active: false } }
+      );
+      if (result.modifiedCount > 0) {
+        console.log(`⏰ [Expired Jobs Cleanup] Deactivated ${result.modifiedCount} expired job/internship listings.`);
+      }
+      return result.modifiedCount;
+    } catch (err) {
+      console.error('⚠️ [Expired Jobs Cleanup] Error during cleanup:', err.message);
+      return 0;
+    }
   }
 }
 

@@ -164,11 +164,10 @@ async function getHybridRecommendations(resumeId, userId, options = {}) {
       applicationDeadline: { $gte: new Date() }
     };
 
-    const typesToQuery = new Set(['Internship']);
+    const typesToQuery = new Set(['Internship', 'Full-time', 'Contract', 'Part-time', 'Temporary']);
     if (preferredJobTypes.length > 0) {
+      typesToQuery.clear();
       preferredJobTypes.forEach(t => typesToQuery.add(t));
-    } else {
-      typesToQuery.add('Full-time');
     }
     hardQuery.type = { $in: Array.from(typesToQuery) };
 

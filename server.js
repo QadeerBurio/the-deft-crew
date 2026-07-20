@@ -46,6 +46,28 @@ connectDB().then(() => {
     console.error("❌ [Startup] Failed to purge non-Pakistan jobs:", err);
   });
 
+  // Patch existing admin/manual jobs to ensure flags exist
+  Job.updateMany({ isExternal: { $exists: false } }, { $set: { isExternal: false } }).exec();
+  Job.updateMany({ active: { $exists: false } }, { $set: { active: true } }).exec();
+  Job.updateMany(
+    { applicationDeadline: { $exists: false } },
+    { $set: { applicationDeadline: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000) } }
+  ).exec();
+
+  const jobIngestionService = require("./services/jobIngestionService");
+  jobIngestionService.cleanupExpiredJobs().then(count => {
+    if (count > 0) console.log(`⏰ [Startup] Cleaned up ${count} expired jobs.`);
+  }).catch(err => {
+    console.error("❌ [Startup] Failed to run expired jobs cleanup:", err);
+  });
+
+  // Schedule periodic cleanup every 6 hours
+  setInterval(() => {
+    jobIngestionService.cleanupExpiredJobs().catch(err => {
+      console.error("❌ [Periodic] Expired jobs cleanup failed:", err);
+    });
+  }, 6 * 60 * 60 * 1000);
+
   const { connectDB: connectChatDB } = require("./chat-service/dist/config/db");
   const { schedulerService } = require("./chat-service/dist/services/scheduler.service");
   connectChatDB().then(() => {
