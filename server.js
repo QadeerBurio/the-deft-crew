@@ -56,17 +56,7 @@ connectDB().then(() => {
     console.error("❌ Failed to connect to chat database:", err);
   });
 
-  // ⏰ Job Ingestion Scheduler (Disabled - Exclusively Internships Mode)
-  // const jobIngestionService = require("./services/jobIngestionService");
-  // setTimeout(() => {
-  //   console.log("⏰ [Scheduler] Running initial job ingestion scan...");
-  //   jobIngestionService.ingestJobs().catch(err => console.error("❌ [Scheduler] Initial ingestion error:", err.message));
-  // }, 5000);
 
-  // setInterval(() => {
-  //   console.log("⏰ [Scheduler] Running recurring 6-hour job ingestion...");
-  //   jobIngestionService.ingestJobs().catch(err => console.error("❌ [Scheduler] Recurring ingestion error:", err.message));
-  // }, 21600000);
 });
 
 // ---------------- ROUTES ----------------

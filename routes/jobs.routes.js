@@ -1058,7 +1058,7 @@ function getStatusColor(status) {
     };
     return colors[status] || "#6b7280";
 }
-
+ 
 // routes/job.routes.js - Add these routes to your existing job routes
 
 // ==================== RESUME-BASED JOB RECOMMENDATIONS ====================
@@ -1260,7 +1260,6 @@ router.get('/feed', authMiddleware, async (req, res) => {
 });
 
 // GET /api/jobs/similar/:jobId
-// Return semantically similar jobs to the given job (for job detail screen)
 router.get('/similar/:jobId', authMiddleware, async (req, res) => {
   try {
     const { jobId } = req.params;
@@ -1419,7 +1418,6 @@ router.post('/:jobId/interactions', authMiddleware, async (req, res) => {
 
 // GET /api/jobs/:jobId/skill-gap
 // Analyse skill gap between the user's primary resume and a specific job.
-// Returns cached result if available (24h TTL). Runs AI analysis on first request.
 router.get('/:jobId/skill-gap', authMiddleware, async (req, res) => {
   try {
     const { jobId } = req.params;
@@ -1559,10 +1557,7 @@ router.get('/:jobId/ats-score', authMiddleware, async (req, res) => {
 });
 
 // ==================== JOB INGESTION ROUTE ====================
-
 // POST /api/jobs/ingest/trigger
-// Manually triggers job ingestion from external sources (Remotive, JSearch).
-// Protected: Admin or Employee only.
 router.post('/ingest/trigger', authMiddleware, isAdminOrEmployee, async (req, res) => {
   try {
     const jobIngestionService = require('../services/jobIngestionService');
@@ -1581,5 +1576,4 @@ router.post('/ingest/trigger', authMiddleware, isAdminOrEmployee, async (req, re
     });
   }
 });
-
 module.exports = router;
