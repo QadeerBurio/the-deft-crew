@@ -9,126 +9,6 @@ const { generateJobEmbedding } = require('../services/jobEmbeddingService');
 const { getHybridRecommendations, getSimilarJobs } = require('../services/recommendationService');
 const { analyseSkillGap, validateApplication } = require('../services/skillGapService');
 
-/**
- * Intelligently parses search text and attaches logical multi-term MongoDB query conditions.
- * Handles: City names, Job/Internship types, Remote/On-site/Hybrid, Paid/Unpaid, Categories, and general Skill/Role keywords.
- */
-function buildSearchQuery(searchString, baseQuery = {}) {
-  if (!searchString || typeof searchString !== 'string' || !searchString.trim()) {
-    return baseQuery;
-  }
-
-  const cleanSearch = searchString.trim();
-  const lowerSearch = cleanSearch.toLowerCase();
-
-  const query = { ...baseQuery };
-  query.$and = query.$and || [];
-
-  // 1. City / Location detection
-  const pakCities = [
-    'karachi', 'lahore', 'islamabad', 'rawalpindi', 'faisalabad', 'multan',
-    'peshawar', 'quetta', 'sialkot', 'gujranwala', 'hyderabad', 'abbottabad',
-    'sargodha', 'bahawalpur', 'sukkur', 'larkana', 'gujrat', 'sheikhupura', 'jhelum', 'sahiwal'
-  ];
-  const detectedCities = pakCities.filter(city => lowerSearch.includes(city));
-  if (detectedCities.length > 0) {
-    const cityRegex = new RegExp(detectedCities.join('|'), 'i');
-    query.$and.push({ location: { $regex: cityRegex } });
-  }
-
-  // 2. Location Type detection (Remote / Hybrid / On-site)
-  if (lowerSearch.includes('remote')) {
-    query.$and.push({
-      $or: [
-        { locationType: 'Remote' },
-        { location: { $regex: 'remote', $options: 'i' } },
-        { description: { $regex: 'remote', $options: 'i' } }
-      ]
-    });
-  } else if (lowerSearch.includes('hybrid')) {
-    query.$and.push({ locationType: 'Hybrid' });
-  } else if (lowerSearch.includes('on-site') || lowerSearch.includes('onsite') || lowerSearch.includes('office')) {
-    query.$and.push({ locationType: 'On-site' });
-  }
-
-  // 3. Job Type / Program Intent (Internship vs Job/Full-time)
-  if (lowerSearch.includes('internship') || lowerSearch.includes('intern')) {
-    query.$and.push({ type: 'Internship' });
-  } else if (lowerSearch.includes('fulltime') || lowerSearch.includes('full-time') || lowerSearch.includes('full time')) {
-    query.$and.push({ type: 'Full-time' });
-  } else if (lowerSearch.includes('part-time') || lowerSearch.includes('parttime') || lowerSearch.includes('part time')) {
-    query.$and.push({ type: 'Part-time' });
-  } else if (lowerSearch.includes('contract')) {
-    query.$and.push({ type: 'Contract' });
-  }
-
-  // 4. Compensation Intent (Paid vs Unpaid)
-  if (lowerSearch.includes('unpaid')) {
-    query.$and.push({
-      $or: [
-        { salary: { $regex: 'unpaid|free|no stipend', $options: 'i' } },
-        { description: { $regex: 'unpaid', $options: 'i' } }
-      ]
-    });
-  } else if (lowerSearch.includes('paid') || lowerSearch.includes('stipend')) {
-    query.$and.push({
-      $or: [
-        { salary: { $regex: 'paid|stipend|pkr|rs|[0-9]', $options: 'i' } },
-        { description: { $regex: 'paid|stipend', $options: 'i' } }
-      ]
-    });
-  }
-
-  // 5. Tokenize for remaining keyword terms (Skills, Roles, Departments, Companies)
-  const stopWords = new Set([
-    'in', 'for', 'at', 'with', 'and', 'or', 'a', 'an', 'the', 'of', 'to', 'is', 'on',
-    'job', 'jobs', 'listing', 'listings', 'opportunity', 'opportunities', 'position', 'positions',
-    'remote', 'hybrid', 'onsite', 'on-site', 'office', 'internship', 'internships', 'intern', 'interns',
-    'fulltime', 'full-time', 'part-time', 'contract', 'paid', 'unpaid', 'stipend',
-    ...pakCities
-  ]);
-
-  const words = lowerSearch
-    .replace(/[^\w\s-]/g, ' ')
-    .split(/\s+/)
-    .filter(w => w.length >= 2 && !stopWords.has(w));
-
-  if (words.length > 0) {
-    words.forEach(word => {
-      const wordRegex = new RegExp(word, 'i');
-      query.$and.push({
-        $or: [
-          { title: { $regex: wordRegex } },
-          { department: { $regex: wordRegex } },
-          { category: { $regex: wordRegex } },
-          { companyName: { $regex: wordRegex } },
-          { skills: { $in: [wordRegex] } },
-          { description: { $regex: wordRegex } },
-          { requirements: { $in: [wordRegex] } }
-        ]
-      });
-    });
-  }
-
-  // Fallback if no specific clauses were added
-  if (query.$and.length === 0) {
-    const fullRegex = new RegExp(cleanSearch, 'i');
-    query.$and.push({
-      $or: [
-        { title: { $regex: fullRegex } },
-        { department: { $regex: fullRegex } },
-        { category: { $regex: fullRegex } },
-        { companyName: { $regex: fullRegex } },
-        { location: { $regex: fullRegex } },
-        { skills: { $in: [fullRegex] } },
-        { description: { $regex: fullRegex } }
-      ]
-    });
-  }
-
-  return query;
-}
-
 // Auth middleware
 const authMiddleware = async (req, res, next) => {
     try {
@@ -166,38 +46,24 @@ router.post("/add", authMiddleware, isAdminOrEmployee, async (req, res) => {
             companyName, companyWebsite
         } = req.body;
 
-        if (!title || !description) {
-            return res.status(400).json({ error: "Job title and description are required" });
+        if (!title || !department || !location || !type || !salary || !email || !description) {
+            return res.status(400).json({ error: "Missing required job fields" });
         }
 
         const newJob = new Job({
-            title: title.trim(),
-            department: (department || 'General').trim(),
-            category: category || 'Technology',
-            location: (location || 'Pakistan').trim(),
-            locationType: locationType || 'On-site',
-            type: type || 'Full-time',
-            salary: (salary || 'Competitive').trim(),
-            salaryMin: salaryMin || 0,
-            salaryMax: salaryMax || 0,
-            currency: currency || "USD",
-            email: (email || req.user?.email || 'careers@deftcrew.com').toLowerCase().trim(),
-            description: description.trim(),
-            requirements: Array.isArray(requirements) ? requirements : (requirements ? [requirements] : []),
-            responsibilities: Array.isArray(responsibilities) ? responsibilities : (responsibilities ? [responsibilities] : []),
-            benefits: Array.isArray(benefits) ? benefits : (benefits ? [benefits] : []),
+            title, department, category, location, locationType, type, salary,
+            salaryMin: salaryMin || 0, salaryMax: salaryMax || 0, currency: currency || "USD",
+            email, description, requirements: requirements || [],
+            responsibilities: responsibilities || [], benefits: benefits || [],
             experienceLevel: experienceLevel || "Mid Level",
-            minExperience: minExperience || 0,
-            education: education || "Bachelor's Degree",
-            skills: Array.isArray(skills) ? skills : (skills ? [skills] : []),
-            active: active !== undefined ? Boolean(active) : true,
-            featured: Boolean(featured),
-            urgent: Boolean(urgent),
-            applicationDeadline: applicationDeadline ? new Date(applicationDeadline) : new Date(Date.now() + 60 * 24 * 60 * 60 * 1000),
+            minExperience: minExperience || 0, education: education || "Bachelor's Degree",
+            skills: skills || [], active: active !== undefined ? active : true,
+            featured: featured || false, urgent: urgent || false,
+            applicationDeadline: applicationDeadline || new Date(+new Date() + 30*24*60*60*1000),
             postedBy: req.userId,
-            companyName: (companyName || 'The Deft Crew').trim(),
-            companyWebsite: (companyWebsite || '').trim(),
-            // TDC internal jobs are NEVER external pipeline jobs
+            companyName: companyName || 'The Deft Crew',
+            companyWebsite: companyWebsite || '',
+            // TDC internal jobs are NEVER from the external pipeline
             isExternal: false,
             source: 'manual'
         });
@@ -351,7 +217,6 @@ router.delete("/delete/:id", authMiddleware, isAdminOrEmployee, async (req, res)
 // ==================== PUBLIC JOB ROUTES ====================
 
 // Get all active EXTERNAL jobs with advanced search (General Jobs feed)
-// Get all active jobs & internships (General feed, includes both TDC internal & external opportunities)
 router.get("/public/all", async (req, res) => {
     try {
         const { 
@@ -359,32 +224,31 @@ router.get("/public/all", async (req, res) => {
             location, minSalary, maxSalary, page = 1, limit = 20
         } = req.query;
         
-        // Strictly restrict to active jobs in Pakistan with valid deadlines
+        // Always filter to external pipeline jobs only — TDC openings never appear here
+        // Strictly restrict to Pakistan
         let query = {
-            active: { $ne: false },
-            $or: [
-                { applicationDeadline: { $gte: new Date() } },
-                { applicationDeadline: { $exists: false } }
-            ],
-            $and: [
-                {
-                    $or: [
-                        { isExternal: { $ne: true } },
-                        { location: { $regex: 'pakistan|karachi|lahore|islamabad|rawalpindi|faisalabad|multan|peshawar|quetta|sialkot|gujranwala|hyderabad|abbottabad|sargodha|bahawalpur|sukkur|larkana|gujrat|sheikhupura|jhelum|sahiwal|pk|remote', $options: 'i' } }
-                    ]
-                }
-            ]
+            active: true,
+            type: 'Internship',
+            isExternal: true,
+            applicationDeadline: { $gte: new Date() },
+            location: { $regex: 'pakistan|karachi|lahore|islamabad|rawalpindi|faisalabad|multan|peshawar|quetta|sialkot|gujranwala|hyderabad|abbottabad|sargodha|bahawalpur|sukkur|larkana|gujrat|sheikhupura|jhelum|sahiwal|pk|remote', $options: 'i' }
         };
 
         if (search) {
-            query = buildSearchQuery(search, query);
-        }
-        if (req.query.isExternal !== undefined && req.query.isExternal !== "") {
-            query.isExternal = req.query.isExternal === 'true';
+            query.$and = [
+                { $or: [
+                    { title: { $regex: search, $options: 'i' } },
+                    { department: { $regex: search, $options: 'i' } },
+                    { category: { $regex: search, $options: 'i' } },
+                    { skills: { $in: [new RegExp(search, 'i')] } },
+                    { companyName: { $regex: search, $options: 'i' } },
+                    { location: { $regex: search, $options: 'i' } }
+                ]}
+            ];
         }
         if (department) query.department = department;
         if (category) query.category = category;
-        if (type && type !== "All" && type !== "all") query.type = type;
+        query.type = 'Internship';
         if (locationType) query.locationType = locationType;
         if (experienceLevel) query.experienceLevel = experienceLevel;
         if (location) {
@@ -398,7 +262,7 @@ router.get("/public/all", async (req, res) => {
         
         const [jobs, total] = await Promise.all([
             Job.find(query)
-                .sort({ isExternal: 1, featured: -1, urgent: -1, createdAt: -1, _id: 1 })
+                .sort({ featured: -1, urgent: -1, createdAt: -1, _id: 1 })
                 .skip(skip)
                 .limit(parseInt(limit)),
             Job.countDocuments(query)
@@ -452,7 +316,7 @@ router.get("/public/filters", async (req, res) => {
 });
 
 // ==================== TDC CAREERS FEED ====================
-// Get all active TDC internal job openings (isExternal: false, posted by Admin)
+// Get all active TDC internal job openings (isExternal: false)
 router.get("/public/tdc", async (req, res) => {
     try {
         const {
@@ -460,22 +324,27 @@ router.get("/public/tdc", async (req, res) => {
             page = 1, limit = 20
         } = req.query;
 
-        // Only TDC internal jobs posted by admin in MongoDB (isExternal: false or not true)
+        // Only TDC internal jobs — never external pipeline jobs
+        // Strictly restrict to Pakistan
         let query = {
-            active: { $ne: false },
-            isExternal: { $ne: true },
-            $or: [
-                { applicationDeadline: { $gte: new Date() } },
-                { applicationDeadline: { $exists: false } }
-            ]
+            active: true,
+            isExternal: false,
+            applicationDeadline: { $gte: new Date() },
+            location: { $regex: 'pakistan|karachi|lahore|islamabad|rawalpindi|faisalabad|multan|peshawar|quetta|sialkot|gujranwala|hyderabad|abbottabad|sargodha|bahawalpur|sukkur|larkana|gujrat|sheikhupura|jhelum|sahiwal|pk|remote', $options: 'i' }
         };
 
         if (search) {
-            query = buildSearchQuery(search, query);
+            query.$and = [{ $or: [
+                { title: { $regex: search, $options: 'i' } },
+                { department: { $regex: search, $options: 'i' } },
+                { category: { $regex: search, $options: 'i' } },
+                { skills: { $in: [new RegExp(search, 'i')] } },
+                { location: { $regex: search, $options: 'i' } }
+            ]}];
         }
         if (department) query.department = department;
         if (category) query.category = category;
-        if (type && type !== "All" && type !== "all") query.type = type;
+        if (type) query.type = type;
         if (locationType) query.locationType = locationType;
         if (experienceLevel) query.experienceLevel = experienceLevel;
 
@@ -1189,7 +1058,7 @@ function getStatusColor(status) {
     };
     return colors[status] || "#6b7280";
 }
- 
+
 // routes/job.routes.js - Add these routes to your existing job routes
 
 // ==================== RESUME-BASED JOB RECOMMENDATIONS ====================
@@ -1328,14 +1197,13 @@ router.get('/feed', authMiddleware, async (req, res) => {
     if (!resume) resume = await Resume.findOne({ user: req.userId }).sort({ updatedAt: -1 });
 
     if (!resume) {
-      let baseQuery = { active: true, applicationDeadline: { $gte: new Date() }, location: { $regex: 'pakistan|karachi|lahore|islamabad|rawalpindi|faisalabad|multan|peshawar|quetta|sialkot|gujranwala|hyderabad|abbottabad|sargodha|bahawalpur|sukkur|larkana|gujrat|sheikhupura|jhelum|sahiwal|pk|remote', $options: 'i' } };
-      if (type && type !== "All" && type !== "all") baseQuery.type = type;
+      // No resume: return quality-sorted active jobs with basic filters, strictly Pakistan
+      const baseQuery = { active: true, type: 'Internship', applicationDeadline: { $gte: new Date() }, location: { $regex: 'pakistan|karachi|lahore|islamabad|rawalpindi|faisalabad|multan|peshawar|quetta|sialkot|gujranwala|hyderabad|abbottabad|sargodha|bahawalpur|sukkur|larkana|gujrat|sheikhupura|jhelum|sahiwal|pk|remote', $options: 'i' } };
       if (locationType)   baseQuery.locationType = locationType;
       if (experienceLevel) baseQuery.experienceLevel = experienceLevel;
-      if (search) baseQuery = buildSearchQuery(search, baseQuery);
 
       const jobs = await Job.find(baseQuery)
-        .sort({ isExternal: 1, featured: -1, urgent: -1, createdAt: -1 })
+        .sort({ featured: -1, urgent: -1, createdAt: -1 })
         .skip((parseInt(page) - 1) * parseInt(limit))
         .limit(parseInt(limit))
         .lean();
@@ -1392,6 +1260,7 @@ router.get('/feed', authMiddleware, async (req, res) => {
 });
 
 // GET /api/jobs/similar/:jobId
+// Return semantically similar jobs to the given job (for job detail screen)
 router.get('/similar/:jobId', authMiddleware, async (req, res) => {
   try {
     const { jobId } = req.params;
@@ -1550,6 +1419,7 @@ router.post('/:jobId/interactions', authMiddleware, async (req, res) => {
 
 // GET /api/jobs/:jobId/skill-gap
 // Analyse skill gap between the user's primary resume and a specific job.
+// Returns cached result if available (24h TTL). Runs AI analysis on first request.
 router.get('/:jobId/skill-gap', authMiddleware, async (req, res) => {
   try {
     const { jobId } = req.params;
@@ -1689,7 +1559,10 @@ router.get('/:jobId/ats-score', authMiddleware, async (req, res) => {
 });
 
 // ==================== JOB INGESTION ROUTE ====================
+
 // POST /api/jobs/ingest/trigger
+// Manually triggers job ingestion from external sources (Remotive, JSearch).
+// Protected: Admin or Employee only.
 router.post('/ingest/trigger', authMiddleware, isAdminOrEmployee, async (req, res) => {
   try {
     const jobIngestionService = require('../services/jobIngestionService');
@@ -1708,4 +1581,5 @@ router.post('/ingest/trigger', authMiddleware, isAdminOrEmployee, async (req, re
     });
   }
 });
+
 module.exports = router;

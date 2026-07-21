@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 
+// Event Schema
 const EventSchema = new mongoose.Schema({
   title: { type: String, required: true, trim: true },
   organizer: { type: String, required: true, trim: true },
@@ -19,6 +20,7 @@ const EventSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
+// Registration Schema
 const RegistrationSchema = new mongoose.Schema({
   eventId: { type: mongoose.Schema.Types.ObjectId, ref: 'Event', required: true },
   studentName: { type: String, required: true, trim: true },
@@ -30,6 +32,7 @@ const RegistrationSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
+// Event Notification Schema
 const EventNotificationSchema = new mongoose.Schema({
   eventId: { type: mongoose.Schema.Types.ObjectId, ref: 'Event', required: true },
   eventTitle: { type: String, required: true },
