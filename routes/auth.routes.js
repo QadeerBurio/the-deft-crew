@@ -79,31 +79,31 @@ const authMiddleware = (req, res, next) => {
 // ==========================================
 // SIGNUP ROUTE - FIXED
 // ==========================================
+// In auth.routes.js - Enhanced signup route with better error handling
 router.post("/signup", uploadLogo.single('logo'), async (req, res) => {
   try {
+    console.log("📝 Signup request received");
+    console.log("📋 Body:", req.body);
+    console.log("📎 File:", req.file ? req.file.filename || req.file.path : "No file");
+
     const {
       role,
       email,
       password,
       fullName,
       brandName,
-      rollNo,
-      isAlumni,
       phone,
-      universityName,
       address,
-      instagram,
-      referralCodeInput,
     } = req.body;
-
-    console.log("📝 Signup request received:", { role, email, phone });
 
     // 1. Validate required fields
     if (!email || !password || !role) {
       if (req.file) {
         await cleanupFile(req.file);
       }
-      return res.status(400).json({ error: "Missing required fields: email, password, and role are required" });
+      return res.status(400).json({ 
+        error: "Missing required fields: email, password, and role are required" 
+      });
     }
 
     // 2. Check if user already exists
@@ -118,7 +118,6 @@ router.post("/signup", uploadLogo.single('logo'), async (req, res) => {
     // 3. Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    let universityId = null;
     let name = "";
     let logoUrl = "";
     let logoPublicId = "";
@@ -134,31 +133,21 @@ router.post("/signup", uploadLogo.single('logo'), async (req, res) => {
       console.log("✅ Logo uploaded:", logoUrl);
     }
 
-    // 4. Role Logic - FIXED
-    if (role === "student") {
-      if (!fullName || !universityName) {
-        if (req.file) {
-          await cleanupFile(req.file);
-        }
-        return res.status(400).json({ error: "Full name and university are required for students" });
-      }
-      name = fullName;
-      let uni = await University.findOne({ name: universityName });
-      if (!uni) uni = await University.create({ name: universityName });
-      universityId = uni._id;
-    } 
-    else if (role === "brand") {
+    // 4. Role Logic - FIXED with better validation
+    if (role === "brand") {
       if (!brandName) {
         if (req.file) {
           await cleanupFile(req.file);
         }
         return res.status(400).json({ error: "Brand name is required" });
       }
-      name = brandName;
+      
       // Logo is required for brand
       if (!req.file) {
         return res.status(400).json({ error: "Brand logo is required" });
       }
+      
+      name = brandName;
     } 
     else if (role === "employee") {
       if (!fullName) {
@@ -167,11 +156,22 @@ router.post("/signup", uploadLogo.single('logo'), async (req, res) => {
         }
         return res.status(400).json({ error: "Employee full name is required" });
       }
-      name = fullName;
+      
       // Logo is required for employee
       if (!req.file) {
         return res.status(400).json({ error: "Company logo is required" });
       }
+      
+      name = fullName;
+    } 
+    else if (role === "student") {
+      if (!fullName) {
+        if (req.file) {
+          await cleanupFile(req.file);
+        }
+        return res.status(400).json({ error: "Full name is required" });
+      }
+      name = fullName;
     } 
     else if (role === "traveler") {
       if (!fullName) {
@@ -192,28 +192,15 @@ router.post("/signup", uploadLogo.single('logo'), async (req, res) => {
       return res.status(400).json({ error: `Invalid role: ${role}` });
     }
 
-    // 5. Handle Referrer lookup
-    let referrer = null;
-    if (referralCodeInput) {
-      referrer = await User.findOne({
-        referralCode: referralCodeInput.toUpperCase(),
-      });
-    }
-
-    // 6. Create the User
+    // 5. Create the User
     const userData = {
       name,
       email,
       password: hashedPassword,
       role,
-      isAlumni: isAlumni === 'true' || isAlumni === true,
-      rollNo: rollNo || "",
       phone: phone || "",
-      university: universityId,
       address: address || "",
-      instagram: instagram || "",
       status: role === "admin" ? "Verified" : "Not Verified",
-      referredBy: referrer ? referrer._id : null,
     };
 
     // Add logo if uploaded
@@ -233,70 +220,7 @@ router.post("/signup", uploadLogo.single('logo'), async (req, res) => {
     const user = await User.create(userData);
     console.log(`✅ User created: ${user.email} (${user.role})`);
 
-    // ============================================
-    // 7. UPDATE REFERRER - AUTO ACTIVATE VIP
-    // ============================================
-    if (referrer) {
-      const updatedReferrer = await User.findByIdAndUpdate(
-        referrer._id,
-        { $inc: { referralCount: 1 } },
-        { new: true }
-      );
-
-      // Check if referrer has reached 10 referrals
-      if (updatedReferrer.referralCount >= 10 && !updatedReferrer.isVip) {
-        // Auto-activate VIP
-        updatedReferrer.isVip = true;
-        updatedReferrer.canApplyForTdcCard = true;
-        updatedReferrer.paymentStatus = "Verified";
-        updatedReferrer.cardStatus = "Active";
-        
-        // Set VIP expiry to 1 year from now
-        const expiryDate = new Date();
-        expiryDate.setFullYear(expiryDate.getFullYear() + 1);
-        updatedReferrer.vipExpiry = expiryDate;
-        
-        await updatedReferrer.save();
-
-        console.log(`✅ VIP Activated for user: ${updatedReferrer.email} (${updatedReferrer.referralCount} referrals)`);
-
-        // Send notification about VIP activation
-        try {
-          await Notification.create({
-            recipient: updatedReferrer._id,
-            title: "🎉 TDC Privilege Card Activated!",
-            description: `Congratulations! You've reached 10 referrals and your TDC Privilege Card is now active. Tap "View My TDC Card" to see your digital card.`,
-            type: "System",
-            icon: "card-account-details-star",
-            readBy: [],
-          });
-
-          // Send email notification
-          await transporter.sendMail({
-            from: `"The Deft Crew" <${process.env.EMAIL_USER}>`,
-            to: updatedReferrer.email,
-            subject: "🎉 TDC Privilege Card Activated!",
-            html: `
-              <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-                <h2 style="color: #f9c349;">🎉 TDC Privilege Card Activated!</h2>
-                <p>Congratulations <b>${updatedReferrer.name}</b>!</p>
-                <p>You've reached <b>10 referrals</b> and your TDC Privilege Card is now active.</p>
-                <div style="background: #f9c349; padding: 20px; text-align: center; border-radius: 10px; margin: 20px 0;">
-                  <h3 style="color: #1a1a1a;">✨ TDC PRIVILEGE CARD ✨</h3>
-                  <p style="color: #1a1a1a;">Valid until: ${expiryDate.toLocaleDateString()}</p>
-                </div>
-                <p>Open the app and tap "View My TDC Card" to see your digital card.</p>
-              </div>
-            `,
-          }).catch(err => console.log("Email Error:", err.message));
-          
-        } catch (nError) {
-          console.error("Notification Error:", nError.message);
-        }
-      }
-    }
-
-    // 8. Notification for new user
+    // Notification for new user
     try {
       await Notification.create({
         recipient: user._id,
@@ -324,7 +248,10 @@ router.post("/signup", uploadLogo.single('logo'), async (req, res) => {
     if (req.file) {
       await cleanupFile(req.file);
     }
-    res.status(500).json({ error: err.message || "Internal server error" });
+    res.status(500).json({ 
+      error: err.message || "Internal server error",
+      details: process.env.NODE_ENV === 'development' ? err.stack : undefined
+    });
   }
 });
 
