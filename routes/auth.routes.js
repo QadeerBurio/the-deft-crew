@@ -77,7 +77,7 @@ const authMiddleware = (req, res, next) => {
 };
 
 // ==========================================
-// SIGNUP ROUTE
+// SIGNUP ROUTE - FIXED
 // ==========================================
 router.post("/signup", uploadLogo.single('logo'), async (req, res) => {
   try {
@@ -96,12 +96,14 @@ router.post("/signup", uploadLogo.single('logo'), async (req, res) => {
       referralCodeInput,
     } = req.body;
 
+    console.log("📝 Signup request received:", { role, email, phone });
+
     // 1. Validate required fields
     if (!email || !password || !role) {
       if (req.file) {
         await cleanupFile(req.file);
       }
-      return res.status(400).json({ error: "Missing required fields" });
+      return res.status(400).json({ error: "Missing required fields: email, password, and role are required" });
     }
 
     // 2. Check if user already exists
@@ -129,52 +131,65 @@ router.post("/signup", uploadLogo.single('logo'), async (req, res) => {
       } else {
         logoUrl = req.file.path.replace(/\\/g, '/');
       }
+      console.log("✅ Logo uploaded:", logoUrl);
     }
 
-    // 4. Role Logic
+    // 4. Role Logic - FIXED
     if (role === "student") {
       if (!fullName || !universityName) {
         if (req.file) {
           await cleanupFile(req.file);
         }
-        return res.status(400).json({ error: "Name and university required" });
+        return res.status(400).json({ error: "Full name and university are required for students" });
       }
       name = fullName;
       let uni = await University.findOne({ name: universityName });
       if (!uni) uni = await University.create({ name: universityName });
       universityId = uni._id;
-    } else if (role === "brand") {
+    } 
+    else if (role === "brand") {
       if (!brandName) {
         if (req.file) {
           await cleanupFile(req.file);
         }
-        return res.status(400).json({ error: "Brand name required" });
+        return res.status(400).json({ error: "Brand name is required" });
       }
       name = brandName;
+      // Logo is required for brand
       if (!req.file) {
         return res.status(400).json({ error: "Brand logo is required" });
       }
-    } else if (role === "traveler") {
+    } 
+    else if (role === "employee") {
       if (!fullName) {
         if (req.file) {
           await cleanupFile(req.file);
         }
-        return res.status(400).json({ error: "Full name required" });
+        return res.status(400).json({ error: "Employee full name is required" });
       }
       name = fullName;
-    } else if (role === "employee") {
-      if (!fullName) {
-        if (req.file) {
-          await cleanupFile(req.file);
-        }
-        return res.status(400).json({ error: "Employee name required" });
-      }
-      name = fullName;
+      // Logo is required for employee
       if (!req.file) {
         return res.status(400).json({ error: "Company logo is required" });
       }
-    } else if (role === "admin") {
+    } 
+    else if (role === "traveler") {
+      if (!fullName) {
+        if (req.file) {
+          await cleanupFile(req.file);
+        }
+        return res.status(400).json({ error: "Full name is required" });
+      }
+      name = fullName;
+    } 
+    else if (role === "admin") {
       name = fullName || "Admin";
+    } 
+    else {
+      if (req.file) {
+        await cleanupFile(req.file);
+      }
+      return res.status(400).json({ error: `Invalid role: ${role}` });
     }
 
     // 5. Handle Referrer lookup
@@ -191,21 +206,23 @@ router.post("/signup", uploadLogo.single('logo'), async (req, res) => {
       email,
       password: hashedPassword,
       role,
-      isAlumni: !!isAlumni,
-      rollNo,
-      phone,
+      isAlumni: isAlumni === 'true' || isAlumni === true,
+      rollNo: rollNo || "",
+      phone: phone || "",
       university: universityId,
-      address,
-      instagram,
+      address: address || "",
+      instagram: instagram || "",
       status: role === "admin" ? "Verified" : "Not Verified",
       referredBy: referrer ? referrer._id : null,
     };
 
+    // Add logo if uploaded
     if (logoUrl) {
       userData.logo = logoUrl;
       userData.logoPublicId = logoPublicId;
     }
 
+    // Role-specific fields
     if (role === "brand") {
       userData.brandName = brandName;
       userData.companyName = brandName;
@@ -214,6 +231,7 @@ router.post("/signup", uploadLogo.single('logo'), async (req, res) => {
     }
 
     const user = await User.create(userData);
+    console.log(`✅ User created: ${user.email} (${user.role})`);
 
     // ============================================
     // 7. UPDATE REFERRER - AUTO ACTIVATE VIP
@@ -226,7 +244,7 @@ router.post("/signup", uploadLogo.single('logo'), async (req, res) => {
       );
 
       // Check if referrer has reached 10 referrals
-      if (updatedReferrer.referralCount >= 10) {
+      if (updatedReferrer.referralCount >= 10 && !updatedReferrer.isVip) {
         // Auto-activate VIP
         updatedReferrer.isVip = true;
         updatedReferrer.canApplyForTdcCard = true;
@@ -279,19 +297,17 @@ router.post("/signup", uploadLogo.single('logo'), async (req, res) => {
     }
 
     // 8. Notification for new user
-    if (role === "student") {
-      try {
-        await Notification.create({
-          recipient: user._id,
-          title: "Welcome to the Crew! 🚀",
-          description: `Hey ${name}! Your student account is ready. Explore exclusive deals.`,
-          type: "System",
-          icon: "party-popper",
-          readBy: [],
-        });
-      } catch (nError) {
-        console.error("Notification Error:", nError.message);
-      }
+    try {
+      await Notification.create({
+        recipient: user._id,
+        title: "Welcome to the Crew! 🚀",
+        description: `Hey ${name}! Your ${role} account is ready. Explore exclusive deals and opportunities.`,
+        type: "System",
+        icon: "party-popper",
+        readBy: [],
+      });
+    } catch (nError) {
+      console.error("Notification Error:", nError.message);
     }
 
     const userResponse = user.toObject();
@@ -304,11 +320,11 @@ router.post("/signup", uploadLogo.single('logo'), async (req, res) => {
     });
 
   } catch (err) {
-    console.error("Signup Error:", err);
+    console.error("❌ Signup Error:", err);
     if (req.file) {
       await cleanupFile(req.file);
     }
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: err.message || "Internal server error" });
   }
 });
 
@@ -355,7 +371,6 @@ router.get("/profile/me", authMiddleware, async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    // Ensure VIP fields are included
     const userData = {
       ...user.toObject(),
       isVip: user.isVip || false,
@@ -375,7 +390,7 @@ router.get("/profile/me", authMiddleware, async (req, res) => {
 });
 
 // ==========================================
-// ACTIVATE VIP - UPDATED WITH MORE LOGGING
+// ACTIVATE VIP - UPDATED
 // ==========================================
 router.post("/activate-vip/:userId", authMiddleware, async (req, res) => {
   try {
@@ -383,7 +398,6 @@ router.post("/activate-vip/:userId", authMiddleware, async (req, res) => {
     
     console.log(`🔍 VIP Activation requested for user: ${userId}`);
     
-    // Check if the requesting user is the same as the target or is admin
     const requestingUser = await User.findById(req.userId);
     const targetUser = await User.findById(userId);
     
@@ -391,16 +405,13 @@ router.post("/activate-vip/:userId", authMiddleware, async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    // Allow if user is activating their own VIP or is admin
     if (req.userId !== userId && requestingUser.role !== 'admin') {
       return res.status(403).json({ message: "Unauthorized" });
     }
 
     console.log(`📊 User ${targetUser.email} has ${targetUser.referralCount} referrals, isVip: ${targetUser.isVip}`);
 
-    // Check if user has 10+ referrals
     if (targetUser.referralCount >= 10) {
-      // Activate VIP
       targetUser.isVip = true;
       targetUser.canApplyForTdcCard = true;
       targetUser.paymentStatus = "Verified";
@@ -414,7 +425,6 @@ router.post("/activate-vip/:userId", authMiddleware, async (req, res) => {
 
       console.log(`✅ VIP Activated successfully for ${targetUser.email}`);
 
-      // Create notification
       await Notification.create({
         recipient: targetUser._id,
         title: "🎉 TDC Privilege Card Activated!",
