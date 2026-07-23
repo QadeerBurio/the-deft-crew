@@ -79,12 +79,11 @@ const authMiddleware = (req, res, next) => {
 // ==========================================
 // SIGNUP ROUTE - FIXED
 // ==========================================
-// In auth.routes.js - Enhanced signup route with better error handling
-router.post("/signup", uploadLogo.single('logo'), async (req, res) => {
+// In auth.routes.js - Signup route without logo
+router.post("/signup", async (req, res) => {
   try {
     console.log("📝 Signup request received");
     console.log("📋 Body:", req.body);
-    console.log("📎 File:", req.file ? req.file.filename || req.file.path : "No file");
 
     const {
       role,
@@ -98,9 +97,6 @@ router.post("/signup", uploadLogo.single('logo'), async (req, res) => {
 
     // 1. Validate required fields
     if (!email || !password || !role) {
-      if (req.file) {
-        await cleanupFile(req.file);
-      }
       return res.status(400).json({ 
         error: "Missing required fields: email, password, and role are required" 
       });
@@ -109,9 +105,6 @@ router.post("/signup", uploadLogo.single('logo'), async (req, res) => {
     // 2. Check if user already exists
     const existingUser = await User.findOne({ email });
     if (existingUser) {
-      if (req.file) {
-        await cleanupFile(req.file);
-      }
       return res.status(400).json({ error: "Email already used" });
     }
 
@@ -119,65 +112,28 @@ router.post("/signup", uploadLogo.single('logo'), async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, 10);
 
     let name = "";
-    let logoUrl = "";
-    let logoPublicId = "";
 
-    // Handle logo upload
-    if (req.file) {
-      if (hasCloudinary) {
-        logoUrl = req.file.path;
-        logoPublicId = req.file.filename;
-      } else {
-        logoUrl = req.file.path.replace(/\\/g, '/');
-      }
-      console.log("✅ Logo uploaded:", logoUrl);
-    }
-
-    // 4. Role Logic - FIXED with better validation
+    // 4. Role Logic
     if (role === "brand") {
       if (!brandName) {
-        if (req.file) {
-          await cleanupFile(req.file);
-        }
         return res.status(400).json({ error: "Brand name is required" });
       }
-      
-      // Logo is required for brand
-      if (!req.file) {
-        return res.status(400).json({ error: "Brand logo is required" });
-      }
-      
       name = brandName;
     } 
     else if (role === "employee") {
       if (!fullName) {
-        if (req.file) {
-          await cleanupFile(req.file);
-        }
         return res.status(400).json({ error: "Employee full name is required" });
       }
-      
-      // Logo is required for employee
-      if (!req.file) {
-        return res.status(400).json({ error: "Company logo is required" });
-      }
-      
       name = fullName;
     } 
     else if (role === "student") {
       if (!fullName) {
-        if (req.file) {
-          await cleanupFile(req.file);
-        }
         return res.status(400).json({ error: "Full name is required" });
       }
       name = fullName;
     } 
     else if (role === "traveler") {
       if (!fullName) {
-        if (req.file) {
-          await cleanupFile(req.file);
-        }
         return res.status(400).json({ error: "Full name is required" });
       }
       name = fullName;
@@ -186,9 +142,6 @@ router.post("/signup", uploadLogo.single('logo'), async (req, res) => {
       name = fullName || "Admin";
     } 
     else {
-      if (req.file) {
-        await cleanupFile(req.file);
-      }
       return res.status(400).json({ error: `Invalid role: ${role}` });
     }
 
@@ -202,12 +155,6 @@ router.post("/signup", uploadLogo.single('logo'), async (req, res) => {
       address: address || "",
       status: role === "admin" ? "Verified" : "Not Verified",
     };
-
-    // Add logo if uploaded
-    if (logoUrl) {
-      userData.logo = logoUrl;
-      userData.logoPublicId = logoPublicId;
-    }
 
     // Role-specific fields
     if (role === "brand") {
@@ -239,15 +186,11 @@ router.post("/signup", uploadLogo.single('logo'), async (req, res) => {
 
     res.status(201).json({ 
       message: "Signup successful", 
-      user: userResponse,
-      logoUploaded: !!req.file 
+      user: userResponse
     });
 
   } catch (err) {
     console.error("❌ Signup Error:", err);
-    if (req.file) {
-      await cleanupFile(req.file);
-    }
     res.status(500).json({ 
       error: err.message || "Internal server error",
       details: process.env.NODE_ENV === 'development' ? err.stack : undefined
