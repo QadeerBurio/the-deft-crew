@@ -1,0 +1,147 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.retrievalService = exports.RetrievalService = void 0;
+const embedding_service_1 = require("./embedding.service");
+const mongoVectorStore_1 = require("../vector/mongoVectorStore");
+const envValidator_1 = require("../config/envValidator");
+const logger_1 = require("../config/logger");
+const KnowledgeDocument_1 = require("../models/KnowledgeDocument");
+const KnowledgeChunk_1 = require("../models/KnowledgeChunk");
+class RetrievalService {
+    /**
+     * Translates text query to vector embedding, searches similarity store,
+     * dedupes matching contents, and formats final RAG prompt contexts.
+     */
+    async retrieveRelevantContext(query, category) {
+        const startTime = Date.now();
+        logger_1.logger.info(`Starting RAG context retrieval for query: "${query}"`);
+        // Guard: Bypass OpenAI embedding API call if vector store has no knowledge chunks
+        const chunkCount = await KnowledgeChunk_1.KnowledgeChunk.countDocuments({}).maxTimeMS(1000).catch(() => 1);
+        if (chunkCount === 0) {
+            logger_1.logger.info('Knowledge chunks collection is empty. Bypassing embedding generation.');
+            return {
+                contextText: '',
+                sourceDocuments: [],
+                retrievalLatencyMs: Date.now() - startTime,
+            };
+        }
+        // 1. Generate query embedding vector
+        const queryEmbedding = await embedding_service_1.embeddingService.getEmbedding(query);
+        const embeddingLatency = Date.now() - startTime;
+        // 2. Perform similarity lookup in vector collection
+        const searchStartTime = Date.now();
+        const topK = envValidator_1.env.TOP_K_RESULTS;
+        const candidates = await mongoVectorStore_1.mongoVectorStore.similaritySearch(queryEmbedding, topK, { category, queryText: query });
+        const searchLatency = Date.now() - searchStartTime;
+        // 3. Deduplicate text chunks by content
+        const seenContent = new Set();
+        const uniqueChunks = [];
+        for (const cand of candidates) {
+            const normalizedContent = cand.content.toLowerCase().trim();
+            if (!seenContent.has(normalizedContent)) {
+                seenContent.add(normalizedContent);
+                uniqueChunks.push(cand);
+            }
+        }
+        // 4. Assemble context up to character limitations
+        let contextText = '';
+        const maxChars = envValidator_1.env.MAX_CONTEXT_CHARACTERS;
+        const sourceDocuments = [];
+        for (const chunk of uniqueChunks) {
+            const nextSegment = `[Document: ${chunk.metadata?.title || 'Unknown'}] (Source: ${chunk.metadata?.source || 'unknown'})\n${chunk.content}\n\n`;
+            if (contextText.length + nextSegment.length > maxChars) {
+                logger_1.logger.warn(`Context character cap reached (${maxChars} chars). Skipping remaining chunks.`);
+                break;
+            }
+            contextText += nextSegment;
+            sourceDocuments.push({
+                docId: chunk.docId,
+                chunkIndex: chunk.chunkIndex,
+                score: chunk.score,
+                title: chunk.metadata?.title || 'Unknown',
+                source: chunk.metadata?.source || 'unknown',
+            });
+        }
+        const totalLatency = Date.now() - startTime;
+        logger_1.logger.info(`Retrieved RAG context. Latency details: ` +
+            `[Total: ${totalLatency}ms, Embedding: ${embeddingLatency}ms, Search: ${searchLatency}ms]. ` +
+            `Context Size: ${contextText.length} chars, Chunks retrieved: ${sourceDocuments.length}`);
+        return {
+            contextText: contextText.trim(),
+            sourceDocuments,
+            retrievalLatencyMs: totalLatency,
+        };
+    }
+    /**
+     * Directly queries the synced MongoDB database KnowledgeDocument collection
+     * using text keywords or regex matching, returning formatted context text.
+     */
+    async retrieveDirectDatabaseContext(intent, query, category) {
+        let categoryFilter = category;
+        // Map intent to unified KnowledgeDocument category values
+        const intentLower = intent.toLowerCase();
+        if (intentLower.includes('tdc knowledge') || intentLower.includes('founder') || intentLower.includes('company')) {
+            categoryFilter = 'tdc_knowledge';
+        }
+        else if (intentLower.includes('job') || intentLower.includes('career') || intentLower.includes('intern')) {
+            categoryFilter = 'jobs';
+        }
+        else if (intentLower.includes('scholarship') || intentLower.includes('grant') || intentLower.includes('financial')) {
+            categoryFilter = 'scholarships';
+        }
+        else if (intentLower.includes('discount') || intentLower.includes('offer') || intentLower.includes('deal')) {
+            categoryFilter = 'offers';
+        }
+        else if (intentLower.includes('event') || intentLower.includes('mix') || intentLower.includes('hackathon')) {
+            categoryFilter = 'events';
+        }
+        else if (intentLower.includes('university') || intentLower.includes('college')) {
+            categoryFilter = 'universities';
+        }
+        else if (intentLower.includes('template') || intentLower.includes('cv') || intentLower.includes('resume')) {
+            categoryFilter = 'templates';
+        }
+        else if (intentLower.includes('package') || intentLower.includes('tour') || intentLower.includes('travel')) {
+            categoryFilter = 'packages';
+        }
+        else if (intentLower.includes('note') || intentLower.includes('book') || intentLower.includes('lecture') || intentLower.includes('past-paper')) {
+            categoryFilter = 'notes';
+        }
+        if (!categoryFilter)
+            return '';
+        try {
+            // Split query into keywords to do a flexible regex search
+            const keywords = query.split(' ').filter(w => w.length > 2).map(w => w.trim());
+            const queryRegex = keywords.length > 0 ? keywords.join('|') : query;
+            const docs = await KnowledgeDocument_1.KnowledgeDocument.find({
+                category: categoryFilter,
+                status: 'published',
+                $or: [
+                    { title: { $regex: queryRegex, $options: 'i' } },
+                    { content: { $regex: queryRegex, $options: 'i' } },
+                ],
+            }).limit(8);
+            if (docs.length > 0) {
+                logger_1.logger.info(`Direct DB query retrieved ${docs.length} matches for category [${categoryFilter}]`);
+                return docs.map(d => `[Database Match: ${d.title}] (Category: ${d.category})\nDescription/Details: ${d.content}\nMetadata: ${JSON.stringify(d.metadata)}`).join('\n\n');
+            }
+            // Default fallback: return latest 8 entries to avoid returning empty context
+            const latestDocs = await KnowledgeDocument_1.KnowledgeDocument.find({
+                category: categoryFilter,
+                status: 'published',
+            }).sort({ updatedAt: -1 }).limit(8);
+            if (latestDocs.length > 0) {
+                logger_1.logger.info(`Direct DB query fell back to latest ${latestDocs.length} items for category [${categoryFilter}]`);
+                return latestDocs.map(d => `[Database Match: ${d.title}] (Category: ${d.category})\nDescription/Details: ${d.content}\nMetadata: ${JSON.stringify(d.metadata)}`).join('\n\n');
+            }
+        }
+        catch (err) {
+            logger_1.logger.error(`Error in direct database context query:`, err.message);
+        }
+        return '';
+    }
+}
+exports.RetrievalService = RetrievalService;
+exports.retrievalService = new RetrievalService();
+exports.default = exports.retrievalService;
+//# sourceMappingURL=retrieval.service.js.map
