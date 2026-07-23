@@ -79,27 +79,26 @@ const authMiddleware = (req, res, next) => {
 // ==========================================
 // SIGNUP ROUTE - FIXED
 // ==========================================
-// In auth.routes.js - Signup route without logo
 router.post("/signup", async (req, res) => {
   try {
-    console.log("📝 Signup request received");
-    console.log("📋 Body:", req.body);
-
     const {
       role,
       email,
       password,
       fullName,
       brandName,
+      rollNo,
+      isAlumni,
       phone,
+      universityName,
       address,
+      instagram,
+      referralCodeInput,
     } = req.body;
 
     // 1. Validate required fields
     if (!email || !password || !role) {
-      return res.status(400).json({ 
-        error: "Missing required fields: email, password, and role are required" 
-      });
+      return res.status(400).json({ error: "Missing required fields" });
     }
 
     // 2. Check if user already exists
@@ -111,52 +110,62 @@ router.post("/signup", async (req, res) => {
     // 3. Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
 
+    let universityId = null;
     let name = "";
 
     // 4. Role Logic
-    if (role === "brand") {
+    if (role === "student") {
+      if (!fullName || !universityName) {
+        return res.status(400).json({ error: "Name and university required" });
+      }
+      name = fullName;
+      let uni = await University.findOne({ name: universityName });
+      if (!uni) uni = await University.create({ name: universityName });
+      universityId = uni._id;
+    } else if (role === "brand") {
       if (!brandName) {
-        return res.status(400).json({ error: "Brand name is required" });
+        return res.status(400).json({ error: "Brand name required" });
       }
       name = brandName;
-    } 
-    else if (role === "employee") {
+    } else if (role === "traveler") {
       if (!fullName) {
-        return res.status(400).json({ error: "Employee full name is required" });
+        return res.status(400).json({ error: "Full name required" });
       }
       name = fullName;
-    } 
-    else if (role === "student") {
+    } else if (role === "employee") {
       if (!fullName) {
-        return res.status(400).json({ error: "Full name is required" });
+        return res.status(400).json({ error: "Employee name required" });
       }
       name = fullName;
-    } 
-    else if (role === "traveler") {
-      if (!fullName) {
-        return res.status(400).json({ error: "Full name is required" });
-      }
-      name = fullName;
-    } 
-    else if (role === "admin") {
+    } else if (role === "admin") {
       name = fullName || "Admin";
-    } 
-    else {
-      return res.status(400).json({ error: `Invalid role: ${role}` });
     }
 
-    // 5. Create the User
+    // 5. Handle Referrer lookup (One time only)
+    let referrer = null;
+    if (referralCodeInput) {
+      referrer = await User.findOne({
+        referralCode: referralCodeInput.toUpperCase(),
+      });
+    }
+
+    // 6. Create the User
     const userData = {
       name,
       email,
       password: hashedPassword,
       role,
-      phone: phone || "",
-      address: address || "",
+      isAlumni: !!isAlumni,
+      rollNo,
+      phone,
+      university: universityId,
+      address,
+      instagram,
       status: role === "admin" ? "Verified" : "Not Verified",
+      referredBy: referrer ? referrer._id : null,
     };
 
-    // Role-specific fields
+    // Add role-specific fields
     if (role === "brand") {
       userData.brandName = brandName;
       userData.companyName = brandName;
@@ -165,22 +174,50 @@ router.post("/signup", async (req, res) => {
     }
 
     const user = await User.create(userData);
-    console.log(`✅ User created: ${user.email} (${user.role})`);
 
-    // Notification for new user
-    try {
-      await Notification.create({
-        recipient: user._id,
-        title: "Welcome to the Crew! 🚀",
-        description: `Hey ${name}! Your ${role} account is ready. Explore exclusive deals and opportunities.`,
-        type: "System",
-        icon: "party-popper",
-        readBy: [],
-      });
-    } catch (nError) {
-      console.error("Notification Error:", nError.message);
+    // 7. Update referral count
+    if (referrer) {
+      const updatedReferrer = await User.findByIdAndUpdate(
+        referrer._id,
+        { $inc: { referralCount: 1 } },
+        { new: true }
+      );
+
+      if (
+        updatedReferrer.referralCount >= 10 &&
+        !updatedReferrer.canApplyForTdcCard
+      ) {
+        updatedReferrer.canApplyForTdcCard = true;
+        await updatedReferrer.save();
+      }
     }
 
+    // 8. Notification for student
+    if (role === "student") {
+      try {
+        await Notification.create({
+          recipient: user._id,
+          title: "Welcome to the Crew! 🚀",
+          description: `Hey ${name}! Your student account is ready. Explore exclusive deals.`,
+          type: "System",
+          icon: "party-popper",
+          readBy: [],
+        });
+
+        transporter
+          .sendMail({
+            from: `"The Deft Crew" <${process.env.EMAIL_USER}>`,
+            to: email,
+            subject: "Welcome to the Crew! 🚀",
+            html: `<p>Welcome <b>${name}</b>! Your account is now active.</p>`,
+          })
+          .catch((err) => console.log("Mail Error:", err.message));
+      } catch (nError) {
+        console.error("Notification/Email Error:", nError.message);
+      }
+    }
+
+    // Return success response without password
     const userResponse = user.toObject();
     delete userResponse.password;
 
@@ -190,11 +227,8 @@ router.post("/signup", async (req, res) => {
     });
 
   } catch (err) {
-    console.error("❌ Signup Error:", err);
-    res.status(500).json({ 
-      error: err.message || "Internal server error",
-      details: process.env.NODE_ENV === 'development' ? err.stack : undefined
-    });
+    console.error("Signup Error:", err);
+    res.status(500).json({ error: err.message });
   }
 });
 
