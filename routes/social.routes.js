@@ -1628,16 +1628,33 @@ router.put('/notifications/read-all', auth, async (req, res) => {
   }
 });
 
-// 10. Clear All Notifications (except pending requests)
+// 10. Clear All Notifications - FIXED
 router.delete('/notifications/clear-all', auth, async (req, res) => {
   try {
-    await Notification.deleteMany({ 
-      recipient: req.user._id,
-      type: { $nin: ['request'] },
-      isProcessed: true
+    const userId = req.user._id;
+    
+    // Get all notifications for the user
+    const notifications = await Notification.find({ 
+      recipient: userId 
     });
-    res.json({ success: true, message: "All notifications cleared" });
-
+    
+    // Separate pending requests from other notifications
+    const pendingRequests = notifications.filter(
+      n => n.type === 'request' && n.status === 'pending' && !n.isProcessed
+    );
+    
+    // Delete all notifications EXCEPT pending connection requests
+    const result = await Notification.deleteMany({ 
+      recipient: userId,
+      _id: { $nin: pendingRequests.map(n => n._id) }
+    });
+    
+    res.json({ 
+      success: true, 
+      message: `${result.deletedCount} notifications cleared successfully`,
+      deletedCount: result.deletedCount,
+      pendingRequestsCount: pendingRequests.length
+    });
   } catch (err) {
     console.error("Clear all error:", err);
     res.status(500).json({ error: "Error clearing notifications" });
