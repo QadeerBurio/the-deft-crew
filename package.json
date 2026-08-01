@@ -3,12 +3,14 @@
   "version": "1.0.0",
   "description": "",
   "main": "server.js",
+  
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
-    "build:chat": "tsc -p chat-service/tsconfig.json",
+    "build:chat": "npx tsc -p chat-service/tsconfig.json",
     "postinstall": "npm run build:chat"
   },
+
   "keywords": [],
   "author": "",
   "license": "ISC",
@@ -51,7 +53,8 @@
     "stripe": "^21.0.1",
     "winston": "^3.13.0",
     "xlsx": "^0.18.5",
-    "zod": "^3.22.4"
+    "zod": "^3.22.4",
+    "typescript": "^5.9.3"
   },
   "devDependencies": {
     "@types/compression": "^1.7.5",
@@ -61,7 +64,6 @@
     "@types/morgan": "^1.9.9",
     "@types/node": "^20.12.7",
     "nodemon": "^3.1.14",
-    "ts-node": "^10.9.2",
-    "typescript": "^5.4.5"
+    "ts-node": "^10.9.2"
   }
 }
