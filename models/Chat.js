@@ -1,4 +1,3 @@
-// models/Chat.js
 const mongoose = require("mongoose");
 
 const messageSchema = new mongoose.Schema({
@@ -23,7 +22,7 @@ const messageSchema = new mongoose.Schema({
     fileName: String,
     fileSize: Number,
     fileType: String,
-    duration: Number // For audio/video
+    duration: Number
   },
   location: {
     latitude: Number,
@@ -47,31 +46,54 @@ const conversationSchema = new mongoose.Schema({
     required: true
   }],
   lastMessage: {
-    text: String,
-    sender: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User"
-    },
-    createdAt: Date,
-    messageType: String
+    type: String,
+    default: "Start a conversation..."
+  },
+  lastMessageSender: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "User"
+  },
+  lastMessageType: {
+    type: String,
+    enum: ['text', 'image', 'video', 'audio', 'document', 'location', 'call_log'],
+    default: 'text'
+  },
+  lastMessageTime: {
+    type: Date,
+    default: Date.now
   },
   unreadCount: {
     type: Number,
     default: 0
   },
-  lastActivity: {
+  isMuted: {
+    type: Boolean,
+    default: false
+  },
+  isArchived: {
+    type: Boolean,
+    default: false
+  },
+  pinned: {
+    type: Boolean,
+    default: false
+  },
+  createdAt: {
     type: Date,
     default: Date.now
   },
-  createdAt: {
+  updatedAt: {
     type: Date,
     default: Date.now
   }
 });
 
-// Index for faster queries
+// Indexes for performance
 conversationSchema.index({ participants: 1 });
 conversationSchema.index({ updatedAt: -1 });
+conversationSchema.index({ isArchived: 1 });
+conversationSchema.index({ isMuted: 1 });
+
 messageSchema.index({ conversationId: 1, createdAt: -1 });
 messageSchema.index({ conversationId: 1, isRead: 1 });
 

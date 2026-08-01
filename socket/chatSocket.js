@@ -1,66 +1,183 @@
+// socket.js - If you want to keep it separate
 const { Message, Conversation } = require('../models/Chat');
+const User = require('../models/User');
 
-// Global objects
-const onlineUsers = new Map(); // { userId: socketId }
-const userCallStatus = new Map(); // Track if user is in a call
+const onlineUsers = new Map();
+const userCallStatus = new Map();
 
 module.exports = (io) => {
   io.on('connection', (socket) => {
-    
-    // --- TRACK ONLINE STATUS ---
-    socket.on('user_online', (userId) => {
-      socket.userId = userId;
-      onlineUsers.set(userId, socket.id);
-      io.emit('user_status_update', { userId, status: 'online' });
+    console.log('New client connected:', socket.id);
+
+    // --- USER ONLINE STATUS ---
+    socket.on('user_online', async (userId) => {
+      try {
+        socket.userId = userId;
+        onlineUsers.set(userId, socket.id);
+        
+        await User.findByIdAndUpdate(userId, { online: true });
+        
+        io.emit('user_status_update', { userId, status: 'online' });
+        console.log(`User ${userId} is online`);
+      } catch (err) {
+        console.error('User online error:', err);
+      }
     });
 
+    // --- GET USER STATUS ---
+    socket.on('get_user_status', async (userId) => {
+      try {
+        const isOnline = onlineUsers.has(userId);
+        socket.emit('user_status_response', { 
+          userId, 
+          status: isOnline ? 'online' : 'offline' 
+        });
+      } catch (err) {
+        console.error('Get status error:', err);
+      }
+    });
+
+    // --- JOIN CHAT ROOM ---
     socket.on('join_chat', (conversationId) => {
       socket.join(conversationId);
+      console.log(`Socket ${socket.id} joined room ${conversationId}`);
     });
 
+    // --- LEAVE CHAT ROOM ---
+    socket.on('leave_chat', (conversationId) => {
+      socket.leave(conversationId);
+      console.log(`Socket ${socket.id} left room ${conversationId}`);
+    });
+
+    // --- SEND MESSAGE ---
     socket.on('send_message', async (data) => {
       try {
-        const { conversationId, senderId, text, messageType, mediaUrl, location, duration } = data;
+        const { conversationId, senderId, text, messageType, mediaUrl, duration } = data;
 
         const newMessage = new Message({
           conversationId,
           sender: senderId,
-          text,
+          text: text || '',
           messageType: messageType || 'text',
-          mediaUrl,
-          location,
-          duration
+          mediaUrl: mediaUrl || '',
+          duration: duration || 0
         });
         
         const savedMessage = await newMessage.save();
         const populatedMessage = await Message.findById(savedMessage._id)
           .populate('sender', 'name profileImage');
 
-        let displayMsg = text;
+        let displayMsg = text || 'Media message';
         if (messageType === 'image') displayMsg = '📷 Photo';
         else if (messageType === 'video') displayMsg = '🎥 Video';
         else if (messageType === 'audio') displayMsg = '🎤 Voice message';
         else if (messageType === 'location') displayMsg = '📍 Location';
-        else if (messageType === 'call_log') displayMsg = text;
+        else if (messageType === 'call_log') displayMsg = text || 'Call log';
 
-        await Conversation.findByIdAndUpdate(conversationId, {
-          lastMessage: displayMsg,
-          updatedAt: Date.now()
+        await Conversation.findByIdAndUpdate(
+          conversationId,
+          {
+            $set: {
+              lastMessage: displayMsg,
+              lastMessageType: messageType || 'text',
+              lastMessageSender: senderId,
+              lastMessageTime: new Date(),
+              updatedAt: new Date()
+            },
+            $inc: { unreadCount: 1 }
+          }
+        );
+
+        const unreadCount = await Message.countDocuments({
+          conversationId,
+          sender: { $ne: senderId },
+          isRead: false
         });
 
-        io.to(conversationId).emit('new_message', populatedMessage);
-        io.emit('inbox_update');
+        io.to(conversationId).emit('new_message', {
+          ...populatedMessage.toObject(),
+          unreadCount
+        });
 
+        io.emit('inbox_update');
+        console.log(`Message sent to conversation ${conversationId}`);
       } catch (err) {
-        console.error("Socket Error:", err);
+        console.error('Send message error:', err);
+        socket.emit('message_error', { error: 'Failed to send message' });
       }
     });
 
-    // ========== WEBRTC CALLING SYSTEM ==========
-    
-    // 1. Initiate Call
+    // --- MARK MESSAGES AS READ ---
+    socket.on('mark_messages_read', async ({ conversationId, userId }) => {
+      try {
+        await Message.updateMany(
+          {
+            conversationId: conversationId,
+            sender: { $ne: userId },
+            isRead: false
+          },
+          {
+            $set: { isRead: true, readAt: new Date() }
+          }
+        );
+        
+        await Conversation.findByIdAndUpdate(conversationId, {
+          unreadCount: 0
+        });
+        
+        io.to(conversationId).emit('messages_read', { conversationId, userId });
+        io.emit('inbox_update');
+      } catch (err) {
+        console.error('Mark read socket error:', err);
+      }
+    });
+// Add this to your socket.js file inside the module.exports
+
+// --- DELETE CONVERSATION ---
+socket.on('delete_conversation', async ({ conversationId }) => {
+  try {
+    // Emit to all users that conversation was deleted
+    io.emit('conversation_deleted', { conversationId });
+    io.emit('inbox_update');
+    console.log(`Conversation ${conversationId} deleted via socket`);
+  } catch (err) {
+    console.error('Delete conversation socket error:', err);
+  }
+});
+    // --- DELETE MESSAGE ---
+    socket.on('delete_message', async ({ messageId, conversationId }) => {
+      try {
+        await Message.findByIdAndDelete(messageId);
+        
+        const lastMsg = await Message.findOne({ conversationId })
+          .sort({ createdAt: -1 });
+        
+        if (lastMsg) {
+          await Conversation.findByIdAndUpdate(conversationId, {
+            lastMessage: lastMsg.text || 'Media message',
+            lastMessageType: lastMsg.messageType,
+            lastMessageTime: lastMsg.createdAt
+          });
+        }
+        
+        io.to(conversationId).emit('message_deleted', { messageId });
+        io.emit('inbox_update');
+      } catch (err) {
+        console.error('Delete message error:', err);
+      }
+    });
+
+    // --- TYPING INDICATOR ---
+    socket.on('typing_start', ({ conversationId, userId, userName }) => {
+      socket.to(conversationId).emit('user_typing', { userId, userName, typing: true });
+    });
+
+    socket.on('typing_stop', ({ conversationId, userId }) => {
+      socket.to(conversationId).emit('user_typing', { userId, typing: false });
+    });
+
+    // --- CALL SYSTEM ---
     socket.on('start_call', ({ senderId, receiverId, senderName, type }) => {
-      // Check if user is already in a call
       if (userCallStatus.get(senderId)) {
         socket.emit('call_failed', { reason: 'You are already in a call' });
         return;
@@ -68,20 +185,17 @@ module.exports = (io) => {
       
       const receiverSocketId = onlineUsers.get(receiverId);
       if (receiverSocketId) {
-        // Check if receiver is in a call
         if (userCallStatus.get(receiverId)) {
           socket.emit('call_failed', { reason: 'User is already in a call' });
           return;
         }
         
-        // Store call info
         userCallStatus.set(senderId, { with: receiverId, status: 'calling' });
         
-        // Trigger ringing on receiver's device
         io.to(receiverSocketId).emit('incoming_call', {
           from: senderId,
-          name: senderName,
-          type: type,
+          name: senderName || 'User',
+          type: type || 'voice',
           callerId: senderId
         });
       } else {
@@ -89,22 +203,18 @@ module.exports = (io) => {
       }
     });
 
-    // 2. Accept Call
     socket.on('accept_call', ({ to, callerId }) => {
       const callerSocketId = onlineUsers.get(callerId || to);
       if (callerSocketId) {
-        // Update call status
         userCallStatus.set(socket.userId, { with: to, status: 'connected' });
         userCallStatus.set(to, { with: socket.userId, status: 'connected' });
         
         io.to(callerSocketId).emit('call_accepted', {
-          from: socket.userId,
-          name: socket.userName
+          from: socket.userId
         });
       }
     });
 
-    // 3. Reject Call
     socket.on('reject_call', ({ to }) => {
       const callerSocketId = onlineUsers.get(to);
       if (callerSocketId) {
@@ -113,7 +223,6 @@ module.exports = (io) => {
       userCallStatus.delete(socket.userId);
     });
 
-    // 4. End Call
     socket.on('end_call', ({ to }) => {
       const targetSocketId = onlineUsers.get(to);
       if (targetSocketId) {
@@ -123,7 +232,7 @@ module.exports = (io) => {
       userCallStatus.delete(to);
     });
 
-    // 5. WebRTC Signaling
+    // --- WEBRTC SIGNALING ---
     socket.on('offer', ({ offer, to }) => {
       const targetSocketId = onlineUsers.get(to);
       if (targetSocketId) {
@@ -154,10 +263,11 @@ module.exports = (io) => {
       }
     });
 
-    // --- HANDLE DISCONNECT ---
-    socket.on('disconnect', () => {
+    // --- DISCONNECT ---
+    socket.on('disconnect', async () => {
+      console.log('Client disconnected:', socket.id);
+      
       if (socket.userId) {
-        // End any active calls
         const callInfo = userCallStatus.get(socket.userId);
         if (callInfo) {
           const targetSocketId = onlineUsers.get(callInfo.with);
@@ -167,7 +277,17 @@ module.exports = (io) => {
         }
         userCallStatus.delete(socket.userId);
         onlineUsers.delete(socket.userId);
-        io.emit('user_status_update', { userId: socket.userId, status: 'offline' });
+        
+        try {
+          await User.findByIdAndUpdate(socket.userId, { online: false });
+        } catch (err) {
+          console.error('Update offline error:', err);
+        }
+        
+        io.emit('user_status_update', { 
+          userId: socket.userId, 
+          status: 'offline' 
+        });
       }
     });
   });

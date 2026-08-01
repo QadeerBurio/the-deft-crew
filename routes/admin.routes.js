@@ -2,26 +2,23 @@ const express = require("express");
 const router = express.Router();
 const multer = require("multer");
 const path = require("path");
-const { storage } = require("../config/cloudinary");
-const Slider = require("../models/Slider"); // Your unified model
+const { uploadOffer } = require("../config/cloudinary"); // Changed from storage to uploadOffer
+const Slider = require("../models/Slider");
 const Notification = require("../models/Notification");
 const Job = require("../models/Job");
-const User = require("../models/User"); // ADDED
-const auth = require("../middleware/auth.middleware"); // ADDED
+const User = require("../models/User");
+const auth = require("../middleware/auth.middleware");
 const Exchange = require("../models/Exchange");
 const Application = require("../models/Application");
 const Package = require("../models/Package");
-const upload = multer({ storage });
 const Booking = require("../models/Booking");
-const Scholarships =require("../models/Scholarships")
-const Course =require('../models/Course')
-
-
+const Scholarships = require("../models/Scholarships");
+const Course = require('../models/Course');
 
 // Configure multer for course image uploads using Cloudinary
 const courseUpload = multer({ 
-  storage: storage,
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+  storage: uploadOffer.storage, // Use the storage from uploadOffer
+  limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     if (file.mimetype.startsWith('image/')) {
       cb(null, true);
@@ -30,7 +27,6 @@ const courseUpload = multer({
     }
   }
 });
-
 
 // --- Routes ---
 const isAdmin = async (req, res, next) => {
@@ -49,25 +45,72 @@ const isAdmin = async (req, res, next) => {
 // ==================== USER MANAGEMENT ROUTES ====================
 
 // ✅ Get users by ANY role (Student, Brand, Employee, Traveler)
+// In admin.routes.js - Modify the GET users by role endpoint
 router.get("/users/:role", auth, isAdmin, async (req, res) => {
   try {
     const { role } = req.params;
-    // Validate role
     const validRoles = ["student", "brand", "employee", "traveler", "admin"];
     if (!validRoles.includes(role)) {
       return res.status(400).json({ message: "Invalid role specified" });
     }
 
+    // For admin users, include password
     const users = await User.find({ role })
       .populate("university", "name")
       .populate("referredBy", "name email")
-      .select("-password")
+      .select("+password") // THIS IS KEY - include password field
       .sort({ createdAt: -1 });
 
     res.json(users);
   } catch (err) {
     console.error("Error fetching users:", err);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Also update the single user details endpoint
+router.get("/users/details/:id", auth, isAdmin, async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id)
+      .populate("university", "name location")
+      .populate("referredBy", "name email role")
+      .select("+password"); // Include password
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    res.json(user);
+  } catch (err) {
+    console.error("Error fetching user details:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Add a dedicated endpoint to get user password
+// In admin.routes.js - Update the password endpoint
+router.get("/users/password/:id", auth, isAdmin, async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id)
+      .select("+password name email role");
+    
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    
+    // Return the hashed password (this is what's stored)
+    res.json({ 
+      success: true,
+      password: user.password || 'No password set',
+      name: user.name,
+      email: user.email
+    });
+  } catch (err) {
+    console.error("Error fetching password:", err);
+    res.status(500).json({ 
+      success: false,
+      error: err.message 
+    });
   }
 });
 
@@ -80,7 +123,6 @@ router.get("/users/all", auth, isAdmin, async (req, res) => {
       .select("-password")
       .sort({ createdAt: -1 });
 
-    // Group by role for statistics
     const stats = {
       total: users.length,
       students: users.filter(u => u.role === "student").length,
@@ -97,24 +139,24 @@ router.get("/users/all", auth, isAdmin, async (req, res) => {
   }
 });
 
-// ✅ Get single user details (with full profile)
-router.get("/users/details/:id", auth, isAdmin, async (req, res) => {
-  try {
-    const user = await User.findById(req.params.id)
-      .populate("university", "name location")
-      .populate("referredBy", "name email role")
-      .select("-password");
+// // ✅ Get single user details (with full profile)
+// router.get("/users/details/:id", auth, isAdmin, async (req, res) => {
+//   try {
+//     const user = await User.findById(req.params.id)
+//       .populate("university", "name location")
+//       .populate("referredBy", "name email role")
+//       .select("-password");
 
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
+//     if (!user) {
+//       return res.status(404).json({ message: "User not found" });
+//     }
 
-    res.json(user);
-  } catch (err) {
-    console.error("Error fetching user details:", err);
-    res.status(500).json({ error: err.message });
-  }
-});
+//     res.json(user);
+//   } catch (err) {
+//     console.error("Error fetching user details:", err);
+//     res.status(500).json({ error: err.message });
+//   }
+// });
 
 // ✅ Toggle User Verification (Approve/Revoke)
 router.post("/approve-user/:id", auth, isAdmin, async (req, res) => {
@@ -125,7 +167,6 @@ router.post("/approve-user/:id", auth, isAdmin, async (req, res) => {
     user.status = user.status === "Verified" ? "Not Verified" : "Verified";
     await user.save();
 
-    // Send notification to user
     if (user.status === "Verified") {
       await Notification.create({
         recipient: user._id,
@@ -189,13 +230,11 @@ router.post("/users/create", auth, isAdmin, async (req, res) => {
   try {
     const { name, email, password, role, phone, address, company, designation } = req.body;
 
-    // Check if user exists
     const existingUser = await User.findOne({ email });
     if (existingUser) {
       return res.status(400).json({ message: "User with this email already exists" });
     }
 
-    // Hash password
     const bcrypt = require("bcryptjs");
     const hashedPassword = await bcrypt.hash(password, 10);
 
@@ -206,16 +245,13 @@ router.post("/users/create", auth, isAdmin, async (req, res) => {
       role: role || "employee",
       phone: phone || "",
       address: address || "",
-      // Brand-specific fields
       company: company || "",
       designation: designation || "",
-      // Auto-verify if created by admin
       status: "Verified",
     });
 
     await newUser.save();
 
-    // Send welcome email/notification
     await Notification.create({
       recipient: newUser._id,
       title: `Welcome to TechDegree Club! 🎉`,
@@ -274,7 +310,6 @@ router.post("/users/reset-password/:id", auth, isAdmin, async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    // Notify user
     await Notification.create({
       recipient: user._id,
       title: "Password Reset 🔐",
@@ -290,9 +325,10 @@ router.post("/users/reset-password/:id", auth, isAdmin, async (req, res) => {
   }
 });
 
-// 1. CREATE: Add new Slider or Offer
-// 1. CREATE: Add new Slider or Offer
-router.post("/add", auth, isAdmin, upload.single("image"), async (req, res) => {
+// ==================== SLIDER & OFFER ROUTES ====================
+
+// 1. CREATE: Add new Slider or Offer - FIXED with uploadOffer
+router.post("/add", auth, isAdmin, uploadOffer.single("image"), async (req, res) => {
   try {
     console.log("=== ADMIN ADD ROUTE HIT ===");
     console.log("Request body:", req.body);
@@ -300,7 +336,6 @@ router.post("/add", auth, isAdmin, upload.single("image"), async (req, res) => {
     
     const { type, title, description, link } = req.body;
     
-    // Validate required fields
     if (!req.file) {
       return res.status(400).json({ message: "Image is required" });
     }
@@ -309,13 +344,16 @@ router.post("/add", auth, isAdmin, upload.single("image"), async (req, res) => {
       return res.status(400).json({ message: "Type and title are required" });
     }
 
-    // Build the slider object
+    // Get the image URL - Cloudinary returns the URL in req.file.path
+    const imageUrl = req.file.path || req.file.secure_url || req.file.filename;
+    console.log("Image URL:", imageUrl);
+
     const sliderData = {
       type: type || 'slider',
       title: title || 'Untitled',
       description: description || '',
       link: link || '',
-      image: req.file.path,
+      image: imageUrl, // Store the full URL
       active: true,
     };
 
@@ -326,37 +364,25 @@ router.post("/add", auth, isAdmin, upload.single("image"), async (req, res) => {
 
     console.log("Slider created successfully:", newEntry);
 
-    // ✅ SEND NOTIFICATION HERE - BEFORE RESPONSE
+    // Send notification for offers
     if (type === 'offer') {
       try {
-        console.log("Attempting to send notification for offer...");
-        
         const notificationData = {
-          recipient: null, // Public broadcast
+          recipient: null,
           title: "New Exclusive Offer! 🔥",
           description: `A new deal has been posted: ${newEntry.title}! Check it out now.`,
-          type: "System", // Changed from "Offers" to "System" - more likely to be valid
+          type: "System",
           icon: "megaphone",
           link: newEntry._id.toString(),
         };
         
-        console.log("Notification data:", notificationData);
-        
         const notification = await Notification.create(notificationData);
         console.log("Notification sent successfully:", notification);
-        
       } catch (nError) {
         console.error("Notification failed:", nError);
-        // Don't fail the request if notification fails
-        console.error("Error details:", {
-          name: nError.name,
-          message: nError.message,
-          code: nError.code
-        });
       }
     }
 
-    // ✅ NOW SEND THE RESPONSE
     res.status(201).json({ 
       message: "Content published successfully!", 
       data: newEntry 
@@ -364,24 +390,13 @@ router.post("/add", auth, isAdmin, upload.single("image"), async (req, res) => {
 
   } catch (error) {
     console.error("=== ERROR IN ADMIN ADD ROUTE ===");
-    console.error("Error name:", error.name);
-    console.error("Error message:", error.message);
-    console.error("Error stack:", error.stack);
+    console.error("Error:", error);
     
-    // Check for validation errors
     if (error.name === 'ValidationError') {
       const errors = Object.values(error.errors).map(e => e.message);
       return res.status(400).json({ 
         message: "Validation failed", 
         errors: errors 
-      });
-    }
-    
-    // Check for duplicate key errors
-    if (error.code === 11000) {
-      return res.status(400).json({ 
-        message: "Duplicate entry", 
-        field: Object.keys(error.keyPattern)[0] 
       });
     }
     
@@ -392,12 +407,10 @@ router.post("/add", auth, isAdmin, upload.single("image"), async (req, res) => {
   }
 });
 
-// READ: Get all items (Used by the Combined Slider)
-
+// READ: Get all items
 router.get("/all", async (req, res) => {
   try {
     const { type } = req.query;
-    // We only want items where active is explicitly NOT false
     const filter = { active: { $ne: false } };
 
     if (type) {
@@ -411,10 +424,13 @@ router.get("/all", async (req, res) => {
   }
 });
 
-// 3. UPDATE: Toggle Active Status (Hide/Show on App)
+// 3. UPDATE: Toggle Active Status
 router.patch("/toggle/:id", auth, isAdmin, async (req, res) => {
   try {
     const item = await Slider.findById(req.params.id);
+    if (!item) {
+      return res.status(404).json({ message: "Item not found" });
+    }
     item.active = !item.active;
     await item.save();
     res.json({ message: "Status updated", active: item.active });
@@ -426,99 +442,18 @@ router.patch("/toggle/:id", auth, isAdmin, async (req, res) => {
 // 4. DELETE: Remove an item
 router.delete("/delete/:id", auth, isAdmin, async (req, res) => {
   try {
-    await Slider.findByIdAndDelete(req.params.id);
+    const deleted = await Slider.findByIdAndDelete(req.params.id);
+    if (!deleted) {
+      return res.status(404).json({ message: "Item not found" });
+    }
     res.json({ message: "Item deleted successfully" });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-
-
-
-router.patch("/verify-user/:targetUserId", auth, isAdmin, async (req, res) => {
-  try {
-    const updatedUser = await User.findByIdAndUpdate(
-      req.params.targetUserId,
-      { isVerified: true },
-      { new: true },
-    );
-
-    await Notification.create({
-      recipient: updatedUser._id, // Private
-      title: "Account Verified! ✅",
-      description:
-        "Your student status is verified. You can now claim premium discounts!",
-      type: "System",
-      icon: "sparkles",
-    });
-
-    res.json({ message: "User verified and notified." });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
-
-// Jobs Portal API's
-
-// // Create a new Job
-// router.post("/jobs/add", auth, isAdmin, async (req, res) => {
-//   try {
-//     const newJob = new Job(req.body);
-//     await newJob.save();
-//     res.status(201).json({ message: "Job posted successfully", data: newJob });
-//   } catch (err) {
-//     res.status(500).json({ error: err.message });
-//   }
-// });
-// Get all jobs (Admin view)
-router.get("/jobs/all", auth, isAdmin, async (req, res) => {
-  try {
-    const jobs = await Job.find().sort({ createdAt: -1 });
-    res.json(jobs);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// // Get only active jobs for the mobile app
-// router.get("/jobs/public", async (req, res) => {
-//   try {
-//     const jobs = await Job.find({ active: true }).sort({ createdAt: -1 });
-//     res.json(jobs);
-//   } catch (err) {
-//     res.status(500).json({ error: err.message });
-//   }
-// });
-
-// // --- ADMIN MANAGEMENT ---
-// // Toggle job status (Active/Inactive)
-// router.patch("/jobs/toggle/:id", auth, isAdmin, async (req, res) => {
-//   try {
-//     const job = await Job.findById(req.params.id);
-//     job.active = !job.active;
-//     await job.save();
-//     res.json({ message: "Status updated", active: job.active });
-//   } catch (err) {
-//     res.status(500).json({ error: err.message });
-//   }
-// });
-
-// router.delete("/jobs/delete/:id", auth, isAdmin, async (req, res) => {
-//   try {
-//     await Job.findByIdAndDelete(req.params.id);
-//     res.json({ message: "Job deleted successfully" });
-//   } catch (err) {
-//     res.status(500).json({ error: err.message });
-//   }
-// });
-
 // ==================== EXCHANGE PROGRAM ROUTES ====================
 
-// ==================== EXCHANGE PROGRAM ROUTES ====================
-
-// @route   POST /admin/exchange/add
-// @desc    Create a new program with scholarship support
 router.post("/exchange/add", auth, isAdmin, async (req, res) => {
   try {
     const {
@@ -538,7 +473,6 @@ router.post("/exchange/add", auth, isAdmin, async (req, res) => {
       return res.status(400).json({ message: "All required fields must be filled." });
     }
 
-    // Create the exchange program
     const newProgram = new Exchange({
       title,
       university,
@@ -554,7 +488,6 @@ router.post("/exchange/add", auth, isAdmin, async (req, res) => {
 
     await newProgram.save();
 
-    // Auto-create scholarship if provided
     if (scholarship && scholarship.name) {
       const newScholarship = new Scholarships({
         programId: newProgram._id,
@@ -567,19 +500,16 @@ router.post("/exchange/add", auth, isAdmin, async (req, res) => {
         active: true
       });
       await newScholarship.save();
-      
-      // Update program with scholarship reference
       newProgram.scholarship = newScholarship._id;
       await newProgram.save();
     }
 
-    // Broadcast notification to all students - Using valid type
     try {
       await Notification.create({
-        recipient: null, // Public broadcast
+        recipient: null,
         title: `🌍 New Exchange Program: ${title}`,
         description: `${university} is now accepting applications! Deadline: ${new Date(deadline).toLocaleDateString()}`,
-        type: "Exchange", // Now valid in the updated Notification model
+        type: "Exchange",
         icon: "globe",
         link: newProgram._id.toString()
       });
@@ -597,19 +527,11 @@ router.post("/exchange/add", auth, isAdmin, async (req, res) => {
   }
 });
 
-// In admin.routes.js - Add this public route BEFORE the authenticated ones
-
-// ==================== PUBLIC EXCHANGE ROUTES ====================
-
-// @route   GET /admin/exchange/all (PUBLIC - for guests)
-// @desc    Get all active programs with scholarship data
 router.get("/exchange/all", async (req, res) => {
   try {
     const programs = await Exchange.find({ active: true })
       .sort({ createdAt: -1 })
       .populate('scholarship');
-    
-    // Ensure we return an array even if empty
     res.json(programs || []);
   } catch (err) {
     console.error("Error fetching programs:", err);
@@ -617,8 +539,6 @@ router.get("/exchange/all", async (req, res) => {
   }
 });
 
-// @route   GET /admin/exchange/all-admin (PROTECTED - for admin)
-// @desc    Get ALL programs including inactive
 router.get("/exchange/all-admin", auth, isAdmin, async (req, res) => {
   try {
     const programs = await Exchange.find()
@@ -631,8 +551,6 @@ router.get("/exchange/all-admin", auth, isAdmin, async (req, res) => {
   }
 });
 
-// @route   PUT /admin/exchange/update/:id
-// @desc    Update an existing program
 router.put("/exchange/update/:id", auth, isAdmin, async (req, res) => {
   try {
     const { id } = req.params;
@@ -654,7 +572,6 @@ router.put("/exchange/update/:id", auth, isAdmin, async (req, res) => {
       return res.status(404).json({ message: "Program not found" });
     }
 
-    // Update program fields
     program.title = title;
     program.university = university;
     program.location = location;
@@ -667,12 +584,10 @@ router.put("/exchange/update/:id", auth, isAdmin, async (req, res) => {
 
     await program.save();
 
-    // Update or create scholarship
     if (scholarship && scholarship.name) {
       let existingScholarship = await Scholarships.findOne({ programId: program._id });
       
       if (existingScholarship) {
-        // Update existing scholarship
         existingScholarship.name = scholarship.name;
         existingScholarship.amount = scholarship.amount || '';
         existingScholarship.currency = scholarship.currency || 'USD';
@@ -681,7 +596,6 @@ router.put("/exchange/update/:id", auth, isAdmin, async (req, res) => {
         existingScholarship.requirements = scholarship.requirements || [];
         await existingScholarship.save();
       } else {
-        // Create new scholarship
         const newScholarship = new Scholarships({
           programId: program._id,
           name: scholarship.name,
@@ -697,7 +611,6 @@ router.put("/exchange/update/:id", auth, isAdmin, async (req, res) => {
         await program.save();
       }
     } else {
-      // If scholarship data is removed, delete existing scholarship
       if (program.scholarship) {
         await Scholarships.findByIdAndDelete(program.scholarship);
         program.scholarship = null;
@@ -716,8 +629,6 @@ router.put("/exchange/update/:id", auth, isAdmin, async (req, res) => {
   }
 });
 
-// @route   PATCH /admin/exchange/toggle/:id
-// @desc    Show/Hide a program
 router.patch("/exchange/toggle/:id", auth, isAdmin, async (req, res) => {
   try {
     const program = await Exchange.findById(req.params.id);
@@ -728,7 +639,6 @@ router.patch("/exchange/toggle/:id", auth, isAdmin, async (req, res) => {
     program.active = !program.active;
     await program.save();
 
-    // Also toggle associated scholarship
     if (program.scholarship) {
       await Scholarships.findByIdAndUpdate(program.scholarship, { active: program.active });
     }
@@ -743,8 +653,6 @@ router.patch("/exchange/toggle/:id", auth, isAdmin, async (req, res) => {
   }
 });
 
-// @route   DELETE /admin/exchange/delete/:id
-// @desc    Permanently remove a program
 router.delete("/exchange/delete/:id", auth, isAdmin, async (req, res) => {
   try {
     const program = await Exchange.findById(req.params.id);
@@ -752,7 +660,6 @@ router.delete("/exchange/delete/:id", auth, isAdmin, async (req, res) => {
       return res.status(404).json({ message: "Program not found" });
     }
 
-    // Delete associated scholarship
     if (program.scholarship) {
       await Scholarships.findByIdAndDelete(program.scholarship);
     }
@@ -765,8 +672,6 @@ router.delete("/exchange/delete/:id", auth, isAdmin, async (req, res) => {
   }
 });
 
-// @route   GET /admin/exchange/applications/:programId
-// @desc    Get applications for a specific program
 router.get("/exchange/applications/:programId", auth, isAdmin, async (req, res) => {
   try {
     const applications = await Application.find({
@@ -779,14 +684,13 @@ router.get("/exchange/applications/:programId", auth, isAdmin, async (req, res) 
   }
 });
 
+// ==================== PACKAGE ROUTES ====================
 
-// 3. POST Route: Create Package (Admin)
-// POST: Create Package
 router.post(
   "/packages/create",
   auth,
   isAdmin,
-  upload.single("image"),
+  uploadOffer.single("image"),
   async (req, res) => {
     try {
       const {
@@ -799,10 +703,10 @@ router.post(
         inclusions,
       } = req.body;
 
-      if (!req.file)
+      if (!req.file) {
         return res.status(400).json({ message: "Package image is required." });
+      }
 
-      // Safely parse JSON arrays
       const parsedRequirements = requirements ? JSON.parse(requirements) : [];
       const parsedInclusions = inclusions ? JSON.parse(inclusions) : [];
 
@@ -814,18 +718,18 @@ router.post(
         description,
         requirements: parsedRequirements,
         inclusions: parsedInclusions,
-        image: req.file.path, // Cloudinary path
+        image: req.file.path,
       });
 
       await newPackage.save();
       res.status(201).json({ success: true, message: "Package published!" });
     } catch (error) {
+      console.error("Error creating package:", error);
       res.status(500).json({ error: error.message });
     }
   },
 );
 
-// GET all packages for Admin list (Shows even inactive ones if you add an active field)
 router.get("/packages/all", auth, isAdmin, async (req, res) => {
   try {
     const packages = await Package.find().sort({ createdAt: -1 });
@@ -835,40 +739,37 @@ router.get("/packages/all", auth, isAdmin, async (req, res) => {
   }
 });
 
-// DELETE Package
 router.delete("/packages/delete/:id", auth, isAdmin, async (req, res) => {
   try {
     const deletedPackage = await Package.findByIdAndDelete(req.params.id);
-    if (!deletedPackage)
+    if (!deletedPackage) {
       return res.status(404).json({ message: "Package not found" });
+    }
     res.json({ success: true, message: "Package deleted successfully" });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
-// --- UPDATE PACKAGE (Improved for Safety) ---
+
 router.put(
   "/packages/update/:id",
   auth,
   isAdmin,
-  upload.single("image"),
+  uploadOffer.single("image"),
   async (req, res) => {
     try {
       const { id } = req.params;
       const updateData = { ...req.body };
 
-      // Safety parse for arrays
       try {
         if (updateData.requirements)
           updateData.requirements = JSON.parse(updateData.requirements);
         if (updateData.inclusions)
           updateData.inclusions = JSON.parse(updateData.inclusions);
       } catch (e) {
-        return res
-          .status(400)
-          .json({
-            message: "Requirements or Inclusions must be valid JSON strings",
-          });
+        return res.status(400).json({
+          message: "Requirements or Inclusions must be valid JSON strings",
+        });
       }
 
       if (updateData.price) updateData.price = parseFloat(updateData.price);
@@ -881,8 +782,9 @@ router.put(
         new: true,
       });
 
-      if (!updatedPackage)
+      if (!updatedPackage) {
         return res.status(404).json({ message: "Package not found" });
+      }
 
       res.json({
         success: true,
@@ -895,13 +797,10 @@ router.put(
   },
 );
 
-// Admin
+// ==================== CARD MANAGEMENT ROUTES ====================
 
-// @desc    Get all users waiting for physical cards
-// @route   GET /api/admin/pending-cards
 router.get("/pending-cards", auth, isAdmin, async (req, res) => {
   try {
-    // Only fetch VIPs who haven't received their card yet
     const pendingUsers = await User.find({
       isVip: true,
       cardStatus: { $in: ["Ordered", "Printing"] },
@@ -912,7 +811,7 @@ router.get("/pending-cards", auth, isAdmin, async (req, res) => {
     res.status(500).json({ message: "Server Error" });
   }
 });
-// Get users waiting for payment approval
+
 router.get("/pending-payments", auth, isAdmin, async (req, res) => {
   try {
     const users = await User.find({
@@ -924,49 +823,36 @@ router.get("/pending-payments", auth, isAdmin, async (req, res) => {
   }
 });
 
-
-// 1. Get stats for the dashboard tabs
-// 1. Get stats for the dashboard including Revenue
 router.get("/card-stats", auth, isAdmin, async (req, res) => {
   try {
     const printing = await User.countDocuments({ cardStatus: "Printing" });
     const shipped = await User.countDocuments({ cardStatus: "Shipped" });
     const delivered = await User.countDocuments({ cardStatus: "Delivered" });
     const pending = await User.countDocuments({ paymentStatus: "Pending Verification" });
-    
-    // Count all users who have successfully paid
     const approvedTotal = await User.countDocuments({ paymentStatus: "Verified" });
     const totalRevenue = approvedTotal * 750;
 
-    res.json({ 
-      printing, 
-      shipped, 
-      delivered, 
-      pending, 
-      approvedTotal, 
-      totalRevenue 
-    });
+    res.json({ printing, shipped, delivered, pending, approvedTotal, totalRevenue });
   } catch (err) { 
     res.status(500).json({ message: "Error fetching stats" }); 
   }
 });
 
-// 2. Comprehensive fetch for Logistics
 router.get("/logistics/:status", auth, isAdmin, async (req, res) => {
   try {
     const users = await User.find({ cardStatus: req.params.status })
       .select("name rollNo phone shippingDetails cardStatus fcmToken");
     res.json(users);
-  } catch (err) { res.status(500).send("Error"); }
+  } catch (err) { 
+    res.status(500).send("Error"); 
+  }
 });
 
-// 3. Bulk Update with Dynamic Notifications
 router.post("/bulk-update-status", auth, isAdmin, async (req, res) => {
   const { userIds, newStatus } = req.body;
   try {
     await User.updateMany({ _id: { $in: userIds } }, { $set: { cardStatus: newStatus } });
 
-    // Send Notifications to all selected users
     const users = await User.find({ _id: { $in: userIds }, fcmToken: { $exists: true } });
     
     users.forEach(u => {
@@ -975,14 +861,15 @@ router.post("/bulk-update-status", auth, isAdmin, async (req, res) => {
       if (newStatus === "Shipped") msg = "Great news! Your TDC card has been dispatched via courier. 🚚";
       if (newStatus === "Delivered") msg = "Your TDC Gold Card has been delivered. Welcome to the elite! 🏁";
       
-      sendPushNotification(u.fcmToken, `Card Update: ${newStatus}`, msg);
+      // sendPushNotification(u.fcmToken, `Card Update: ${newStatus}`, msg);
     });
 
     res.json({ success: true });
-  } catch (err) { res.status(500).json({ message: "Failed" }); }
+  } catch (err) { 
+    res.status(500).json({ message: "Failed" }); 
+  }
 });
-// @desc    Approve a manual payment
-// POST /api/admin/approve-payment/:id
+
 router.post("/approve-payment/:id", auth, isAdmin, async (req, res) => {
   try {
     const expiryDate = new Date();
@@ -992,12 +879,11 @@ router.post("/approve-payment/:id", auth, isAdmin, async (req, res) => {
       isVip: true,
       vipExpiry: expiryDate,
       paymentStatus: "Verified",
-      cardStatus: "Printing", // Moves to printing phase
+      cardStatus: "Printing",
     }, { new: true });
 
-    // Trigger Notification
     if (user.fcmToken) {
-       sendPushNotification(user.fcmToken, "Gold Activated! ✨", "Welcome to the Gold Club. Your card is being printed.");
+      // sendPushNotification(user.fcmToken, "Gold Activated! ✨", "Welcome to the Gold Club. Your card is being printed.");
     }
 
     res.json({ success: true });
@@ -1006,8 +892,6 @@ router.post("/approve-payment/:id", auth, isAdmin, async (req, res) => {
   }
 });
 
-// @desc    Reject a payment
-// @route   POST /api/admin/reject-payment/:id
 router.post("/reject-payment/:id", auth, isAdmin, async (req, res) => {
   try {
     await User.findByIdAndUpdate(req.params.id, {
@@ -1020,7 +904,8 @@ router.post("/reject-payment/:id", auth, isAdmin, async (req, res) => {
   }
 });
 
-// Get all bookings (admin only)
+// ==================== BOOKING ROUTES ====================
+
 router.get("/bookings/all", auth, isAdmin, async (req, res) => {
   try {
     const bookings = await Booking.find()
@@ -1028,53 +913,45 @@ router.get("/bookings/all", auth, isAdmin, async (req, res) => {
       .populate("packageId", "name location");
     res.json(bookings);
   } catch (error) {
-    res
-      .status(500)
-      .json({ message: "Error fetching bookings", error: error.message });
+    res.status(500).json({ message: "Error fetching bookings", error: error.message });
   }
 });
 
-// --- 3. NOTIFY ON BOOKING STATUS (The "Response" Step) ---
 router.put("/bookings/:id", auth, isAdmin, async (req, res) => {
-    try {
-        const { status, adminNotes } = req.body;
-        const booking = await Booking.findByIdAndUpdate(
-            req.params.id,
-            { status, adminNotes },
-            { new: true }
-        );
+  try {
+    const { status, adminNotes } = req.body;
+    const booking = await Booking.findByIdAndUpdate(
+      req.params.id,
+      { status, adminNotes },
+      { new: true }
+    );
 
-        if (!booking) return res.status(404).json({ message: "Booking not found" });
+    if (!booking) return res.status(404).json({ message: "Booking not found" });
 
-        // Build a friendly message based on status
-        let statusMsg = `Your booking for ${booking.packageName} is now ${status.toUpperCase()}.`;
-        if (status === 'confirmed') statusMsg = `Pack your bags! Your booking for ${booking.packageName} is CONFIRMED! ✅`;
-        if (status === 'cancelled') statusMsg = `Note: Your booking for ${booking.packageName} was cancelled. ❌`;
+    let statusMsg = `Your booking for ${booking.packageName} is now ${status.toUpperCase()}.`;
+    if (status === 'confirmed') statusMsg = `Pack your bags! Your booking for ${booking.packageName} is CONFIRMED! ✅`;
+    if (status === 'cancelled') statusMsg = `Note: Your booking for ${booking.packageName} was cancelled. ❌`;
 
-        // PRIVATE NOTIFICATION to the specific user
-        await Notification.create({
-            recipient: booking.userId, // Send only to this user
-            title: `Booking Update: ${status.toUpperCase()}`,
-            description: statusMsg,
-            type: "System",
-            icon: status === 'confirmed' ? "checkmark-circle" : "information-circle",
-            link: `/my-bookings/${booking._id}`
-        });
+    await Notification.create({
+      recipient: booking.userId,
+      title: `Booking Update: ${status.toUpperCase()}`,
+      description: statusMsg,
+      type: "System",
+      icon: status === 'confirmed' ? "checkmark-circle" : "information-circle",
+      link: `/my-bookings/${booking._id}`
+    });
 
-        res.json({ success: true, message: "User notified of status change", booking });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
+    res.json({ success: true, message: "User notified of status change", booking });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
-// Get booking statistics (admin only)
 router.get("/bookings/stats", auth, isAdmin, async (req, res) => {
   try {
     const totalBookings = await Booking.countDocuments();
     const pendingBookings = await Booking.countDocuments({ status: "pending" });
-    const confirmedBookings = await Booking.countDocuments({
-      status: "confirmed",
-    });
+    const confirmedBookings = await Booking.countDocuments({ status: "confirmed" });
     const totalRevenue = await Booking.aggregate([
       { $match: { status: { $in: ["confirmed", "completed"] } } },
       { $group: { _id: null, total: { $sum: "$totalAmount" } } },
@@ -1087,12 +964,10 @@ router.get("/bookings/stats", auth, isAdmin, async (req, res) => {
       totalRevenue: totalRevenue[0]?.total || 0,
     });
   } catch (error) {
-    res
-      .status(500)
-      .json({ message: "Error fetching stats", error: error.message });
+    res.status(500).json({ message: "Error fetching stats", error: error.message });
   }
 });
-// @desc    Delete a booking permanently
+
 router.delete("/bookings/:id", auth, isAdmin, async (req, res) => {
   try {
     const booking = await Booking.findById(req.params.id);
@@ -1101,8 +976,6 @@ router.delete("/bookings/:id", auth, isAdmin, async (req, res) => {
       return res.status(404).json({ message: "Booking not found" });
     }
 
-    // Optional: Prevent deletion of confirmed/completed bookings to keep financial records
-    // If you want to allow it anyway, just remove this if block
     if (booking.status === 'confirmed' || booking.status === 'completed') {
       return res.status(400).json({ 
         message: "Cannot delete a confirmed or completed booking. Please cancel it first if necessary." 
@@ -1111,12 +984,11 @@ router.delete("/bookings/:id", auth, isAdmin, async (req, res) => {
 
     await Booking.findByIdAndDelete(req.params.id);
 
-    // Send a final notification to the user (Optional)
     try {
       await Notification.create({
         recipient: booking.userId,
         title: "Booking Removed",
-        description: `Your booking for ${booking.packageName} has been Reject from the system by an administrator.`,
+        description: `Your booking for ${booking.packageName} has been removed from the system by an administrator.`,
         type: "System",
         icon: "trash-outline"
       });
@@ -1133,8 +1005,39 @@ router.delete("/bookings/:id", auth, isAdmin, async (req, res) => {
   }
 });
 
+// ==================== JOB ROUTES ====================
 
+router.get("/jobs/all", auth, isAdmin, async (req, res) => {
+  try {
+    const jobs = await Job.find().sort({ createdAt: -1 });
+    res.json(jobs);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
+// ==================== VERIFICATION ROUTES ====================
 
+router.patch("/verify-user/:targetUserId", auth, isAdmin, async (req, res) => {
+  try {
+    const updatedUser = await User.findByIdAndUpdate(
+      req.params.targetUserId,
+      { isVerified: true },
+      { new: true },
+    );
+
+    await Notification.create({
+      recipient: updatedUser._id,
+      title: "Account Verified! ✅",
+      description: "Your student status is verified. You can now claim premium discounts!",
+      type: "System",
+      icon: "sparkles",
+    });
+
+    res.json({ message: "User verified and notified." });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
 
 module.exports = router;

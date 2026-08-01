@@ -1,15 +1,15 @@
+// socialRoutes.js - Complete Fixed Version
+
 const express = require('express');
 const router = express.Router();
 const auth = require('../middleware/auth.middleware');
-const Post =require('../models/Post');
-const Confession =require('../models/Confession');
-const User =require('../models/User');
-const Story =require('../models/Story');
-const Notification =require('../models/SocialNotification');
-const  createNotification  = require('../utils/notificationHelper');
+const Post = require('../models/Post');
+const Confession = require('../models/Confession');
+const User = require('../models/User');
+const Story = require('../models/Story');
+const Notification = require('../models/SocialNotification');
+const createNotification = require('../utils/notificationHelper');
 const { Conversation, Message } = require('../models/Chat');
-
-
 
 // -------------------- FEED & POSTS --------------------
 router.post('/create-post', auth, async (req, res) => {
@@ -20,12 +20,11 @@ router.post('/create-post', auth, async (req, res) => {
       return res.status(400).json({ error: "Please add some text or an image to your post." });
     }
 
-    // Now 'Post' is the constructor, so 'new Post()' will work!
     const newPost = new Post({
-      author: req.user._id, 
+      author: req.user._id,
       content: content?.trim(),
       category: category || "General",
-      image: image || "", 
+      image: image || "",
       poll: poll || [],
       location: location || "Karachi"
     });
@@ -35,7 +34,7 @@ router.post('/create-post', auth, async (req, res) => {
     const populatedPost = await Post.findById(newPost._id)
       .populate({
         path: 'author',
-        select: 'name profileImage university',
+        select: 'name profileImage university connections sentRequests receivedRequests',
         populate: { path: 'university', select: 'name' }
       });
 
@@ -46,8 +45,7 @@ router.post('/create-post', auth, async (req, res) => {
   }
 });
 
-// --- 1. Fetch Feed (Fixed Population) ---
-// routes/social.js - UPDATED Feed Route
+// --- Feed Route - COMPLETELY FIXED with null author handling ---
 router.get('/feed', auth, async (req, res) => {
   try {
     const { category, search, limit = 20, before } = req.query;
@@ -55,15 +53,10 @@ router.get('/feed', auth, async (req, res) => {
     
     let query = {};
 
-    // ✅ FIX: Don't exclude user's own posts OR viewed posts
-    // Instead, just fetch posts and track views separately
-    
-    // 1. Handle Category Filter
     if (category && category !== "All") {
       query.category = category;
     }
 
-    // 2. Handle Search Query
     if (search && search.trim() !== "") {
       const searchRegex = new RegExp(search, 'i');
       const matchingUsers = await User.find({ name: searchRegex }).select('_id');
@@ -75,15 +68,23 @@ router.get('/feed', auth, async (req, res) => {
       ];
     }
 
-    // 3. Pagination - get posts older than 'before' timestamp
     if (before) {
       query.createdAt = { $lt: new Date(before) };
     }
 
-    const posts = await Post.find(query)
+    // Get current user's connections and sent requests with null checks
+    const currentUser = await User.findById(userId).select('connections sentRequests receivedRequests');
+    
+    // Safely map with fallback empty arrays
+    const userConnections = (currentUser?.connections || []).map(id => id ? id.toString() : '');
+    const userSentRequests = (currentUser?.sentRequests || []).map(id => id ? id.toString() : '');
+    const userReceivedRequests = (currentUser?.receivedRequests || []).map(id => id ? id.toString() : '');
+
+    // Get posts and populate author
+    let posts = await Post.find(query)
       .populate({
         path: 'author',
-        select: 'name profileImage university',
+        select: 'name profileImage university connections sentRequests receivedRequests',
         populate: { path: 'university', select: 'name' }
       })
       .populate({
@@ -93,24 +94,105 @@ router.get('/feed', auth, async (req, res) => {
       .sort({ createdAt: -1 })
       .limit(parseInt(limit));
 
-    // ✅ Add a flag to indicate if current user has viewed each post
-    const postsWithViewStatus = posts.map(post => {
-      const postObj = post.toObject();
-      postObj.hasViewed = post.viewedBy?.includes(userId) || false;
-      return postObj;
+    // STEP 1: Filter out posts with null or undefined author FIRST
+    const validPosts = posts.filter(post => {
+      return post && post.author !== null && post.author !== undefined;
     });
 
+    // STEP 2: Map through only valid posts
+    const postsWithStatus = validPosts.map(post => {
+      const postObj = post.toObject();
+      const author = post.author;
+      
+      // Safety check - should never be null here but just in case
+      if (!author) {
+        return null;
+      }
+      
+      // SAFE: Get author ID with proper null checks
+      let authorId = '';
+      try {
+        authorId = author._id ? author._id.toString() : '';
+      } catch (err) {
+        authorId = '';
+      }
+      
+      const userIdStr = userId.toString();
+      
+      // Determine connection status with safe checks
+      let connectionStatus = 'none';
+      if (authorId === userIdStr) {
+        connectionStatus = 'self';
+      } else if (userConnections.includes(authorId)) {
+        connectionStatus = 'connected';
+      } else if (userSentRequests.includes(authorId)) {
+        connectionStatus = 'pending';
+      } else if (author.receivedRequests && Array.isArray(author.receivedRequests)) {
+        // Safe check for received requests
+        const hasReceived = author.receivedRequests.some(id => {
+          try {
+            return id && id.toString() === userIdStr;
+          } catch (err) {
+            return false;
+          }
+        });
+        if (hasReceived) {
+          connectionStatus = 'received';
+        }
+      }
+      
+      // Build author object safely
+      postObj.author = {
+        _id: author._id || null,
+        name: author.name || 'Unknown User',
+        profileImage: author.profileImage || '',
+        university: author.university || null,
+        connectionStatus: connectionStatus,
+        isConnected: connectionStatus === 'connected',
+        isPending: connectionStatus === 'pending',
+        isReceived: connectionStatus === 'received'
+      };
+      
+      // Safe check for viewedBy
+      let hasViewed = false;
+      try {
+        if (post.viewedBy && Array.isArray(post.viewedBy)) {
+          hasViewed = post.viewedBy.some(id => {
+            try {
+              return id && id.toString() === userIdStr;
+            } catch (err) {
+              return false;
+            }
+          });
+        }
+      } catch (err) {
+        hasViewed = false;
+      }
+      postObj.hasViewed = hasViewed;
+      
+      return postObj;
+    })
+    .filter(post => post !== null); // Remove any null entries
+
+    // Calculate hasMore based on original posts length
+    const hasMore = posts.length === parseInt(limit);
+
     res.json({
-      posts: postsWithViewStatus,
-      hasMore: posts.length === parseInt(limit)
+      posts: postsWithStatus,
+      hasMore: hasMore
     });
+    
   } catch (err) {
     console.error("[Backend Error] Feed/Search:", err.message);
-    res.status(500).json({ error: "Failed to fetch feed results." });
+    console.error("[Backend Error] Stack:", err.stack);
+    res.status(500).json({ 
+      error: "Failed to fetch feed results.",
+      details: err.message 
+    });
   }
 });
 
-// routes/social.js - Add this new route
+// --- Mark Post as Viewed ---
 router.post('/posts/view/:id', auth, async (req, res) => {
   try {
     const post = await Post.findById(req.params.id);
@@ -120,7 +202,6 @@ router.post('/posts/view/:id', auth, async (req, res) => {
 
     const userId = req.user._id;
     
-    // Only add if not already in viewedBy array
     if (!post.viewedBy.includes(userId)) {
       post.viewedBy.push(userId);
       await post.save();
@@ -133,8 +214,7 @@ router.post('/posts/view/:id', auth, async (req, res) => {
   }
 });
 
-// --- 2. Toggle Like ---
-// Toggle Like on Post
+// --- Toggle Like on Post ---
 router.put('/posts/like/:id', auth, async (req, res) => {
   try {
     const post = await Post.findById(req.params.id);
@@ -148,14 +228,13 @@ router.put('/posts/like/:id', auth, async (req, res) => {
     } else {
       post.likes.push(userId);
       
-      // Create notification with postId
       if (post.author.toString() !== userId.toString()) {
         await createNotification(
-          post.author,      // recipient
-          req.user._id,     // sender
-          'like',           // type
-          `${req.user.name} liked your post`, // text
-          post._id          // postId - THIS IS CRITICAL
+          post.author,
+          req.user._id,
+          'like',
+          `${req.user.name} liked your post`,
+          post._id
         );
       }
     }
@@ -176,7 +255,7 @@ router.put('/posts/like/:id', auth, async (req, res) => {
   }
 });
 
-// Get Post Likes
+// --- Get Post Likes ---
 router.get('/posts/likes/:id', auth, async (req, res) => {
   try {
     const post = await Post.findById(req.params.id)
@@ -191,8 +270,7 @@ router.get('/posts/likes/:id', auth, async (req, res) => {
   }
 });
 
-// --- 3. Add Comment ---
-// Add Comment
+// --- Add Comment to Post ---
 router.post('/posts/comment/:id', auth, async (req, res) => {
   try {
     const { text } = req.body;
@@ -201,7 +279,6 @@ router.post('/posts/comment/:id', auth, async (req, res) => {
       return res.status(400).json({ error: "Comment text cannot be empty." });
     }
 
-    // Find post and add comment
     const post = await Post.findById(req.params.id);
     if (!post) return res.status(404).json({ error: "Post not found." });
 
@@ -214,23 +291,20 @@ router.post('/posts/comment/:id', auth, async (req, res) => {
     post.comments.unshift(newComment);
     await post.save();
 
-    // CRITICAL: Re-fetch the post and populate user details for ALL comments
     const updatedPost = await Post.findById(req.params.id)
       .populate('comments.user', 'name profileImage');
 
-    // Create Notification with postId
     const previewText = text.length > 20 ? text.substring(0, 20) + "..." : text;
     if (post.author.toString() !== req.user._id.toString()) {
        await createNotification(
-         post.author,       // recipient
-         req.user._id,      // sender
-         'comment',         // type
-         `${req.user.name} commented: "${previewText}"`, // text
-         post._id           // postId - THIS IS CRITICAL
+         post.author,
+         req.user._id,
+         'comment',
+         `${req.user.name} commented: "${previewText}"`,
+         post._id
        );
     }
 
-    // Return the FULL updated comments array
     res.json({ success: true, comments: updatedPost.comments });
   } catch (err) { 
     console.error("Comment Logic Error:", err.message);
@@ -238,41 +312,30 @@ router.post('/posts/comment/:id', auth, async (req, res) => {
   }
 });
 
-// --- 4. Favorite ---
+// --- Favorite Post ---
 router.post('/posts/favorite/:id', auth, async (req, res) => {
   try {
-
     const post = await Post.findById(req.params.id);
-
     if (!post) return res.status(404).json({ message: "Post not found" });
 
     const userId = req.user._id.toString();
-
-    const alreadySaved = post.favorites.some(
-      (id) => id.toString() === userId
-    );
+    const alreadySaved = post.favorites.some(id => id.toString() === userId);
 
     if (alreadySaved) {
-      post.favorites = post.favorites.filter(
-        (id) => id.toString() !== userId
-      );
+      post.favorites = post.favorites.filter(id => id.toString() !== userId);
     } else {
       post.favorites.push(userId);
     }
 
     await post.save();
-
-    res.json({
-      success: true,
-      favorites: post.favorites
-    });
-
+    res.json({ success: true, favorites: post.favorites });
   } catch (err) {
     console.log(err);
     res.status(500).json({ message: "Favorite failed" });
   }
 });
-// Delete Comment from Post
+
+// --- Delete Comment from Post ---
 router.delete('/posts/comment/:postId/:commentId', auth, async (req, res) => {
   try {
     const post = await Post.findById(req.params.postId);
@@ -295,7 +358,7 @@ router.delete('/posts/comment/:postId/:commentId', auth, async (req, res) => {
   }
 });
 
-// Delete Post
+// --- Delete Post ---
 router.delete('/posts/:id', auth, async (req, res) => {
   try {
     const post = await Post.findById(req.params.id);
@@ -313,11 +376,33 @@ router.delete('/posts/:id', auth, async (req, res) => {
   }
 });
 
-// Add this route to check if a post exists
+// social.routes.js - FIXED Get Single Post route
+
+// --- Get Single Post ---
 router.get('/posts/:id', auth, async (req, res) => {
   try {
-    const post = await Post.findById(req.params.id)
-      .populate('author', 'name profileImage')
+    // ========== FIXED: Validate and clean post ID ==========
+    let postId = req.params.id;
+    
+    // If the ID is an object, extract the _id
+    if (postId && typeof postId === 'object') {
+      postId = postId._id || postId.toString();
+    }
+    
+    // Validate ObjectId format
+    const isValidObjectId = (id) => {
+      if (!id) return false;
+      const idStr = typeof id === 'string' ? id : String(id);
+      return /^[0-9a-fA-F]{24}$/.test(idStr);
+    };
+    
+    if (!isValidObjectId(postId)) {
+      console.error('Invalid post ID format:', postId);
+      return res.status(400).json({ error: "Invalid post ID format" });
+    }
+    
+    const post = await Post.findById(postId)
+      .populate('author', 'name profileImage connections sentRequests receivedRequests')
       .populate('comments.user', 'name profileImage')
       .populate('likes', 'name profileImage');
     
@@ -328,46 +413,146 @@ router.get('/posts/:id', auth, async (req, res) => {
     res.json(post);
   } catch (err) {
     console.error("Get Post Error:", err);
+    console.error("Stack:", err.stack);
     res.status(500).json({ error: "Server error" });
   }
 });
 
-// -------------------- User Profile --------------------
-
-// 1. Get Logged-in User's Confessions
-// Get User Profile with user data and posts
+// -------------------- USER PROFILE --------------------
+// --- Get User Profile with connection status ---
 router.get('/profile/:userId', auth, async (req, res) => {
   try {
     const userId = req.params.userId;
+    const currentUserId = req.user._id;
     
-    // Get user profile data
+    // Get current user's connections and sent requests
+    const currentUser = await User.findById(currentUserId).select('connections sentRequests receivedRequests');
+    
+    // SAFE: Map with fallback empty arrays and null checks
+    const userConnections = (currentUser?.connections || []).map(id => id ? id.toString() : '');
+    const userSentRequests = (currentUser?.sentRequests || []).map(id => id ? id.toString() : '');
+    const userReceivedRequests = (currentUser?.receivedRequests || []).map(id => id ? id.toString() : '');
+    
     const profile = await User.findById(userId)
       .select('-password -email')
       .populate('university', 'name')
-      .populate('connections', 'name profileImage');
+      .populate({
+        path: 'connections',
+        select: 'name profileImage username headline'
+      });
     
     if (!profile) {
       return res.status(404).json({ error: "User not found" });
     }
     
-    // Get user's posts
+    // Determine connection status with safe checks
+    let connectionStatus = 'none';
+    const userIdStr = userId.toString();
+    const currentUserIdStr = currentUserId.toString();
+    
+    if (userIdStr === currentUserIdStr) {
+      connectionStatus = 'self';
+    } else if (userConnections.includes(userIdStr)) {
+      connectionStatus = 'connected';
+    } else if (userSentRequests.includes(userIdStr)) {
+      connectionStatus = 'pending';
+    } else if (userReceivedRequests.includes(userIdStr)) {
+      connectionStatus = 'received';
+    }
+    
+    // Get connection count safely
+    const connectionCount = profile.connections?.length || 0;
+    
     const posts = await Post.find({ author: userId })
       .populate({
         path: 'author',
-        select: 'name profileImage university'
+        select: 'name profileImage university connections sentRequests receivedRequests',
+        populate: { path: 'university', select: 'name' }
       })
       .populate('comments.user', 'name profileImage')
       .populate('likes', 'name profileImage')
       .sort({ createdAt: -1 });
 
-    res.json({ profile, posts });
+    // SAFE: Filter out posts with null/undefined author
+    const validPosts = posts.filter(post => post && post.author !== null && post.author !== undefined);
+
+    // SAFE: Map through valid posts with connection status
+    const postsWithStatus = validPosts.map(post => {
+      const postObj = post.toObject();
+      const author = post.author;
+      
+      if (!author) {
+        return null;
+      }
+      
+      // SAFE: Get author ID with null checks
+      let authorId = '';
+      try {
+        authorId = author._id ? author._id.toString() : '';
+      } catch (err) {
+        authorId = '';
+      }
+      
+      const userIdStr = currentUserId.toString();
+      
+      // Determine connection status for post author
+      let connectionStatus = 'none';
+      if (authorId === userIdStr) {
+        connectionStatus = 'self';
+      } else if (userConnections.includes(authorId)) {
+        connectionStatus = 'connected';
+      } else if (userSentRequests.includes(authorId)) {
+        connectionStatus = 'pending';
+      } else if (author.receivedRequests && Array.isArray(author.receivedRequests)) {
+        const hasReceived = author.receivedRequests.some(id => {
+          try {
+            return id && id.toString() === userIdStr;
+          } catch (err) {
+            return false;
+          }
+        });
+        if (hasReceived) {
+          connectionStatus = 'received';
+        }
+      }
+      
+      // Build author object safely
+      postObj.author = {
+        _id: author._id || null,
+        name: author.name || 'Unknown User',
+        profileImage: author.profileImage || '',
+        university: author.university || null,
+        connectionStatus: connectionStatus,
+        isConnected: connectionStatus === 'connected',
+        isPending: connectionStatus === 'pending',
+        isReceived: connectionStatus === 'received'
+      };
+      
+      return postObj;
+    }).filter(post => post !== null);
+
+    // Convert to plain object and add connection status
+    const profileObj = profile.toObject();
+    profileObj.connectionStatus = connectionStatus;
+    profileObj.isConnected = connectionStatus === 'connected';
+    profileObj.isPending = connectionStatus === 'pending';
+    profileObj.isReceived = connectionStatus === 'received';
+    profileObj.connectionCount = connectionCount;
+
+    res.json({ 
+      profile: profileObj, 
+      posts: postsWithStatus,
+      connections: profile.connections || [],
+      connectionStatus
+    });
   } catch (err) {
     console.error("Profile Fetch Error:", err);
-    res.status(500).json({ error: "Failed to fetch profile content" });
+    console.error("Stack:", err.stack);
+    res.status(500).json({ error: "Failed to fetch profile content", details: err.message });
   }
 });
 
-// Get User's Confessions
+// --- Get User's Confessions ---
 router.get('/confessions/my-confessions', auth, async (req, res) => {
   try {
     const myConfessions = await Confession.find({ authorId: req.user.id })
@@ -380,13 +565,12 @@ router.get('/confessions/my-confessions', auth, async (req, res) => {
   }
 });
 
-// Get Confession Likes
+// --- Get Confession Likes ---
 router.get('/confessions/likes/:id', auth, async (req, res) => {
   try {
     const confession = await Confession.findById(req.params.id);
     if (!confession) return res.status(404).json({ message: "Confession not found" });
     
-    // Get user details for each likedBy ID
     const users = await User.find({ _id: { $in: confession.likedBy } })
       .select('name profileImage');
     
@@ -397,7 +581,7 @@ router.get('/confessions/likes/:id', auth, async (req, res) => {
   }
 });
 
-// Update Profile
+// --- Update Profile ---
 router.put('/profile/update', auth, async (req, res) => {
   try {
     const { name, headline, bio, school, degree, rollNo } = req.body;
@@ -433,12 +617,7 @@ router.put('/profile/update', auth, async (req, res) => {
   }
 });
 
-
 // ==================== CONFESSION ROUTES ====================
-
-// @route   GET api/social/confessions/feed
-// @desc    Get feed based on university and connections
-// @access  Private
 router.get('/confessions/feed', auth, async (req, res) => {
   try {
     const currentUser = await User.findById(req.user._id)
@@ -448,32 +627,24 @@ router.get('/confessions/feed', auth, async (req, res) => {
       return res.status(404).json({ error: "User not found" });
     }
 
-    // Get IDs of connected users
     const connectedUserIds = currentUser.connections.map(conn => conn._id);
-    
-    // Get current user's university ID
     const currentUniversityId = currentUser.university;
     
-    // Build query: Show confessions where:
-    // 1. Author is from same university, OR
-    // 2. Author is connected to current user
     const confessions = await Confession.find({
       $or: [
-        { university: currentUniversityId }, // Same university
-        { authorId: { $in: connectedUserIds } } // Connected users
+        { university: currentUniversityId },
+        { authorId: { $in: connectedUserIds } }
       ]
     })
-    .select('-authorId') // Hide author identity
+    .select('-authorId')
     .sort({ createdAt: -1 })
     .populate('comments.user', 'name profileImage')
     .lean();
 
-    // Format response with anonymous info
     const formattedConfessions = confessions.map(confession => ({
       ...confession,
       authorName: "Anonymous",
       authorAvatar: null,
-      // Check if current user liked this confession
       likedByCurrentUser: confession.likedBy?.includes(req.user._id) || false
     }));
 
@@ -484,9 +655,7 @@ router.get('/confessions/feed', auth, async (req, res) => {
   }
 });
 
-// @route   POST api/social/confessions/create
-// @desc    Create new confession
-// @access  Private
+// --- Create Confession ---
 router.post('/confessions/create', auth, async (req, res) => {
   try {
     const { text, image } = req.body;
@@ -514,7 +683,6 @@ router.post('/confessions/create', auth, async (req, res) => {
 
     await confession.save();
     
-    // Return the created confession without authorId
     const createdConfession = await Confession.findById(confession._id)
       .select('-authorId')
       .lean();
@@ -529,10 +697,7 @@ router.post('/confessions/create', auth, async (req, res) => {
   }
 });
 
-// @route   PUT api/social/confessions/like/:id
-// @desc    Like/unlike a confession
-// @access  Private
-// Like/Unlike Confession
+// --- Like/Unlike Confession ---
 router.put('/confessions/like/:id', auth, async (req, res) => {
   try {
     const confession = await Confession.findById(req.params.id);
@@ -564,9 +729,7 @@ router.put('/confessions/like/:id', auth, async (req, res) => {
   }
 });
 
-// @route   POST api/social/confessions/comment/:id
-// @desc    Add comment to confession
-// @access  Private
+// --- Add Comment to Confession ---
 router.post('/confessions/comment/:id', auth, async (req, res) => {
   try {
     const { text } = req.body;
@@ -588,7 +751,6 @@ router.post('/confessions/comment/:id', auth, async (req, res) => {
     confession.comments.push(newComment);
     await confession.save();
 
-    // Get updated confession with populated comment user info
     const updatedConfession = await Confession.findById(req.params.id)
       .select('-authorId')
       .populate('comments.user', 'name profileImage')
@@ -601,7 +763,7 @@ router.post('/confessions/comment/:id', auth, async (req, res) => {
   }
 });
 
-// @route   DELETE api/social/confessions/comment/:postId/:commentId
+// --- Delete Confession Comment ---
 router.delete('/confessions/comment/:postId/:commentId', auth, async (req, res) => {
   try {
     const confession = await Confession.findById(req.params.postId);
@@ -631,9 +793,7 @@ router.delete('/confessions/comment/:postId/:commentId', auth, async (req, res) 
   }
 });
 
-
-// @route   DELETE api/social/confessions/:id
-// Delete Confession
+// --- Delete Confession ---
 router.delete('/confessions/:id', auth, async (req, res) => {
   try {
     const confession = await Confession.findById(req.params.id);
@@ -654,65 +814,71 @@ router.delete('/confessions/:id', auth, async (req, res) => {
   }
 });
 
-
-
-
-// -------------------- STORIES --------------------
-
+// ==================== STORIES ROUTES ====================
 // Helper function to check if users can see each other's stories
 const canViewStories = async (viewerId, targetId) => {
+  if (viewerId === targetId) return true;
+  
   const viewer = await User.findById(viewerId).select('connections sentRequests receivedRequests');
   const target = await User.findById(targetId).select('connections sentRequests receivedRequests');
   
-  // Can always view own stories
-  if (viewerId === targetId) return true;
-  
-  // Check if they are confirmed connections (mutual)
   const isConnected = viewer.connections.includes(targetId) && target.connections.includes(viewerId);
   if (isConnected) return true;
   
-  // Check if viewer has sent a request to target (pending from viewer to target)
   const hasViewerSentRequest = viewer.sentRequests.includes(targetId);
   if (hasViewerSentRequest) return true;
   
-  // Check if viewer has received a request from target (pending from target to viewer)
   const hasViewerReceivedRequest = viewer.receivedRequests.includes(targetId);
   if (hasViewerReceivedRequest) return true;
   
   return false;
 };
 
-// 1. POST - Upload Story
+// 1. UPLOAD STORY
 router.post('/stories/upload', auth, async (req, res) => {
   try {
     const { image, caption } = req.body;
-    if (!image) return res.status(400).json({ msg: 'No image provided' });
+    
+    if (!image) {
+      return res.status(400).json({ error: "No image provided" });
+    }
+
+    const currentUser = await User.findById(req.user._id).select('name profileImage');
+    
+    if (!currentUser) {
+      return res.status(404).json({ error: "User not found" });
+    }
 
     const newStory = new Story({
-      author: req.userId, 
+      author: req.user._id,
       image: image,
-      caption: caption,
+      caption: caption || "",
       likes: [],
+      comments: [],
       seenBy: [],
-      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000) 
+      createdAt: new Date(),
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000)
     });
 
-    const story = await newStory.save();
-    const populatedStory = await story.populate('author', 'name profileImage');
-    res.json(populatedStory);
+    await newStory.save();
+    
+    const populatedStory = await Story.findById(newStory._id)
+      .populate('author', 'name profileImage');
+    
+    res.status(201).json({
+      success: true,
+      story: populatedStory
+    });
   } catch (err) {
-    console.error("Upload Error:", err.message);
-    res.status(500).json({ msg: 'Server Error during upload' });
+    console.error("[Upload Story Error]:", err.message);
+    res.status(500).json({ error: "Server Error during upload" });
   }
 });
 
-// 2. GET - Fetch all stories with seen status
+// 2. GET ALL STORIES
 router.get('/stories', auth, async (req, res) => {
   try {
-    const currentUserId = req.userId;
-    
-    const currentUser = await User.findById(currentUserId)
-      .select('connections sentRequests receivedRequests');
+    const currentUserId = req.user._id;
     
     const activeStories = await Story.find({ 
       expiresAt: { $gt: new Date() } 
@@ -729,9 +895,8 @@ router.get('/stories', auth, async (req, res) => {
       const canView = await canViewStories(currentUserId, storyAuthorId);
       
       if (canView) {
-        // Add seen status to the story object
         const storyObj = story.toObject();
-        storyObj.hasViewed = story.seenBy.includes(currentUserId);
+        storyObj.hasViewed = story.seenBy.some(id => id.toString() === currentUserId.toString());
         storyObj.viewCount = story.seenBy.length;
         filteredStories.push(storyObj);
       }
@@ -739,23 +904,25 @@ router.get('/stories', auth, async (req, res) => {
     
     res.json(filteredStories);
   } catch (err) {
-    console.error("Fetch Stories Error:", err.message);
-    res.status(500).json({ msg: 'Server Error fetching stories' });
+    console.error("[Fetch Stories Error]:", err.message);
+    res.status(500).json({ error: "Server Error fetching stories" });
   }
 });
 
-// 3. PUT - Mark story as seen
+// 3. MARK STORY AS SEEN
 router.put('/stories/seen/:id', auth, async (req, res) => {
   try {
     const story = await Story.findById(req.params.id);
-    if (!story) return res.status(404).json({ msg: 'Story not found' });
+    if (!story) {
+      return res.status(404).json({ error: "Story not found" });
+    }
 
-    const currentUserId = req.userId;
+    const currentUserId = req.user._id;
     const storyAuthorId = story.author.toString();
     
     const canView = await canViewStories(currentUserId, storyAuthorId);
     if (!canView) {
-      return res.status(403).json({ msg: 'You cannot view this story' });
+      return res.status(403).json({ error: "You cannot view this story" });
     }
 
     let isNewView = false;
@@ -766,132 +933,162 @@ router.put('/stories/seen/:id', auth, async (req, res) => {
     }
     
     const populatedStory = await Story.findById(story._id)
-      .populate('seenBy', 'name profileImage');
+      .populate('seenBy', 'name profileImage')
+      .populate('author', 'name profileImage');
     
     res.json({
+      success: true,
       seenBy: populatedStory.seenBy,
       viewCount: populatedStory.seenBy.length,
       hasViewed: true,
       isNewView
     });
   } catch (err) {
-    console.error("Seen Error:", err.message);
-    res.status(500).send('Server Error');
+    console.error("[Seen Story Error]:", err.message);
+    res.status(500).json({ error: "Server Error" });
   }
 });
 
-// 4. GET - Get viewers list for a story
+// 4. GET STORY VIEWERS
 router.get('/stories/views/:id', auth, async (req, res) => {
   try {
     const story = await Story.findById(req.params.id)
       .populate('seenBy', 'name profileImage');
     
-    if (!story) return res.status(404).json({ msg: 'Story not found' });
+    if (!story) {
+      return res.status(404).json({ error: "Story not found" });
+    }
     
-    // Only author can see full viewers list
-    const isAuthor = story.author.toString() === req.userId;
+    const isAuthor = story.author.toString() === req.user._id.toString();
+    
+    if (!isAuthor) {
+      return res.status(403).json({ error: "Only the story author can view viewers" });
+    }
     
     res.json({
+      success: true,
       viewCount: story.seenBy.length,
       viewers: story.seenBy,
-      isAuthor
+      isAuthor: true
     });
   } catch (err) {
-    console.error("Views Error:", err.message);
-    res.status(500).json({ msg: 'Server Error' });
+    console.error("[Viewers Error]:", err.message);
+    res.status(500).json({ error: "Server Error" });
   }
 });
 
-// 5. PUT - Like/Unlike story
+// 5. LIKE/UNLIKE STORY
 router.put('/stories/like/:id', auth, async (req, res) => {
   try {
     const story = await Story.findById(req.params.id);
-    if (!story) return res.status(404).json({ msg: 'Story not found' });
+    if (!story) {
+      return res.status(404).json({ error: "Story not found" });
+    }
 
-    const currentUserId = req.userId;
+    const currentUserId = req.user._id;
     const storyAuthorId = story.author.toString();
     
     const canView = await canViewStories(currentUserId, storyAuthorId);
     if (!canView) {
-      return res.status(403).json({ msg: 'You cannot interact with this story' });
+      return res.status(403).json({ error: "You cannot interact with this story" });
     }
 
     const userId = currentUserId.toString();
+    const isLiked = story.likes.some(id => id.toString() === userId);
     
-    if (story.likes.includes(userId)) {
+    if (isLiked) {
       story.likes = story.likes.filter(id => id.toString() !== userId);
     } else {
-      story.likes.push(userId);
+      story.likes.push(currentUserId);
     }
     
     await story.save();
     
+    const populatedStory = await Story.findById(story._id)
+      .populate('likes', 'name profileImage');
+    
     res.json({ 
-      likes: story.likes, 
-      likeCount: story.likes.length,
-      isLiked: story.likes.includes(userId)
+      success: true,
+      likes: populatedStory.likes,
+      likeCount: populatedStory.likes.length,
+      isLiked: !isLiked
     });
   } catch (err) {
-    console.error("Like Error:", err.message);
-    res.status(500).json({ msg: 'Server Error liking story' });
+    console.error("[Like Story Error]:", err.message);
+    res.status(500).json({ error: "Server Error liking story" });
   }
 });
 
-// 6. POST - Add comment to story
+// 6. ADD COMMENT TO STORY
 router.post('/stories/comment/:id', auth, async (req, res) => {
   try {
     const story = await Story.findById(req.params.id);
-    if (!story) return res.status(404).json({ msg: 'Story not found' });
+    if (!story) {
+      return res.status(404).json({ error: "Story not found" });
+    }
 
-    const currentUserId = req.userId;
+    const { text } = req.body;
+    if (!text || !text.trim()) {
+      return res.status(400).json({ error: "Comment cannot be empty" });
+    }
+
+    const currentUserId = req.user._id;
     const storyAuthorId = story.author.toString();
     
     const canView = await canViewStories(currentUserId, storyAuthorId);
     if (!canView) {
-      return res.status(403).json({ msg: 'You cannot interact with this story' });
+      return res.status(403).json({ error: "You cannot interact with this story" });
     }
 
     const newComment = {
       user: currentUserId,
-      text: req.body.text,
+      text: text.trim(),
       createdAt: new Date()
     };
 
     story.comments.unshift(newComment);
     await story.save();
 
-    const populated = await Story.findById(story._id)
+    const populatedStory = await Story.findById(story._id)
       .populate('comments.user', 'name profileImage');
     
-    res.json(populated.comments);
+    res.json({
+      success: true,
+      comments: populatedStory.comments
+    });
   } catch (err) {
-    console.error("Comment Error:", err.message);
-    res.status(500).send('Server Error');
+    console.error("[Comment Story Error]:", err.message);
+    res.status(500).json({ error: "Server Error" });
   }
 });
 
-// 7. DELETE - Delete story
+// 7. DELETE STORY
 router.delete('/stories/:id', auth, async (req, res) => {
   try {
     const story = await Story.findById(req.params.id);
-    if (!story) return res.status(404).json({ msg: 'Story not found' });
+    if (!story) {
+      return res.status(404).json({ error: "Story not found" });
+    }
     
-    if (story.author.toString() !== req.userId.toString()) {
-      return res.status(401).json({ msg: 'User not authorized' });
+    if (story.author.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ error: "You can only delete your own stories" });
     }
 
     await story.deleteOne();
-    res.json({ msg: 'Story removed' });
+    res.json({ 
+      success: true, 
+      message: "Story deleted successfully" 
+    });
   } catch (err) {
-    console.error("Delete Error:", err.message);
-    res.status(500).json({ msg: 'Server Error deleting story' });
+    console.error("[Delete Story Error]:", err.message);
+    res.status(500).json({ error: "Server Error deleting story" });
   }
 });
 
-// 8. GET - Check visibility status
+// 8. CHECK STORY VISIBILITY STATUS
 router.get('/stories/visibility-status/:targetUserId', auth, async (req, res) => {
   try {
-    const currentUserId = req.userId;
+    const currentUserId = req.user._id;
     const targetUserId = req.params.targetUserId;
     
     const currentUser = await User.findById(currentUserId)
@@ -903,7 +1100,7 @@ router.get('/stories/visibility-status/:targetUserId', auth, async (req, res) =>
     let relationshipStatus = 'none';
     let message = '';
     
-    if (currentUserId === targetUserId) {
+    if (currentUserId.toString() === targetUserId) {
       canViewStories = true;
       relationshipStatus = 'self';
       message = 'This is your own profile';
@@ -929,21 +1126,18 @@ router.get('/stories/visibility-status/:targetUserId', auth, async (req, res) =>
       message = 'Send a connection request to view their stories';
     }
     
-    res.json({ canViewStories, relationshipStatus, message });
+    res.json({ 
+      canViewStories, 
+      relationshipStatus, 
+      message 
+    });
   } catch (err) {
-    console.error("Visibility Check Error:", err.message);
-    res.status(500).json({ msg: 'Server Error' });
+    console.error("[Visibility Check Error]:", err.message);
+    res.status(500).json({ error: "Server Error" });
   }
 });
 
-
-
 // -------------------- USER & CONNECTIONS --------------------
-
-
-
-// 3. @route   GET api/social/users/search
-
 router.get('/users/search', auth, async (req, res) => {
   try {
     const { q } = req.query;
@@ -965,207 +1159,612 @@ router.get('/users/search', auth, async (req, res) => {
   }
 });
 
+// ==================== CONNECTION ROUTES ====================
 
-// 1. --- CONNECTION REQUEST ---
+// 1. Send Connection Request - FIXED with better response
 router.post('/user/connect/:targetId', auth, async (req, res) => {
   try {
     const targetId = req.params.targetId;
-    const me = await User.findById(req.user._id);
+    const userId = req.user._id;
 
-    if (!me.sentRequests.includes(targetId)) {
-      me.sentRequests.push(targetId);
-      await me.save();
-
-      // FIXED: Passed 4 arguments to match the helper 
-      // Helper expects: (recipient, sender, type, text, relatedId)
-      await createNotification(
-        targetId,
-        req.user._id,
-        "request", // Changed from "Connection Request" to match Schema Enum
-        `${req.user.name} wants to connect with you.`
-      );
+    if (targetId === userId.toString()) {
+      return res.status(400).json({ error: "Cannot connect with yourself" });
     }
-    res.json({ success: true, status: "connecting" });
-  } catch (err) { 
-    console.error("Connect Error:", err.message);
-    res.status(500).json({ error: "Server Error" }); 
-  }
-});
 
-// 2. Accept Request (Run by the receiver)
-router.post('/user/accept/:senderId', auth, async (req, res) => {
-  try {
-    const me = await User.findById(req.user.id);
-    const sender = await User.findById(req.params.senderId);
-
-    if (!me.connections.includes(req.params.senderId)) {
-      me.connections.push(req.params.senderId);
-      sender.connections.push(req.user.id);
-
-      // Clean up the pending request from the sender
-      sender.sentRequests = sender.sentRequests.filter(id => id.toString() !== req.user.id);
-      
-      await me.save();
-      await sender.save();
+    const targetUser = await User.findById(targetId);
+    if (!targetUser) {
+      return res.status(404).json({ error: "User not found" });
     }
-    res.json({ success: true, status: "connected" });
+
+    const currentUser = await User.findById(userId);
+
+    // Check if already connected
+    if (currentUser.connections.includes(targetId)) {
+      return res.status(400).json({ error: "Already connected" });
+    }
+
+    // Check if request already sent
+    if (currentUser.sentRequests.includes(targetId)) {
+      return res.status(400).json({ error: "Request already sent" });
+    }
+
+    // Check if request already received from target
+    if (currentUser.receivedRequests.includes(targetId)) {
+      return res.status(400).json({ error: "This user already sent you a request" });
+    }
+
+    // Add to sent requests
+    await User.findByIdAndUpdate(userId, {
+      $addToSet: { sentRequests: targetId }
+    });
+
+    // Add to target's received requests
+    await User.findByIdAndUpdate(targetId, {
+      $addToSet: { receivedRequests: userId }
+    });
+
+    // Create notification for target user
+    await createNotification(
+      targetId,
+      userId,
+      'request',
+      `${currentUser.name} wants to connect with you.`,
+      null
+    );
+
+    // Get updated user to return
+    const updatedUser = await User.findById(userId)
+      .select('-password -email')
+      .populate('university', 'name');
+
+    res.json({ 
+      success: true, 
+      status: "pending",
+      message: "Connection request sent successfully",
+      user: updatedUser
+    });
+
   } catch (err) {
-    res.status(500).json({ message: "Server error" });
+    console.error("Connect Error:", err.message);
+    res.status(500).json({ error: "Server Error" });
   }
 });
 
-
-
-// 3. Respond to Request (Accept/Decline)
+// 2. Respond to Connection Request (Accept/Decline) - FIXED
 router.post('/notifications/respond', auth, async (req, res) => {
   try {
-    const { notificationId, action } = req.body; 
-    const notification = await Notification.findById(notificationId)
-      .populate('sender', 'name')
-      .populate('recipient', 'name');
+    const { notificationId, action } = req.body;
     
-    if (!notification) return res.status(404).json({ error: "Notification not found" });
-
-    // Ensure the person responding is the actual recipient
-    if (notification.recipient._id.toString() !== req.user.id) {
-      return res.status(401).json({ error: "Unauthorized" });
+    if (!notificationId || !action) {
+      return res.status(400).json({ error: "Notification ID and action are required" });
     }
+
+    if (!['accepted', 'declined'].includes(action)) {
+      return res.status(400).json({ error: "Invalid action. Use 'accepted' or 'declined'" });
+    }
+
+    const notification = await Notification.findById(notificationId)
+      .populate('sender', 'name profileImage username')
+      .populate('recipient', 'name profileImage username');
+
+    if (!notification) {
+      return res.status(404).json({ error: "Notification not found" });
+    }
+
+    if (notification.recipient._id.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ error: "Unauthorized" });
+    }
+
+    if (notification.isProcessed) {
+      return res.status(400).json({ 
+        error: "This request has already been processed",
+        status: notification.status
+      });
+    }
+
+    if (notification.type !== 'request') {
+      return res.status(400).json({ error: "This notification is not a connection request" });
+    }
+
+    const senderId = notification.sender._id;
+    const recipientId = notification.recipient._id;
 
     if (action === 'accepted') {
-      // 1. Update connections for both users ($addToSet prevents duplicates)
-      await User.findByIdAndUpdate(notification.recipient, { 
-        $addToSet: { connections: notification.sender },
-        $pull: { receivedRequests: notification.sender } // Clean up request list
+      const recipient = await User.findById(recipientId);
+      if (recipient.connections.includes(senderId)) {
+        notification.isProcessed = true;
+        notification.status = 'accepted';
+        await notification.save();
+        return res.json({ 
+          success: true, 
+          message: "Already connected",
+          status: 'accepted'
+        });
+      }
+
+      // Add connections to both users
+      await User.findByIdAndUpdate(recipientId, {
+        $addToSet: { connections: senderId },
+        $pull: { receivedRequests: senderId }
       });
-      await User.findByIdAndUpdate(notification.sender, { 
-        $addToSet: { connections: notification.recipient },
-        $pull: { sentRequests: notification.recipient } // Clean up request list
+
+      await User.findByIdAndUpdate(senderId, {
+        $addToSet: { connections: recipientId },
+        $pull: { sentRequests: recipientId }
       });
-      
-      // 2. Update the original notification (The one User B is looking at)
+
+      // Update notification
       notification.status = 'accepted';
-      notification.text = "is now a connection.";
+      notification.isProcessed = true;
+      notification.text = `${notification.recipient.name} accepted your connection request.`;
+      notification.type = 'connection_accepted';
       await notification.save();
 
-      // 3. NEW: Send a notification BACK to the original sender (User A)
-      // Helper: (recipient, sender, type, text)
+      // Send acceptance notification to sender
       await createNotification(
-        notification.sender._id,    // Target: The person who sent the original request
-        notification.recipient._id, // Actor: The person who just clicked 'Accept'
-        "request",                  // Type
-        `${notification.recipient.name} accepted your connection request.` 
+        senderId,
+        recipientId,
+        'connection_accepted',
+        `${notification.recipient.name} accepted your connection request 🎉`,
+        null
       );
 
-    } else {
-      // Logic for declining
+      // Get updated users
+      const updatedRecipient = await User.findById(recipientId)
+        .select('-password -email')
+        .populate('university', 'name');
+      const updatedSender = await User.findById(senderId)
+        .select('-password -email')
+        .populate('university', 'name');
+
+      res.json({ 
+        success: true, 
+        message: "Connection accepted successfully!",
+        status: 'accepted',
+        notification: notification,
+        recipient: updatedRecipient,
+        sender: updatedSender
+      });
+
+    } else if (action === 'declined') {
+      // Remove from received requests
+      await User.findByIdAndUpdate(recipientId, {
+        $pull: { receivedRequests: senderId }
+      });
+
+      // Remove from sender's sent requests
+      await User.findByIdAndUpdate(senderId, {
+        $pull: { sentRequests: recipientId }
+      });
+
+      // Update notification
       notification.status = 'declined';
-      notification.text = "request declined.";
-      
-      // Clean up lists even if declined
-      await User.findByIdAndUpdate(notification.recipient, { $pull: { receivedRequests: notification.sender } });
-      await User.findByIdAndUpdate(notification.sender, { $pull: { sentRequests: notification.recipient } });
-      
+      notification.isProcessed = true;
+      notification.text = `${notification.recipient.name} declined your connection request.`;
+      notification.type = 'request_declined';
       await notification.save();
+
+      // Send decline notification to sender
+      await createNotification(
+        senderId,
+        recipientId,
+        'request_declined',
+        `${notification.recipient.name} declined your connection request.`,
+        null
+      );
+
+      res.json({ 
+        success: true, 
+        message: "Request declined.",
+        status: 'declined',
+        notification: notification
+      });
     }
 
-    res.json({ success: true, notification });
   } catch (err) {
     console.error("Response Error:", err.message);
     res.status(500).json({ error: "Response failed" });
   }
 });
 
-// Disconnect user
+// 3. Cancel Sent Request
+router.post('/user/cancel-request/:targetId', auth, async (req, res) => {
+  try {
+    const targetId = req.params.targetId;
+    const userId = req.user._id;
+
+    // Remove from sent requests
+    await User.findByIdAndUpdate(userId, {
+      $pull: { sentRequests: targetId }
+    });
+
+    // Remove from target's received requests
+    await User.findByIdAndUpdate(targetId, {
+      $pull: { receivedRequests: userId }
+    });
+
+    // Delete pending notification
+    await Notification.findOneAndDelete({
+      recipient: targetId,
+      sender: userId,
+      type: 'request',
+      status: 'pending',
+      isProcessed: false
+    });
+
+    // Get updated user
+    const updatedUser = await User.findById(userId)
+      .select('-password -email')
+      .populate('university', 'name');
+
+    res.json({ 
+      success: true, 
+      message: "Request cancelled successfully",
+      user: updatedUser
+    });
+
+  } catch (err) {
+    console.error("Cancel Request Error:", err);
+    res.status(500).json({ error: "Failed to cancel request" });
+  }
+});
+
+// 4. Disconnect User
 router.post('/user/disconnect/:targetId', auth, async (req, res) => {
   try {
     const targetId = req.params.targetId;
     const userId = req.user._id;
-    
+
+    // Remove from each other's connections
     await User.findByIdAndUpdate(userId, {
       $pull: { connections: targetId }
     });
+
     await User.findByIdAndUpdate(targetId, {
       $pull: { connections: userId }
     });
-    
-    res.json({ success: true, status: "disconnected" });
+
+    // Clean up any pending requests
+    await User.findByIdAndUpdate(userId, {
+      $pull: { sentRequests: targetId, receivedRequests: targetId }
+    });
+
+    await User.findByIdAndUpdate(targetId, {
+      $pull: { sentRequests: userId, receivedRequests: userId }
+    });
+
+    // Delete any pending notifications
+    await Notification.deleteMany({
+      $or: [
+        { recipient: userId, sender: targetId, type: 'request', isProcessed: false },
+        { recipient: targetId, sender: userId, type: 'request', isProcessed: false }
+      ]
+    });
+
+    // Get updated user
+    const updatedUser = await User.findById(userId)
+      .select('-password -email')
+      .populate('university', 'name');
+
+    res.json({ 
+      success: true, 
+      status: "disconnected",
+      message: "Disconnected successfully",
+      user: updatedUser
+    });
+
   } catch (err) {
     console.error("Disconnect Error:", err);
     res.status(500).json({ error: "Failed to disconnect" });
   }
 });
 
-// Cancel sent request
-router.post('/user/cancel-request/:targetId', auth, async (req, res) => {
+// 5. Get Notifications (with proper filters)
+router.get('/notifications', auth, async (req, res) => {
   try {
-    const targetId = req.params.targetId;
-    await User.findByIdAndUpdate(req.user._id, {
-      $pull: { sentRequests: targetId }
+    const notifications = await Notification.find({ 
+      recipient: req.user._id 
+    })
+    .populate('sender', 'name profileImage username')
+    .populate('postId', 'content image')
+    .sort({ createdAt: -1 });
+
+    const transformedNotifications = notifications.map(notification => {
+      const notif = notification.toObject();
+      
+      const hasRead = notif.readBy?.some(id => id.toString() === req.user._id.toString());
+      notif.isUnread = !hasRead;
+      
+      if (notif.type === 'request') {
+        notif.status = notif.status || 'pending';
+        notif.isProcessed = notif.isProcessed || false;
+      }
+      
+      if (notif.type === 'connection_accepted' || notif.type === 'request_declined') {
+        notif.isProcessed = true;
+        notif.status = notif.type === 'connection_accepted' ? 'accepted' : 'declined';
+      }
+      
+      return notif;
     });
-    res.json({ success: true });
+
+    res.json(transformedNotifications);
+
   } catch (err) {
-    res.status(500).json({ error: "Failed to cancel request" });
+    console.error("Fetch Notifications Error:", err.message);
+    res.status(500).json({ message: "Server Error" });
   }
 });
 
-// Reject received request
-router.post('/user/reject-request/:targetId', auth, async (req, res) => {
+// 6. Get User Profile (with connection status) - FIXED
+router.get('/profile/:userId', auth, async (req, res) => {
   try {
-    const targetId = req.params.targetId;
-    await User.findByIdAndUpdate(req.user._id, {
-      $pull: { receivedRequests: targetId }
+    const userId = req.params.userId;
+    const currentUserId = req.user._id;
+    
+    // Get current user's connections and sent requests
+    const currentUser = await User.findById(currentUserId).select('connections sentRequests receivedRequests');
+    const userConnections = currentUser.connections.map(id => id.toString());
+    const userSentRequests = currentUser.sentRequests.map(id => id.toString());
+    const userReceivedRequests = currentUser.receivedRequests.map(id => id.toString());
+    
+    const profile = await User.findById(userId)
+      .select('-password -email')
+      .populate('university', 'name')
+      .populate({
+        path: 'connections',
+        select: 'name profileImage username headline'
+      });
+    
+    if (!profile) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // Get posts
+    const posts = await Post.find({ author: userId })
+      .populate({
+        path: 'author',
+        select: 'name profileImage university'
+      })
+      .populate('comments.user', 'name profileImage')
+      .populate('likes', 'name profileImage')
+      .sort({ createdAt: -1 });
+
+    // Determine connection status
+    let connectionStatus = 'none';
+    if (userId.toString() === currentUserId.toString()) {
+      connectionStatus = 'self';
+    } else if (userConnections.includes(userId.toString())) {
+      connectionStatus = 'connected';
+    } else if (userSentRequests.includes(userId.toString())) {
+      connectionStatus = 'pending';
+    } else if (userReceivedRequests.includes(userId.toString())) {
+      connectionStatus = 'received';
+    }
+
+    const profileObj = profile.toObject();
+    profileObj.connectionStatus = connectionStatus;
+    profileObj.isConnected = connectionStatus === 'connected';
+    profileObj.isPending = connectionStatus === 'pending';
+    profileObj.isReceived = connectionStatus === 'received';
+
+    res.json({ 
+      profile: profileObj, 
+      posts,
+      connections: profile.connections || [],
+      connectionStatus
     });
-    res.json({ success: true });
+
   } catch (err) {
-    res.status(500).json({ error: "Failed to reject request" });
+    console.error("Profile Fetch Error:", err);
+    res.status(500).json({ error: "Failed to fetch profile content" });
   }
 });
 
-// Get user's connections list
+// 7. Get User's Connections
 router.get('/user/connections/:userId', auth, async (req, res) => {
   try {
     const user = await User.findById(req.params.userId)
-      .populate('connections', 'name profileImage headline');
-    res.json({ connections: user.connections });
+      .populate({
+        path: 'connections',
+        select: 'name profileImage username headline online'
+      });
+    
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    
+    res.json({ 
+      connections: user.connections || [],
+      count: user.connections?.length || 0
+    });
+
   } catch (err) {
+    console.error("Fetch connections error:", err);
     res.status(500).json({ error: "Failed to fetch connections" });
   }
 });
 
-// -------------------- MESSAGING --------------------
-
-// 1. Get Inbox (Chat List)
-// Example of how your Backend 'inbox' route should look:
-router.get("/inbox", auth, async (req, res) => {
+// 8. Mark Notification as Read
+router.put('/notifications/read/:id', auth, async (req, res) => {
   try {
-    const conversations = await Conversation.find({
-      participants: req.user.id,
-    })
-      .populate({
-        path: "participants",
-        select: "name profileImage headline bio location online", // <--- ADD THESE FIELDS
-      })
-      .sort({ updatedAt: -1 });
+    const notification = await Notification.findById(req.params.id);
+    if (!notification) {
+      return res.status(404).json({ error: "Notification not found" });
+    }
 
-    res.json(conversations);
+    if (notification.recipient.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ error: "Unauthorized" });
+    }
+
+    if (!notification.readBy.includes(req.user._id)) {
+      notification.readBy.push(req.user._id);
+      await notification.save();
+    }
+
+    res.json({ success: true });
+
   } catch (err) {
-    res.status(500).send("Server Error");
+    console.error("Mark read error:", err);
+    res.status(500).json({ error: "Error updating" });
   }
 });
 
-// 2. Get Chat Messages
-router.get('/messages/:conversationId', auth, async (req, res) => {
-  const messages = await Message.find({ conversationId: req.params.conversationId }).sort({ createdAt: 1 });
-  res.json(messages);
+// 9. Mark All Notifications as Read
+router.put('/notifications/read-all', auth, async (req, res) => {
+  try {
+    await Notification.updateMany(
+      { 
+        recipient: req.user._id, 
+        readBy: { $ne: req.user._id } 
+      },
+      { $addToSet: { readBy: req.user._id } }
+    );
+    res.json({ success: true });
+
+  } catch (err) {
+    console.error("Mark all read error:", err);
+    res.status(500).json({ error: "Error updating all" });
+  }
 });
 
-// routes/social.js
-router.post('/conversations/get-or-create', auth, async (req, res) => {
-  const { recipientId } = req.body;
-  const senderId = req.user.id; // From your auth middleware
-
+// 10. Clear All Notifications (except pending requests)
+router.delete('/notifications/clear-all', auth, async (req, res) => {
   try {
-    // Find conversation where BOTH exist in participants array
+    await Notification.deleteMany({ 
+      recipient: req.user._id,
+      type: { $nin: ['request'] },
+      isProcessed: true
+    });
+    res.json({ success: true, message: "All notifications cleared" });
+
+  } catch (err) {
+    console.error("Clear all error:", err);
+    res.status(500).json({ error: "Error clearing notifications" });
+  }
+});
+
+// 11. Get Unread Notification Count
+router.get('/notifications/unread-count', auth, async (req, res) => {
+  try {
+    const count = await Notification.countDocuments({
+      recipient: req.user._id,
+      readBy: { $ne: req.user._id }
+    });
+    res.json({ unreadCount: count });
+
+  } catch (err) {
+    console.error("Unread count error:", err);
+    res.status(500).json({ error: "Error fetching unread count" });
+  }
+});
+
+// -------------------- MESSAGING --------------------
+router.get('/inbox', auth, async (req, res) => {
+  try {
+    const conversations = await Conversation.find({
+      participants: req.user.id,
+      isArchived: { $ne: true }
+    })
+    .populate({
+      path: "participants",
+      select: "name profileImage headline bio location online"
+    })
+    .sort({ updatedAt: -1 });
+
+    const enrichedConversations = await Promise.all(conversations.map(async (conv) => {
+      const convObj = conv.toObject();
+      
+      const unreadCount = await Message.countDocuments({
+        conversationId: conv._id,
+        sender: { $ne: req.user.id },
+        isRead: false
+      });
+      
+      convObj.unreadCount = unreadCount;
+      
+      const lastMsg = await Message.findOne({ conversationId: conv._id })
+        .sort({ createdAt: -1 })
+        .populate('sender', 'name');
+      
+      if (lastMsg) {
+        convObj.lastMessage = lastMsg.text || 'Media message';
+        convObj.lastMessageType = lastMsg.messageType;
+        convObj.lastMessageSender = lastMsg.sender;
+        convObj.lastMessageTime = lastMsg.createdAt;
+      }
+      
+      return convObj;
+    }));
+
+    res.json(enrichedConversations);
+  } catch (err) {
+    console.error("Inbox Error:", err);
+    res.status(500).json({ error: "Server Error" });
+  }
+});
+
+// ==================== MESSAGES ====================
+router.get('/messages/:conversationId', auth, async (req, res) => {
+  try {
+    const { conversationId } = req.params;
+    const { limit = 50, before } = req.query;
+    
+    const conversation = await Conversation.findOne({
+      _id: conversationId,
+      participants: req.user.id
+    });
+    
+    if (!conversation) {
+      return res.status(403).json({ error: "Not authorized to view these messages" });
+    }
+    
+    let query = { conversationId };
+    if (before) {
+      query.createdAt = { $lt: new Date(before) };
+    }
+    
+    const messages = await Message.find(query)
+      .populate('sender', 'name profileImage')
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit));
+    
+    await Message.updateMany(
+      {
+        conversationId,
+        sender: { $ne: req.user.id },
+        isRead: false
+      },
+      {
+        $set: { isRead: true, readAt: new Date() }
+      }
+    );
+    
+    await Conversation.findByIdAndUpdate(conversationId, {
+      unreadCount: 0
+    });
+    
+    res.json(messages.reverse());
+  } catch (err) {
+    console.error("Messages Error:", err);
+    res.status(500).json({ error: "Server Error" });
+  }
+});
+
+// ==================== GET OR CREATE CONVERSATION ====================
+router.post('/conversations/get-or-create', auth, async (req, res) => {
+  try {
+    const { recipientId } = req.body;
+    const senderId = req.user.id;
+
+    if (!recipientId) {
+      return res.status(400).json({ error: "Recipient ID is required" });
+    }
+
+    if (recipientId === senderId) {
+      return res.status(400).json({ error: "Cannot create conversation with yourself" });
+    }
+
     let conversation = await Conversation.findOne({
       participants: { $all: [senderId, recipientId] }
     });
@@ -1178,93 +1777,232 @@ router.post('/conversations/get-or-create', auth, async (req, res) => {
       await conversation.save();
     }
 
-    res.json({ conversationId: conversation._id });
-  } catch (err) {
-    res.status(500).json({ message: "Server Error" });
-  }
-});
-// -------------------- NOTIFICATIONS --------------------
+    const populated = await Conversation.findById(conversation._id)
+      .populate('participants', 'name profileImage online');
 
-// -------------------- NOTIFICATIONS --------------------
-
-// 1. --- GET NOTIFICATIONS ---
-// GET NOTIFICATIONS
-router.get('/notifications', auth, async (req, res) => {
-  try {
-    const notifications = await Notification.find({ recipient: req.user._id })
-      .populate('sender', 'name profileImage')
-      .populate('postId', 'content image') // Populate post details
-      .sort({ createdAt: -1 });
-    
-    // Transform to ensure postId is always present in the response
-    const transformedNotifications = notifications.map(notification => {
-      const notif = notification.toObject();
-      // Ensure postId field exists for frontend
-      if (notif.postId) {
-        notif.postId = notif.postId._id || notif.postId;
-      } else if (notif.relatedId && (notif.type === 'like' || notif.type === 'comment')) {
-        notif.postId = notif.relatedId;
-      }
-      return notif;
+    res.json({ 
+      conversationId: populated._id,
+      conversation: populated
     });
-    
-    res.json(transformedNotifications);
   } catch (err) {
-    console.error("Fetch Notifications Error:", err.message);
-    res.status(500).json({ message: "Server Error" });
+    console.error("Get or Create Conversation Error:", err);
+    res.status(500).json({ error: "Server Error" });
   }
 });
 
-// 2. @route   PUT /api/social/notifications/read/:id
-// @desc    Mark a specific notification as read
-router.put('/notifications/read/:id', auth, async (req, res) => {
+// ==================== DELETE CONVERSATION ====================
+router.delete('/conversations/:id', auth, async (req, res) => {
   try {
-    const notification = await Notification.findById(req.params.id);
-    if (!notification) return res.status(404).json({ message: "Notification not found" });
+    const conversationId = req.params.id;
+    const userId = req.user.id;
 
-    // Add user to readBy array if not already there
-    if (!notification.readBy.includes(req.user._id)) {
-      notification.readBy.push(req.user._id);
-      await notification.save();
+    const conversation = await Conversation.findOne({
+      _id: conversationId,
+      participants: userId
+    });
+
+    if (!conversation) {
+      return res.status(404).json({ 
+        success: false, 
+        error: "Conversation not found or you are not a participant" 
+      });
     }
-    res.json({ success: true });
-  } catch (err) {
-    console.error("Mark read error:", err);
-    res.status(500).json({ message: "Error updating" });
-  }
-});
 
+    await Message.deleteMany({ conversationId: conversation._id });
+    await Conversation.findByIdAndDelete(conversation._id);
 
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('conversation_deleted', { conversationId: conversation._id });
+      io.emit('inbox_update');
+    }
 
-// --- MARK ALL AS READ ---
-router.put('/notifications/read-all', auth, async (req, res) => {
-  try {
-    await Notification.updateMany(
-      { recipient: req.user._id, readBy: { $ne: req.user._id } },
-      { $addToSet: { readBy: req.user._id } }
-    );
-    res.json({ success: true });
-  } catch (err) {
-    console.error("Mark all read error:", err);
-    res.status(500).json({ message: "Error updating all" });
-  }
-});
-
-
-
-
-// Add to routes/social.js
-router.delete('/messages/:conversationId', auth, async (req, res) => {
-  try {
-    await Message.deleteMany({ conversationId: req.params.conversationId });
-    await Conversation.findByIdAndUpdate(req.params.conversationId, {
-      lastMessage: "Chat cleared",
-      updatedAt: Date.now()
+    res.json({ 
+      success: true, 
+      message: "Conversation deleted successfully",
+      conversationId: conversation._id
     });
-    res.json({ success: true, message: "Chat cleared successfully" });
   } catch (err) {
-    console.error("Clear chat error:", err);
-    res.status(500).json({ error: "Failed to clear chat" });
+    console.error("Delete Conversation Error:", err);
+    res.status(500).json({ 
+      success: false, 
+      error: "Server Error" 
+    });
   }
 });
+
+// ==================== DELETE SINGLE MESSAGE ====================
+router.delete('/messages/:id', auth, async (req, res) => {
+  try {
+    const messageId = req.params.id;
+    const userId = req.user.id;
+
+    const message = await Message.findById(messageId);
+    
+    if (!message) {
+      return res.status(404).json({ 
+        success: false, 
+        error: "Message not found" 
+      });
+    }
+
+    if (message.sender.toString() !== userId) {
+      return res.status(403).json({ 
+        success: false, 
+        error: "You can only delete your own messages" 
+      });
+    }
+
+    await Message.findByIdAndDelete(messageId);
+
+    const io = req.app.get('io');
+    if (io) {
+      io.to(message.conversationId).emit('message_deleted', { 
+        messageId: messageId,
+        conversationId: message.conversationId 
+      });
+      io.emit('inbox_update');
+    }
+
+    res.json({ 
+      success: true, 
+      message: "Message deleted successfully" 
+    });
+  } catch (err) {
+    console.error("Delete Message Error:", err);
+    res.status(500).json({ 
+      success: false, 
+      error: "Server Error" 
+    });
+  }
+});
+
+// ==================== MUTE CONVERSATION ====================
+router.post('/conversations/:id/mute', auth, async (req, res) => {
+  try {
+    const conversation = await Conversation.findOne({
+      _id: req.params.id,
+      participants: req.user.id
+    });
+
+    if (!conversation) {
+      return res.status(404).json({ error: "Conversation not found" });
+    }
+
+    conversation.isMuted = !conversation.isMuted;
+    await conversation.save();
+
+    res.json({ 
+      success: true, 
+      isMuted: conversation.isMuted,
+      message: conversation.isMuted ? "Conversation muted" : "Conversation unmuted"
+    });
+  } catch (err) {
+    console.error("Mute Error:", err);
+    res.status(500).json({ error: "Server Error" });
+  }
+});
+
+// ==================== ARCHIVE CONVERSATION ====================
+router.post('/conversations/:id/archive', auth, async (req, res) => {
+  try {
+    const conversation = await Conversation.findOne({
+      _id: req.params.id,
+      participants: req.user.id
+    });
+
+    if (!conversation) {
+      return res.status(404).json({ error: "Conversation not found" });
+    }
+
+    conversation.isArchived = !conversation.isArchived;
+    await conversation.save();
+
+    res.json({ 
+      success: true, 
+      isArchived: conversation.isArchived,
+      message: conversation.isArchived ? "Conversation archived" : "Conversation unarchived"
+    });
+  } catch (err) {
+    console.error("Archive Error:", err);
+    res.status(500).json({ error: "Server Error" });
+  }
+});
+
+// ==================== GET UNREAD COUNT ====================
+// ==================== GET UNREAD COUNT ====================
+router.get('/unread-count', auth, async (req, res) => {
+  try {
+    const conversations = await Conversation.find({
+      participants: req.user.id
+    });
+
+    let totalUnread = 0;
+    for (const conv of conversations) {
+      const count = await Message.countDocuments({
+        conversationId: conv._id,
+        sender: { $ne: req.user.id },
+        isRead: false
+      });
+      totalUnread += count;
+    }
+
+    res.json({ unreadCount: totalUnread });
+  } catch (err) {
+    console.error("Unread Count Error:", err);
+    res.status(500).json({ error: "Server Error" });
+  }
+});
+
+// ==================== MARK MESSAGES AS READ ====================
+router.post('/messages/mark-read/:conversationId', auth, async (req, res) => {
+  try {
+    const { conversationId } = req.params;
+    const userId = req.user.id;
+    
+    const io = req.app.get('io');
+    
+    const conversation = await Conversation.findOne({
+      _id: conversationId,
+      participants: userId
+    });
+    
+    if (!conversation) {
+      return res.status(403).json({ error: "Not authorized" });
+    }
+    
+    const result = await Message.updateMany(
+      {
+        conversationId: conversationId,
+        sender: { $ne: userId },
+        isRead: false
+      },
+      {
+        $set: { isRead: true, readAt: new Date() }
+      }
+    );
+    
+    await Conversation.findByIdAndUpdate(conversationId, {
+      unreadCount: 0
+    });
+    
+    if (io) {
+      io.to(conversationId).emit('messages_read', { 
+        conversationId, 
+        userId 
+      });
+      io.emit('inbox_update');
+    }
+    
+    res.json({ 
+      success: true, 
+      message: "Messages marked as read",
+      modifiedCount: result.modifiedCount 
+    });
+  } catch (err) {
+    console.error("Mark Read Error:", err);
+    res.status(500).json({ error: "Server Error" });
+  }
+});
+
 module.exports = router;

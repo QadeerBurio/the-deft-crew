@@ -42,29 +42,29 @@ const userSchema = new mongoose.Schema(
     livePicture: { type: String, default: "" },
 
     // --- BRAND/EMPLOYEE LOGO ---
-    logo: { 
-      type: String, 
-      default: "" 
+    logo: {
+      type: String,
+      default: "",
     }, // For brand and employee company logo
     brandName: { type: String }, // For brand role
     companyName: { type: String }, // For employee role
-// In User model - add category field for brands
-category: { 
-  type: String, 
-  default: "General" 
-},
-isOnline: { 
-  type: Boolean, 
-  default: false 
-},
-isInStore: { 
-  type: Boolean, 
-  default: false 
-},
-address: { 
-  type: String, 
-  default: "" 
-},
+    // In User model - add category field for brands
+    category: {
+      type: String,
+      default: "General",
+    },
+    isOnline: {
+      type: Boolean,
+      default: false,
+    },
+    isInStore: {
+      type: Boolean,
+      default: false,
+    },
+    address: {
+      type: String,
+      default: "",
+    },
     // --- STUDENT SPECIFICS ---
     rollNo: { type: String },
     phone: { type: String },
@@ -97,7 +97,7 @@ address: {
     // --- PHYSICAL TDC CARD LOGIC ---
     cardStatus: {
       type: String,
-       enum: ["None", "Ordered", "Printing", "Shipped", "Delivered", "Active"], // ✅ Added "Active"
+      enum: ["None", "Ordered", "Printing", "Shipped", "Delivered", "Active"], // ✅ Added "Active"
       default: "None",
     },
     shippingDetails: {
@@ -141,25 +141,29 @@ address: {
         completedLessons: [{ type: String }],
       },
     ],
+    // --- SOCIAL & PROFESSIONAL ---
     connections: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
     sentRequests: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+    receivedRequests: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }], // ✅ ADD THIS LINE
 
     // --- CAREER INTELLIGENCE ---
-    savedJobs: [{
-      jobId: { type: mongoose.Schema.Types.ObjectId, ref: 'Job' },
-      savedAt: { type: Date, default: Date.now },
-      tag: { type: String, default: '' }
-    }],
+    savedJobs: [
+      {
+        jobId: { type: mongoose.Schema.Types.ObjectId, ref: "Job" },
+        savedAt: { type: Date, default: Date.now },
+        tag: { type: String, default: "" },
+      },
+    ],
     careerProfileId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'Resume'
+      ref: "Resume",
     },
     quickProfile: {
       topSkills: [{ type: String }],
-      seniority: { type: String, default: '' },
-      targetRole: { type: String, default: '' },
-      lastSyncedAt: { type: Date }
-    }
+      seniority: { type: String, default: "" },
+      targetRole: { type: String, default: "" },
+      lastSyncedAt: { type: Date },
+    },
   },
   {
     timestamps: true,

@@ -783,7 +783,108 @@ router.get("/me", authMiddleware, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
+// ==========================================
+// CHANGE PASSWORD ROUTE
+// ==========================================
+router.post("/change-password", authMiddleware, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    
+    // Validate input
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Current password and new password are required" 
+      });
+    }
+    
+    if (newPassword.length < 6) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "New password must be at least 6 characters long" 
+      });
+    }
+    
+    // Find user
+    const user = await User.findById(req.userId);
+    if (!user) {
+      return res.status(404).json({ 
+        success: false, 
+        message: "User not found" 
+      });
+    }
+    
+    // Verify current password
+    const isMatch = await bcrypt.compare(currentPassword, user.password);
+    if (!isMatch) {
+      return res.status(401).json({ 
+        success: false, 
+        message: "Current password is incorrect" 
+      });
+    }
+    
+    // Check if new password is same as current
+    const isSamePassword = await bcrypt.compare(newPassword, user.password);
+    if (isSamePassword) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "New password must be different from current password" 
+      });
+    }
+    
+    // Hash and update new password
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    user.password = hashedPassword;
+    await user.save();
+    
+    // Send notification
+    try {
+      await Notification.create({
+        recipient: user._id,
+        title: "Password Changed 🔒",
+        description: "Your password has been updated successfully. If you didn't make this change, please contact support immediately.",
+        type: "Security",
+        icon: "shield-lock",
+        readBy: [],
+      });
+    } catch (notifError) {
+      console.log("Notification error:", notifError.message);
+    }
+    
+    // Send email notification
+    try {
+      await transporter.sendMail({
+        from: `"The Deft Crew" <${process.env.EMAIL_USER}>`,
+        to: user.email,
+        subject: "Password Changed Successfully - The Deft Crew",
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 20px;">
+            <h2 style="color: #1a1a1a;">Password Changed 🔒</h2>
+            <p>Hello ${user.name || 'User'},</p>
+            <p>Your password was changed successfully on <strong>${new Date().toLocaleString()}</strong>.</p>
+            <p style="color: #666; font-size: 14px;">If you did not make this change, please contact our support team immediately.</p>
+            <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
+            <p style="color: #999; font-size: 12px;">The Deft Crew Security Team</p>
+          </div>
+        `,
+      });
+    } catch (mailError) {
+      console.log("Email notification error:", mailError.message);
+    }
+    
+    res.json({ 
+      success: true, 
+      message: "Password changed successfully" 
+    });
+    
+  } catch (error) {
+    console.error("Change password error:", error);
+    res.status(500).json({ 
+      success: false, 
+      message: "Failed to change password. Please try again later." 
+    });
+  }
+});
 // ==========================================
 // EXPORT
 // ==========================================

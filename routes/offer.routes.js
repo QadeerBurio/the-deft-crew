@@ -6,8 +6,7 @@ const auth = require("../middleware/auth.middleware");
 const Notification = require("../models/Notification");
 const Slider = require("../models/Slider");
 const router = express.Router();
-const { storage } = require("../config/cloudinary");
-const upload = multer({ storage });
+const { uploadOffer } = require("../config/cloudinary");
 
 // Add Redis cache if available, fallback to in-memory cache
 let cache;
@@ -15,7 +14,6 @@ try {
   const Redis = require('ioredis');
   cache = new Redis(process.env.REDIS_URL);
 } catch (e) {
-  // Simple in-memory cache fallback
   cache = {
     store: new Map(),
     async get(key) { 
@@ -38,16 +36,15 @@ try {
   };
 }
 
-const CACHE_TTL = 120; // 2 minutes
+const CACHE_TTL = 120;
 
-// Helper: Clear brand-related caches
 async function clearBrandCaches(brandId) {
   await cache.del(`offers:brand:${brandId}`);
   await cache.del('offers:summary');
 }
 
-// CREATE: Create new offer (and delete old ones for that brand)
-router.post("/", auth, upload.single("image"), async (req, res) => {
+// CREATE: Create new offer
+router.post("/", auth, uploadOffer.single("image"), async (req, res) => {
   try {
     const user = await User.findById(req.userId).lean().select('role');
     
@@ -55,11 +52,9 @@ router.post("/", auth, upload.single("image"), async (req, res) => {
       return res.status(403).json({ message: "Only brands allowed" });
     }
 
-    // Delete old offers
     await Offer.deleteMany({ brand: req.userId });
 
-    // Create new offer
-    const offer = await Offer.create({
+    const offerData = {
       title: req.body.title,
       description: req.body.description,
       discountPercentage: req.body.discountPercentage,
@@ -68,11 +63,15 @@ router.post("/", auth, upload.single("image"), async (req, res) => {
       location: req.body.location,
       isOnline: req.body.isOnline === "true",
       isInStore: req.body.isInStore === "true",
-      image: req.file?.path || null,
       brand: req.userId,
-    });
+    };
 
-    // Clear caches
+    if (req.file) {
+      offerData.image = req.file.path || req.file.secure_url || req.file.filename;
+    }
+
+    const offer = await Offer.create(offerData);
+
     await clearBrandCaches(req.userId);
 
     res.json({
@@ -80,12 +79,13 @@ router.post("/", auth, upload.single("image"), async (req, res) => {
       offer,
     });
   } catch (err) {
+    console.error("❌ Error creating offer:", err);
     res.status(500).json({ message: err.message });
   }
 });
 
 // UPDATE: Modify existing offer
-router.put("/:offerId", auth, upload.single("image"), async (req, res) => {
+router.put("/:offerId", auth, uploadOffer.single("image"), async (req, res) => {
   try {
     const offer = await Offer.findById(req.params.offerId);
     
@@ -95,23 +95,27 @@ router.put("/:offerId", auth, upload.single("image"), async (req, res) => {
       return res.status(403).json({ message: "Unauthorized" });
     }
 
-    // Update fields
-    Object.assign(offer, {
+    const updateData = {
       title: req.body.title || offer.title,
       description: req.body.description || offer.description,
       discountPercentage: req.body.discountPercentage || offer.discountPercentage,
       location: req.body.location || offer.location,
       redeemInstructions: req.body.redeemInstructions || offer.redeemInstructions,
-      isOnline: req.body.isOnline ?? offer.isOnline,
-      isInStore: req.body.isInStore ?? offer.isInStore,
-      image: req.file ? req.file.path : offer.image,
-    });
+      isOnline: req.body.isOnline !== undefined ? req.body.isOnline === "true" : offer.isOnline,
+      isInStore: req.body.isInStore !== undefined ? req.body.isInStore === "true" : offer.isInStore,
+    };
 
+    if (req.file) {
+      updateData.image = req.file.path || req.file.secure_url || req.file.filename;
+    }
+
+    Object.assign(offer, updateData);
     await offer.save();
     await clearBrandCaches(req.userId);
 
     res.json({ message: "Offer updated successfully", offer });
   } catch (err) {
+    console.error("❌ Error updating offer:", err);
     res.status(500).json({ message: err.message });
   }
 });
@@ -186,6 +190,23 @@ router.post("/redeem-payment", auth, async (req, res) => {
     const offer = await Offer.findById(offerId);
     if (!offer) return res.status(404).json({ message: "Offer not found" });
 
+    // Check if user already redeemed this offer today
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const todayRedemptions = offer.redemptions.filter(r => {
+      const redeemDate = new Date(r.redeemedAt);
+      redeemDate.setHours(0, 0, 0, 0);
+      return r.student.toString() === userId && redeemDate.getTime() === today.getTime();
+    });
+
+    // Max 2 redemptions per day per user
+    if (todayRedemptions.length >= 2) {
+      return res.status(400).json({ 
+        message: "You have already used this discount 2 times today. Please try again tomorrow." 
+      });
+    }
+
     offer.redemptions.push({
       student: userId,
       billAmount: Number(billAmount),
@@ -193,28 +214,52 @@ router.post("/redeem-payment", auth, async (req, res) => {
       redeemedAt: new Date(),
     });
 
-    offer.claimedBy = offer.claimedBy.filter(
-      id => id.toString() !== userId.toString()
-    );
+    // Only remove from claimedBy if this is the second redemption
+    const totalRedemptions = offer.redemptions.filter(r => r.student.toString() === userId);
+    
+    // If user has used 2 redemptions, remove from claimedBy
+    if (totalRedemptions.length >= 2) {
+      offer.claimedBy = offer.claimedBy.filter(
+        id => id.toString() !== userId.toString()
+      );
+    }
     
     await offer.save();
 
-    res.json({ message: "Redemption successful! Voucher used.", offer });
+    // Mark scan as processed
+    try {
+      const pendingScanIndex = pendingScans.findIndex(
+        scan => scan.studentId === userId && scan.status === 'pending'
+      );
+      if (pendingScanIndex !== -1) {
+        pendingScans[pendingScanIndex].status = 'processed';
+        processedScans.add(userId);
+      }
+    } catch (err) {
+      console.error("Error marking scan as processed:", err);
+    }
+
+    res.json({ 
+      message: "Redemption successful! Voucher used.", 
+      offer,
+      redemptionsUsed: totalRedemptions.length,
+      redemptionsRemaining: 2 - totalRedemptions.length
+    });
 
     await Notification.create({
       recipient: userId,
       title: "Payment Successful! 🎉",
-      description: `Congratulations! You just saved Rs. ${savedAmount} at ${offer.title}.`,
+      description: `Congratulations! You just saved Rs. ${savedAmount} at ${offer.title}. ${totalRedemptions.length >= 2 ? 'You have used both redemptions for today.' : `You have ${2 - totalRedemptions.length} redemption${2 - totalRedemptions.length > 1 ? 's' : ''} remaining for today.`}`,
       type: "System",
       icon: "checkmark-circle",
     });
   } catch (err) {
+    console.error("Error in redeem-payment:", err);
     res.status(500).json({ message: err.message });
   }
 });
 
-// GET: View specific brand's offers (with caching)
-// In offers.js route file - update the /brand/:brandId endpoint
+// GET: View specific brand's offers
 router.get("/brand/:brandId", auth, async (req, res) => {
   try {
     const cacheKey = `offers:brand:${req.params.brandId}`;
@@ -224,23 +269,20 @@ router.get("/brand/:brandId", auth, async (req, res) => {
       return res.json(JSON.parse(cached));
     }
 
-    // Always return an array, even if empty
     const offers = await Offer.find({ brand: req.params.brandId })
       .populate("brand", "name logo category")
       .lean()
       .exec();
 
-    // Cache even empty results to prevent repeated queries
     await cache.set(cacheKey, JSON.stringify(offers || []), CACHE_TTL);
 
     res.json(offers || []);
   } catch (err) {
-    // Return empty array on error
     res.json([]);
   }
 });
 
-// NEW: Offers summary endpoint for fast loading
+// GET: Offers summary
 router.get("/summary", auth, async (req, res) => {
   try {
     const cacheKey = 'offers:summary';
@@ -250,7 +292,6 @@ router.get("/summary", auth, async (req, res) => {
       return res.json(JSON.parse(cached));
     }
 
-    // Aggregate offers by brand with minimal data
     const offers = await Offer.aggregate([
       {
         $group: {
@@ -271,7 +312,6 @@ router.get("/summary", auth, async (req, res) => {
       }
     ]);
 
-    // Transform to brandId -> offers map
     const summaryMap = {};
     offers.forEach(item => {
       summaryMap[item._id] = item.offers;
@@ -285,7 +325,7 @@ router.get("/summary", auth, async (req, res) => {
   }
 });
 
-// GET: Student's active vouchers
+// GET: Student's active vouchers with redemption info
 router.get("/claimed", auth, async (req, res) => {
   try {
     const claimedOffers = await Offer.find({ claimedBy: req.userId })
@@ -293,13 +333,32 @@ router.get("/claimed", auth, async (req, res) => {
       .lean()
       .exec();
     
-    res.json(claimedOffers);
+    // Add redemption info to each offer
+    const offersWithInfo = claimedOffers.map(offer => {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      const todayRedemptions = offer.redemptions.filter(r => {
+        const redeemDate = new Date(r.redeemedAt);
+        redeemDate.setHours(0, 0, 0, 0);
+        return r.student.toString() === req.userId && redeemDate.getTime() === today.getTime();
+      });
+      
+      return {
+        ...offer,
+        redemptionsToday: todayRedemptions.length,
+        maxRedemptionsPerDay: 2,
+        canRedeem: todayRedemptions.length < 2
+      };
+    });
+    
+    res.json(offersWithInfo);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 });
 
-// STATS: Total student savings (optimized with aggregation)
+// STATS: Total student savings
 router.get("/my-total-savings", auth, async (req, res) => {
   try {
     const result = await Offer.aggregate([
@@ -325,7 +384,7 @@ router.get("/my-total-savings", auth, async (req, res) => {
   }
 });
 
-// REPORT: Brand's list of students who claimed offers (optimized)
+// REPORT: Brand's list of students who claimed offers
 router.get("/claimed-users", auth, async (req, res) => {
   try {
     const user = await User.findById(req.userId).lean().select('role');
@@ -348,16 +407,22 @@ router.get("/claimed-users", auth, async (req, res) => {
 
     const claimedUsers = offers.reduce((acc, offer) => {
       offer.claimedBy.forEach(student => {
+        const studentRedemptions = offer.redemptions.filter(
+          r => r.student.toString() === student._id.toString()
+        );
+        
         acc.push({
           _id: student._id,
-          name: student.name,
-          email: student.email,
+          name: student.name || 'Student',
+          email: student.email || '',
           rollNo: student.rollNo || "N/A",
           universityName: student.university?.name || "N/A",
           offerId: offer._id.toString(),
-          offerTitle: offer.title,
-          discountPercentage: offer.discountPercentage,
+          offerTitle: offer.title || 'Offer',
+          discountPercentage: offer.discountPercentage || 0,
           claimedAt: offer.createdAt,
+          redemptionsCount: studentRedemptions.length,
+          totalSaved: studentRedemptions.reduce((sum, r) => sum + r.savedAmount, 0)
         });
       });
       return acc;
@@ -370,7 +435,7 @@ router.get("/claimed-users", auth, async (req, res) => {
   }
 });
 
-// REPORT: Brand's total savings/sales report (optimized)
+// REPORT: Brand's total savings/sales report
 router.get("/savings-report", auth, async (req, res) => {
   try {
     const offers = await Offer.find({ brand: req.userId })
@@ -391,10 +456,10 @@ router.get("/savings-report", auth, async (req, res) => {
           name: r.student?.name || "N/A",
           rollNo: r.student?.rollNo || "N/A",
           university: r.student?.university?.name || "N/A",
-          brand: offer.title,
-          bill: r.billAmount,
-          saved: r.savedAmount,
-          paid: r.billAmount - r.savedAmount,
+          brand: offer.title || 'Brand',
+          bill: r.billAmount || 0,
+          saved: r.savedAmount || 0,
+          paid: (r.billAmount || 0) - (r.savedAmount || 0),
           date: r.redeemedAt,
         });
       });
@@ -407,8 +472,7 @@ router.get("/savings-report", auth, async (req, res) => {
   }
 });
 
-
-// GET: Fetch only offer image by offer ID
+// GET: Fetch offer image
 router.get("/:offerId/image", auth, async (req, res) => {
   try {
     const offer = await Offer.findById(req.params.offerId)
@@ -419,10 +483,6 @@ router.get("/:offerId/image", auth, async (req, res) => {
     if (!offer) {
       return res.status(404).json({ message: "Offer not found" });
     }
-
-    // Check if user has access to this offer
-    // (Optional: Add authorization logic if needed)
-    // For example, check if user is the brand owner or has claimed the offer
     
     res.json({
       offerId: offer._id,
@@ -440,14 +500,12 @@ router.get("/images/all", auth, async (req, res) => {
   try {
     const { brandId, category, limit = 50 } = req.query;
     
-    // Build filter
     const filter = { image: { $ne: null } };
     if (brandId) filter.brand = brandId;
     if (category) filter.category = category;
 
     const cacheKey = `offers:images:filter:${JSON.stringify(filter)}`;
     
-    // Try cache
     const cached = await cache.get(cacheKey);
     if (cached) {
       return res.json(JSON.parse(cached));
@@ -464,23 +522,258 @@ router.get("/images/all", auth, async (req, res) => {
       count: offers.length,
       offers: offers.map(offer => ({
         offerId: offer._id,
-        title: offer.title,
+        title: offer.title || 'Offer',
         image: offer.image,
         brand: {
           id: offer.brand?._id,
-          name: offer.brand?.name,
+          name: offer.brand?.name || 'Brand',
           logo: offer.brand?.logo
         },
-        discountPercentage: offer.discountPercentage,
-        category: offer.category,
-        isOnline: offer.isOnline,
-        isInStore: offer.isInStore
+        discountPercentage: offer.discountPercentage || 0,
+        category: offer.category || 'General',
+        isOnline: offer.isOnline || false,
+        isInStore: offer.isInStore || false
       }))
     };
 
     await cache.set(cacheKey, JSON.stringify(response), 300);
 
     res.json(response);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ============= QR SCAN ROUTES =============
+
+// Track pending student scans
+const pendingScans = [];
+const processedScans = new Set();
+
+// POST - Student scans QR and sends data
+router.post("/scan-verify", auth, async (req, res) => {
+  try {
+    const { studentId, name, rollNo, university, email, offerId, offerTitle, discountPercentage, brandId, brandName } = req.body;
+    
+    if (!studentId || !name || !offerId) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Missing required student information" 
+      });
+    }
+    
+    // Check if student has already used 2 redemptions today
+    const offer = await Offer.findById(offerId);
+    if (!offer) {
+      return res.status(404).json({ 
+        success: false, 
+        message: "Offer not found" 
+      });
+    }
+    
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const todayRedemptions = offer.redemptions.filter(r => {
+      const redeemDate = new Date(r.redeemedAt);
+      redeemDate.setHours(0, 0, 0, 0);
+      return r.student.toString() === studentId && redeemDate.getTime() === today.getTime();
+    });
+    
+    if (todayRedemptions.length >= 2) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "You have already used this discount 2 times today. Please try again tomorrow.",
+        redemptionsUsed: todayRedemptions.length,
+        maxRedemptions: 2
+      });
+    }
+    
+    // Check for existing pending scan
+    const existingScan = pendingScans.find(
+      scan => scan.studentId === studentId.toString() && 
+              scan.brandId === (brandId ? brandId.toString() : '') && 
+              scan.status === 'pending'
+    );
+    
+    if (existingScan) {
+      return res.json({ 
+        success: true, 
+        message: 'Student already scanned',
+        scanId: pendingScans.indexOf(existingScan),
+        student: existingScan,
+        redemptionsUsed: todayRedemptions.length,
+        maxRedemptions: 2
+      });
+    }
+    
+    let universityName = '';
+    if (typeof university === 'string') {
+      universityName = university;
+    } else if (university && typeof university === 'object') {
+      universityName = university.name || university._id || 'University';
+    } else {
+      universityName = 'University';
+    }
+    
+    pendingScans.push({
+      studentId: studentId.toString(),
+      name: name || 'Student',
+      rollNo: rollNo || 'N/A',
+      university: universityName,
+      universityName: universityName,
+      email: email || '',
+      offerId: offerId.toString(),
+      offerTitle: offerTitle || 'Offer',
+      discountPercentage: discountPercentage || 0,
+      brandId: brandId ? brandId.toString() : '',
+      brandName: brandName || 'Brand',
+      scannedAt: new Date().toISOString(),
+      status: 'pending',
+      redemptionsUsed: todayRedemptions.length,
+      maxRedemptions: 2
+    });
+    
+    while (pendingScans.length > 50) {
+      pendingScans.shift();
+    }
+    
+    res.json({ 
+      success: true, 
+      message: 'Student data received successfully',
+      scanId: pendingScans.length - 1,
+      student: pendingScans[pendingScans.length - 1],
+      redemptionsUsed: todayRedemptions.length,
+      maxRedemptions: 2
+    });
+  } catch (err) {
+    console.error("Error in scan-verify:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// GET - Brand checks for pending student scans
+router.get("/pending-scans", auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.userId).lean().select('role');
+    
+    if (!user || user.role !== "brand") {
+      return res.status(403).json({ message: "Only brands allowed" });
+    }
+    
+    const brandScans = pendingScans.filter(
+      scan => scan.brandId === req.userId && scan.status === 'pending'
+    );
+    
+    const formattedScans = brandScans.map(scan => ({
+      studentId: scan.studentId,
+      name: scan.name,
+      rollNo: scan.rollNo,
+      university: scan.university,
+      universityName: scan.universityName || scan.university || 'University',
+      email: scan.email,
+      offerId: scan.offerId,
+      offerTitle: scan.offerTitle,
+      discountPercentage: scan.discountPercentage,
+      scannedAt: scan.scannedAt,
+      status: scan.status,
+      redemptionsUsed: scan.redemptionsUsed || 0,
+      maxRedemptions: scan.maxRedemptions || 2
+    }));
+    
+    res.json(formattedScans);
+  } catch (err) {
+    console.error("Error fetching pending scans:", err);
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// POST - Mark scan as processed
+router.post("/scan-processed", auth, async (req, res) => {
+  try {
+    const { studentId } = req.body;
+    
+    if (!studentId) {
+      return res.status(400).json({ success: false, message: "Student ID required" });
+    }
+    
+    let found = false;
+    for (let i = 0; i < pendingScans.length; i++) {
+      if (pendingScans[i].studentId === studentId && pendingScans[i].status === 'pending') {
+        pendingScans[i].status = 'processed';
+        processedScans.add(studentId);
+        found = true;
+      }
+    }
+    
+    if (found) {
+      res.json({ success: true, message: "Scan marked as processed" });
+    } else {
+      res.status(404).json({ success: false, message: "Scan not found" });
+    }
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// GET - Check if student can scan
+router.get("/can-scan/:offerId", auth, async (req, res) => {
+  try {
+    const { offerId } = req.params;
+    const userId = req.userId;
+    
+    const offer = await Offer.findById(offerId);
+    if (!offer) {
+      return res.status(404).json({ 
+        canScan: false, 
+        message: "Offer not found" 
+      });
+    }
+    
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const todayRedemptions = offer.redemptions.filter(r => {
+      const redeemDate = new Date(r.redeemedAt);
+      redeemDate.setHours(0, 0, 0, 0);
+      return r.student.toString() === userId && redeemDate.getTime() === today.getTime();
+    });
+    
+    const canScan = todayRedemptions.length < 2;
+    
+    res.json({
+      canScan,
+      redemptionsUsed: todayRedemptions.length,
+      maxRedemptions: 2,
+      remainingRedemptions: 2 - todayRedemptions.length,
+      message: canScan ? "You can scan and redeem" : "You have already used this discount 2 times today"
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// GET - Get a specific student by ID
+router.get("/student/:studentId", auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.params.studentId)
+      .select('name email rollNo university')
+      .populate('university', 'name')
+      .lean();
+    
+    if (!user) {
+      return res.status(404).json({ message: "Student not found" });
+    }
+    
+    const universityName = user.university?.name || 'N/A';
+    
+    res.json({
+      _id: user._id,
+      name: user.name || 'Student',
+      email: user.email || '',
+      rollNo: user.rollNo || 'N/A',
+      universityName: universityName
+    });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

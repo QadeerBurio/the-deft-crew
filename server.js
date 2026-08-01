@@ -17,6 +17,9 @@ const io = new Server(server, {
   cors: { origin: "*" }
 });
 
+// Make io available to routes
+app.set('io', io);
+
 // ---------------- DNS CONFIG ----------------
 dns.setServers(["1.1.1.1", "8.8.8.8"]);
 
@@ -77,8 +80,6 @@ connectDB().then(() => {
   }).catch((err) => {
     console.error("❌ Failed to connect to chat database:", err);
   });
-
-
 });
 
 // ---------------- ROUTES ----------------
@@ -98,13 +99,12 @@ app.use("/api/traveler", require("./routes/traveler.routes"));
 app.use("/api/resume", require("./routes/resume.routes"));
 app.use("/api/v1", require("./chat-service/dist/routes/index").default);
 
-
-// // ============ SKILLSWAP ROUTES ============
 // ============ SKILLSWAP ROUTES ============
 app.use('/api/listings', require('./routes/listing.routes'));
 app.use('/api/skill-offers', require('./routes/skillOffer.routes'));
 app.use('/api/chat', require('./routes/chat.routes'));
 app.use('/api/inquiries', require('./routes/inquiry.routes'));
+
 // ---------------- SOCKET.IO CHAT & CALL HANDLER ----------------
 const { Message, Conversation } = require('./models/Chat');
 
@@ -113,24 +113,48 @@ const onlineUsers = new Map(); // { userId: socketId }
 const userCallStatus = new Map(); // Track if user is in a call
 
 io.on('connection', (socket) => {
-  // console.log('New client connected:', socket.id);
+  console.log('New client connected:', socket.id);
   
   // --- TRACK ONLINE STATUS ---
-  socket.on('user_online', (userId) => {
-    // console.log('User online:', userId);
+  socket.on('user_online', async (userId) => {
+    console.log('User online:', userId);
     socket.userId = userId;
     onlineUsers.set(userId, socket.id);
+    
+    try {
+      const User = require('./models/User');
+      await User.findByIdAndUpdate(userId, { online: true });
+    } catch (err) {
+      console.error('Update online status error:', err);
+    }
+    
     io.emit('user_status_update', { userId, status: 'online' });
   });
 
-  socket.on('join_chat', (conversationId) => {
-    // console.log('User joined chat:', conversationId);
-    socket.join(conversationId);
+  // --- GET USER STATUS ---
+  socket.on('get_user_status', (userId) => {
+    const isOnline = onlineUsers.has(userId);
+    socket.emit('user_status_response', { 
+      userId, 
+      status: isOnline ? 'online' : 'offline' 
+    });
   });
 
+  // --- JOIN CHAT ROOM ---
+  socket.on('join_chat', (conversationId) => {
+    socket.join(conversationId);
+    console.log(`Socket ${socket.id} joined room ${conversationId}`);
+  });
+
+  // --- LEAVE CHAT ROOM ---
+  socket.on('leave_chat', (conversationId) => {
+    socket.leave(conversationId);
+    console.log(`Socket ${socket.id} left room ${conversationId}`);
+  });
+
+  // --- SEND MESSAGE ---
   socket.on('send_message', async (data) => {
     try {
-      // console.log('Send message received:', data);
       const { conversationId, senderId, text, messageType, mediaUrl, location, duration } = data;
 
       // Validate required fields
@@ -162,12 +186,28 @@ io.on('connection', (socket) => {
       else if (!text && messageType !== 'text') displayMsg = 'Media message';
 
       await Conversation.findByIdAndUpdate(conversationId, {
-        lastMessage: displayMsg || 'New message',
-        updatedAt: Date.now()
+        $set: {
+          lastMessage: displayMsg || 'New message',
+          lastMessageType: messageType || 'text',
+          lastMessageSender: senderId,
+          lastMessageTime: new Date(),
+          updatedAt: Date.now()
+        },
+        $inc: { unreadCount: 1 }
+      });
+
+      // Get unread count for the recipient
+      const unreadCount = await Message.countDocuments({
+        conversationId,
+        sender: { $ne: senderId },
+        isRead: false
       });
 
       // Emit to room
-      io.to(conversationId).emit('new_message', populatedMessage);
+      io.to(conversationId).emit('new_message', {
+        ...populatedMessage.toObject(),
+        unreadCount
+      });
       
       // Also emit to sender for confirmation
       socket.emit('message_sent', populatedMessage);
@@ -179,6 +219,83 @@ io.on('connection', (socket) => {
       console.error("Socket Error in send_message:", err);
       socket.emit('message_error', { error: err.message });
     }
+  });
+
+  // --- MARK MESSAGES AS READ (Socket) ---
+  socket.on('mark_messages_read', async ({ conversationId, userId }) => {
+    try {
+      await Message.updateMany(
+        {
+          conversationId: conversationId,
+          sender: { $ne: userId },
+          isRead: false
+        },
+        {
+          $set: { isRead: true, readAt: new Date() }
+        }
+      );
+      
+      await Conversation.findByIdAndUpdate(conversationId, {
+        unreadCount: 0
+      });
+      
+      io.to(conversationId).emit('messages_read', { conversationId, userId });
+      io.emit('inbox_update');
+      console.log(`Messages marked as read in conversation ${conversationId}`);
+    } catch (err) {
+      console.error('Mark read socket error:', err);
+    }
+  });
+// In server.js - Inside io.on('connection') block
+
+// In server.js - Inside io.on('connection') block
+
+// --- DELETE MESSAGE ---
+socket.on('delete_message', async ({ messageId, conversationId }) => {
+  try {
+    console.log('Delete message socket:', messageId);
+    const result = await Message.findByIdAndDelete(messageId);
+    if (result) {
+      // Update last message if needed
+      const lastMsg = await Message.findOne({ conversationId })
+        .sort({ createdAt: -1 });
+      
+      if (lastMsg) {
+        await Conversation.findByIdAndUpdate(conversationId, {
+          lastMessage: lastMsg.text || 'Media message',
+          lastMessageType: lastMsg.messageType,
+          lastMessageTime: lastMsg.createdAt
+        });
+      }
+      
+      io.to(conversationId).emit('message_deleted', { messageId });
+      io.emit('inbox_update');
+      console.log('Message deleted successfully:', messageId);
+    }
+  } catch (err) {
+    console.error('Delete message error:', err);
+  }
+});
+
+// --- DELETE CONVERSATION ---
+socket.on('delete_conversation', async ({ conversationId }) => {
+  try {
+    console.log('Delete conversation socket:', conversationId);
+    io.emit('conversation_deleted', { conversationId });
+    io.emit('inbox_update');
+    console.log('Conversation deleted socket event sent:', conversationId);
+  } catch (err) {
+    console.error('Delete conversation socket error:', err);
+  }
+});
+
+  // --- TYPING INDICATORS ---
+  socket.on('typing_start', ({ conversationId, userId, userName }) => {
+    socket.to(conversationId).emit('user_typing', { userId, userName, typing: true });
+  });
+
+  socket.on('typing_stop', ({ conversationId, userId }) => {
+    socket.to(conversationId).emit('user_typing', { userId, typing: false });
   });
 
   // ========== WEBRTC CALLING SYSTEM ==========
@@ -287,31 +404,10 @@ io.on('connection', (socket) => {
     }
   });
 
-  // --- TYPING INDICATORS ---
-  socket.on('typing_start', ({ conversationId, userId, userName }) => {
-    socket.to(conversationId).emit('user_typing', { userId, userName });
-  });
-
-  socket.on('typing_stop', ({ conversationId, userId }) => {
-    socket.to(conversationId).emit('user_stop_typing', { userId });
-  });
-
-  // --- MARK MESSAGES AS READ ---
-  socket.on('mark_read', async ({ conversationId, userId, messageIds }) => {
-    try {
-      await Message.updateMany(
-        { _id: { $in: messageIds }, conversationId },
-        { $set: { readBy: userId, readAt: new Date() } }
-      );
-      socket.to(conversationId).emit('messages_read', { userId, messageIds });
-    } catch (err) {
-      console.error('Error marking messages as read:', err);
-    }
-  });
-
   // --- HANDLE DISCONNECT ---
-  socket.on('disconnect', () => {
-    console.log('Client disconnected:', socket.userId);
+  socket.on('disconnect', async () => {
+    console.log('Client disconnected:', socket.id);
+    
     if (socket.userId) {
       // End any active calls
       const callInfo = userCallStatus.get(socket.userId);
@@ -323,7 +419,18 @@ io.on('connection', (socket) => {
       }
       userCallStatus.delete(socket.userId);
       onlineUsers.delete(socket.userId);
-      io.emit('user_status_update', { userId: socket.userId, status: 'offline' });
+      
+      try {
+        const User = require('./models/User');
+        await User.findByIdAndUpdate(socket.userId, { online: false });
+      } catch (err) {
+        console.error('Update offline error:', err);
+      }
+      
+      io.emit('user_status_update', { 
+        userId: socket.userId, 
+        status: 'offline' 
+      });
     }
   });
 });
