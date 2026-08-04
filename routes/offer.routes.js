@@ -495,12 +495,16 @@ router.get("/:offerId/image", auth, async (req, res) => {
   }
 });
 
-// GET: Fetch offer images with filters
+// GET: Fetch offer images with filters - FIXED VERSION
 router.get("/images/all", auth, async (req, res) => {
   try {
     const { brandId, category, limit = 50 } = req.query;
     
-    const filter = { image: { $ne: null } };
+    // Build filter - only get offers with images
+    const filter = { 
+      image: { $ne: null, $ne: '' } // Only offers with images
+    };
+    
     if (brandId) filter.brand = brandId;
     if (category) filter.category = category;
 
@@ -511,6 +515,7 @@ router.get("/images/all", auth, async (req, res) => {
       return res.json(JSON.parse(cached));
     }
 
+    // Get offers with populated brand data
     const offers = await Offer.find(filter)
       .select('_id title image brand discountPercentage category isOnline isInStore')
       .populate('brand', 'name logo')
@@ -518,16 +523,25 @@ router.get("/images/all", auth, async (req, res) => {
       .lean()
       .exec();
 
+    // Filter out offers where brand doesn't exist or is null
+    const validOffers = offers.filter(offer => 
+      offer.brand && 
+      offer.brand._id && 
+      offer.image && 
+      offer.image !== null && 
+      offer.image !== ''
+    );
+
     const response = {
-      count: offers.length,
-      offers: offers.map(offer => ({
+      count: validOffers.length,
+      offers: validOffers.map(offer => ({
         offerId: offer._id,
         title: offer.title || 'Offer',
         image: offer.image,
         brand: {
-          id: offer.brand?._id,
-          name: offer.brand?.name || 'Brand',
-          logo: offer.brand?.logo
+          id: offer.brand._id,
+          name: offer.brand.name || 'Brand',
+          logo: offer.brand.logo
         },
         discountPercentage: offer.discountPercentage || 0,
         category: offer.category || 'General',
@@ -540,9 +554,15 @@ router.get("/images/all", auth, async (req, res) => {
 
     res.json(response);
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    console.error('Error fetching offer images:', err);
+    res.status(500).json({ 
+      message: err.message,
+      offers: [],
+      count: 0 
+    });
   }
 });
+
 
 // ============= QR SCAN ROUTES =============
 
