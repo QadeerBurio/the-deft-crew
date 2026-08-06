@@ -885,6 +885,89 @@ router.post("/change-password", authMiddleware, async (req, res) => {
     });
   }
 });
+
+
+
+// ==========================================
+// ADMIN LOGIN AS BRAND (Auto-Login)
+// ==========================================
+router.post("/admin-login-as-brand", authMiddleware, async (req, res) => {
+  try {
+    const { brandId } = req.body;
+    
+    // Verify the requesting user is an admin
+    const adminUser = await User.findById(req.userId);
+    if (adminUser.role !== 'admin') {
+      return res.status(403).json({ 
+        success: false, 
+        message: "Only admins can login as brands" 
+      });
+    }
+    
+    // Find the brand
+    const brand = await User.findOne({ 
+      _id: brandId, 
+      role: 'brand' 
+    }).select('+password');
+    
+    if (!brand) {
+      return res.status(404).json({ 
+        success: false, 
+        message: "Brand not found" 
+      });
+    }
+    
+    // Check if brand is approved
+    if (brand.brandApprovalStatus !== 'approved') {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Brand is not approved yet" 
+      });
+    }
+    
+    // Generate token for the brand
+    const token = jwt.sign(
+      { id: brand._id, role: brand.role },
+      process.env.JWT_SECRET || "abdulqadeer11111",
+      { expiresIn: "7d" }
+    );
+    
+    // Remove password from response
+    const brandResponse = brand.toObject();
+    delete brandResponse.password;
+    
+    // Log the activity (optional)
+    console.log(`✅ Admin ${adminUser.email} logged in as brand ${brand.brandName || brand.name}`);
+    
+    // Create notification for the brand (optional)
+    try {
+      await Notification.create({
+        recipient: brand._id,
+        title: "Admin Login 👤",
+        description: `An administrator has logged into your brand dashboard. This is for administrative purposes.`,
+        type: "Security",
+        icon: "shield-lock",
+        readBy: [],
+      });
+    } catch (notifError) {
+      console.log("Notification error:", notifError.message);
+    }
+    
+    res.json({
+      success: true,
+      message: "Logged in as brand successfully",
+      token,
+      user: brandResponse
+    });
+    
+  } catch (error) {
+    console.error("Admin login as brand error:", error);
+    res.status(500).json({ 
+      success: false, 
+      message: "Failed to login as brand" 
+    });
+  }
+});
 // ==========================================
 // EXPORT
 // ==========================================

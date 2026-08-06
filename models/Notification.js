@@ -40,7 +40,8 @@ const NotificationSchema = new mongoose.Schema({
       "Payment",
       "Jobs",
       "Update",
-      "Promotion"
+      "Promotion",
+      "Brand",
     ],
     default: "System"
   },

@@ -1,3 +1,5 @@
+// models/User.js - Add status field if not present, and add brandApprovalStatus
+
 const mongoose = require("mongoose");
 
 const userSchema = new mongoose.Schema(
@@ -25,6 +27,23 @@ const userSchema = new mongoose.Schema(
       default: "student",
     },
 
+    // --- BRAND APPROVAL STATUS (NEW) ---
+    brandApprovalStatus: {
+      type: String,
+      enum: ["pending", "approved", "rejected", "draft"],
+      default: "pending", // All new brands start as pending
+    },
+    brandApprovalNote: {
+      type: String,
+      default: "",
+    },
+    brandApprovedAt: {
+      type: Date,
+    },
+    brandRejectedAt: {
+      type: Date,
+    },
+
     // --- VERIFICATION & STATUS ---
     isAlumni: { type: Boolean, default: false },
     isVip: { type: Boolean, default: false },
@@ -45,10 +64,9 @@ const userSchema = new mongoose.Schema(
     logo: {
       type: String,
       default: "",
-    }, // For brand and employee company logo
-    brandName: { type: String }, // For brand role
-    companyName: { type: String }, // For employee role
-    // In User model - add category field for brands
+    },
+    brandName: { type: String },
+    companyName: { type: String },
     category: {
       type: String,
       default: "General",
@@ -72,7 +90,6 @@ const userSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "University",
     },
-    address: { type: String },
     instagram: { type: String },
 
     // --- REFERRAL SYSTEM ---
@@ -97,7 +114,7 @@ const userSchema = new mongoose.Schema(
     // --- PHYSICAL TDC CARD LOGIC ---
     cardStatus: {
       type: String,
-      enum: ["None", "Ordered", "Printing", "Shipped", "Delivered", "Active"], // ✅ Added "Active"
+      enum: ["None", "Ordered", "Printing", "Shipped", "Delivered", "Active"],
       default: "None",
     },
     shippingDetails: {
@@ -141,10 +158,9 @@ const userSchema = new mongoose.Schema(
         completedLessons: [{ type: String }],
       },
     ],
-    // --- SOCIAL & PROFESSIONAL ---
     connections: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
     sentRequests: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
-    receivedRequests: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }], // ✅ ADD THIS LINE
+    receivedRequests: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
 
     // --- CAREER INTELLIGENCE ---
     savedJobs: [
@@ -170,9 +186,10 @@ const userSchema = new mongoose.Schema(
   },
 );
 
-// ==================== PERFORMANCE INDEXES ====================
+// --- INDEXES ---
 userSchema.index({ role: 1, status: 1 });
 userSchema.index({ university: 1, role: 1 });
+userSchema.index({ brandApprovalStatus: 1, role: 1 }); // For filtering brands
 
 // --- PRE-SAVE HOOK: AUTOMATIC REFERRAL CODE GENERATION ---
 userSchema.pre("save", async function () {
