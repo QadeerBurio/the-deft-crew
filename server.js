@@ -20,6 +20,10 @@ const io = new Server(server, {
 // Make io available to routes
 app.set('io', io);
 
+// Initialize Event Socket Broadcaster
+const eventSocket = require("./socket/eventSocket");
+eventSocket.init(io);
+
 // ---------------- DNS CONFIG ----------------
 dns.setServers(["1.1.1.1", "8.8.8.8"]);
 
@@ -33,6 +37,10 @@ app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 // ---------------- DATABASE ----------------
 connectDB().then(() => {
+  // Initialize Automated Event Ingestion Scheduler
+  const eventScheduler = require("./services/events/scheduler");
+  eventScheduler.initialize();
+
   // Purge any existing non-Pakistan/worldwide external jobs to keep the feed clean
   const Job = require("./models/Job");
   const JobEmbedding = require("./models/JobEmbedding");
