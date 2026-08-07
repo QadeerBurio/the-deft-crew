@@ -102,7 +102,22 @@ class JobIngestionService {
             });
             totalUpdated++;
           } else {
-            const applicationDeadline = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+            let applicationDeadline = jobData.applicationDeadline ? new Date(jobData.applicationDeadline) : null;
+            if (!applicationDeadline || isNaN(applicationDeadline.getTime())) {
+              // Try parsing deadline from description text
+              const text = (jobData.description || '') + ' ' + (jobData.title || '');
+              const dateMatch = text.match(/(?:deadline|last\s*date|apply\s*before|closing\s*date)[:\s]+([0-9]{1,2}[-/\s]+[A-Za-z0-9]+[-/\s]+[0-9]{2,4})/i);
+              if (dateMatch && dateMatch[1]) {
+                const parsed = new Date(dateMatch[1]);
+                if (!isNaN(parsed.getTime())) {
+                  applicationDeadline = parsed;
+                }
+              }
+            }
+            if (!applicationDeadline || isNaN(applicationDeadline.getTime())) {
+              applicationDeadline = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+            }
+
             bulkOps.push({
               insertOne: {
                 document: {
@@ -147,8 +162,14 @@ class JobIngestionService {
     try {
       const now = new Date();
       const result = await Job.updateMany(
-        { active: true, applicationDeadline: { $lt: now } },
-        { $set: { active: false } }
+        {
+          active: true,
+          $or: [
+            { applicationDeadline: { $lt: now } },
+            { batchExpiresAt: { $lt: now } }
+          ]
+        },
+        { $set: { active: false, updatedAt: now } }
       );
       if (result.modifiedCount > 0) {
         console.log(`⏰ [Expired Jobs Cleanup] Deactivated ${result.modifiedCount} expired job/internship listings.`);

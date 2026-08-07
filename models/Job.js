@@ -130,11 +130,21 @@ const JobSchema = new mongoose.Schema({
         type: String,
         default: ""
     },
-    // --- JOB INGESTION PIPELINE FIELDS ---
+    // --- JOB INGESTION PIPELINE & IMPORT METADATA FIELDS ---
     source: {
         type: String,
-        enum: ['manual', 'jSearch', 'remotive', 'rozee', 'mustakbil', 'adzuna', 'lever', 'greenhouse', 'workable'],
         default: 'manual'
+    },
+    sourceFile: {
+        type: String,
+        default: ''
+    },
+    importBatch: {
+        type: String,
+        default: ''
+    },
+    batchExpiresAt: {
+        type: Date
     },
     externalId: {
         type: String,
@@ -166,7 +176,8 @@ const JobSchema = new mongoose.Schema({
 JobSchema.index({ active: 1, type: 1, createdAt: -1 });          // Main feed
 JobSchema.index({ active: 1, category: 1, locationType: 1 });    // Category filters
 JobSchema.index({ active: 1, featured: -1, urgent: -1 });        // Featured/urgent jobs
-JobSchema.index({ active: 1, applicationDeadline: 1 });          // Deadline queries
+JobSchema.index({ active: 1, applicationDeadline: 1, type: 1 }); // Deadline queries with type
+JobSchema.index({ companyName: 1, title: 1, location: 1 });      // Exact matching for deduplication
 JobSchema.index({ postedBy: 1, active: 1 });                     // Employer dashboard
 JobSchema.index({ skills: 1 });                                  // Skill matching
 JobSchema.index({ source: 1, externalId: 1 }, { sparse: true }); // Deduplication

@@ -289,11 +289,14 @@ router.get("/public/all", async (req, res) => {
 // Get single job details
 router.get("/public/job/:id", async (req, res) => {
     try {
-        const job = await Job.findOne({ _id: req.params.id, active: true });
+        const job = await Job.findById(req.params.id);
         if (!job) return res.status(404).json({ message: "Job not found" });
         
+        const now = new Date();
+        const isExpired = !job.active || (job.applicationDeadline && new Date(job.applicationDeadline) < now);
+
         await Job.findByIdAndUpdate(req.params.id, { $inc: { views: 1 } });
-        res.json(job);
+        res.json({ ...job.toObject(), isExpired });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -1283,21 +1286,24 @@ router.get('/bookmarks', authMiddleware, async (req, res) => {
         const user = await User.findById(req.userId)
             .populate({
                 path: 'savedJobs.jobId',
-                match: { active: true },  // Only return active jobs
-                select: 'title companyName location locationType type salary experienceLevel category featured urgent applicationDeadline createdAt'
+                select: 'title companyName location locationType type salary experienceLevel category featured urgent applicationDeadline active createdAt'
             })
             .select('savedJobs');
 
         if (!user) return res.status(404).json({ message: 'User not found' });
 
-        // Filter out any nulls (jobs that were deleted or deactivated)
+        const now = new Date();
         const bookmarks = user.savedJobs
             .filter(b => b.jobId !== null)
-            .map(b => ({
-                job: b.jobId,
-                savedAt: b.savedAt,
-                tag: b.tag || ''
-            }));
+            .map(b => {
+                const jobObj = b.jobId.toObject ? b.jobId.toObject() : b.jobId;
+                const isExpired = !jobObj.active || (jobObj.applicationDeadline && new Date(jobObj.applicationDeadline) < now);
+                return {
+                    job: { ...jobObj, isExpired },
+                    savedAt: b.savedAt,
+                    tag: b.tag || ''
+                };
+            });
 
         res.json({ success: true, bookmarks, total: bookmarks.length });
     } catch (err) {
