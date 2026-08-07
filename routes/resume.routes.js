@@ -30,14 +30,29 @@ const rejectGuest = (req, res, next) => {
   next();
 };
 
-// Check resume limit
+// Check lifetime resume creation limit (Maximum 2 lifetime resume creations per user)
+const MAX_LIFETIME_RESUME_CREATIONS = 2;
+
 const checkResumeLimit = async (req, res, next) => {
   try {
-    const count = await Resume.countDocuments({ user: req.user._id });
-    if (count >= 10) {
-      return res.status(400).json({
+    const userDoc = await User.findById(req.user._id);
+    let creationCount = userDoc ? userDoc.resumeCreationCount : 0;
+
+    // Auto-migrate existing users who haven't had resumeCreationCount initialized
+    if (userDoc && (userDoc.resumeCreationCount === undefined || userDoc.resumeCreationCount === null)) {
+      const existingCount = await Resume.countDocuments({ user: req.user._id });
+      creationCount = existingCount;
+      await User.findByIdAndUpdate(req.user._id, { resumeCreationCount: existingCount });
+    }
+
+    if (creationCount >= MAX_LIFETIME_RESUME_CREATIONS) {
+      return res.status(403).json({
         success: false,
-        error: 'Maximum 10 resumes allowed per user'
+        code: 'RESUME_CREATION_LIMIT_REACHED',
+        error: 'You have used all 2 resume creations available for your account. Deleting a resume will not restore your creation limit.',
+        message: 'You have used all 2 resume creations available for your account. Deleting a resume will not restore your creation limit.',
+        creationsUsed: creationCount,
+        maxCreations: MAX_LIFETIME_RESUME_CREATIONS
       });
     }
     next();
@@ -58,10 +73,12 @@ router.post('/', auth, rejectGuest, checkResumeLimit, async (req, res) => {
 
     if (req.body.personalInfo) {
       cleanData.personalInfo = {
-        firstName: req.body.personalInfo.firstName || '',
-        lastName: req.body.personalInfo.lastName || '',
-        email: req.body.personalInfo.email || '',
-        phone: req.body.personalInfo.phone || '',
+        firstName: req.body.personalInfo.firstName || req.user?.name?.split(' ')[0] || '',
+        lastName: req.body.personalInfo.lastName || req.user?.name?.split(' ')[1] || '',
+        title: req.body.personalInfo.title || req.body.professionalSummary?.title || req.user?.headline || '',
+        email: req.body.personalInfo.email || req.user?.email || '',
+        phone: req.body.personalInfo.phone || req.user?.phone || '',
+        location: req.body.personalInfo.location || req.user?.location || '',
         address: req.body.personalInfo.address || '',
         city: req.body.personalInfo.city || '',
         state: req.body.personalInfo.state || '',
@@ -72,7 +89,14 @@ router.post('/', auth, rejectGuest, checkResumeLimit, async (req, res) => {
         portfolio: req.body.personalInfo.portfolio || ''
       };
     } else {
-      cleanData.personalInfo = {};
+      cleanData.personalInfo = {
+        firstName: req.user?.name?.split(' ')[0] || '',
+        lastName: req.user?.name?.split(' ')[1] || '',
+        title: req.user?.headline || '',
+        email: req.user?.email || '',
+        phone: req.user?.phone || '',
+        location: req.user?.location || ''
+      };
     }
 
     if (req.body.professionalSummary) {
@@ -142,6 +166,9 @@ router.post('/', auth, rejectGuest, checkResumeLimit, async (req, res) => {
     const resume = new Resume(cleanData);
     await resume.save();
 
+    // Increment lifetime creation count for user
+    await User.findByIdAndUpdate(req.user._id, { $inc: { resumeCreationCount: 1 } });
+
     console.log('✅ Resume created successfully:', resume._id);
 
     // 🧠 Fire-and-forget: AI career profile enrichment (does not block response)
@@ -167,9 +194,18 @@ router.get('/', auth, async (req, res) => {
     const resumes = await Resume.find({ user: req.user._id })
       .sort({ updatedAt: -1 });
 
+    const userDoc = await User.findById(req.user._id).select('resumeCreationCount');
+    let creationCount = userDoc ? userDoc.resumeCreationCount : 0;
+    if (userDoc && (userDoc.resumeCreationCount === undefined || userDoc.resumeCreationCount === null)) {
+      creationCount = resumes.length;
+      await User.findByIdAndUpdate(req.user._id, { resumeCreationCount: creationCount });
+    }
+
     res.json({
       success: true,
-      data: resumes
+      data: resumes,
+      creationsUsed: creationCount,
+      maxCreations: 2
     });
   } catch (error) {
     console.error('Get resumes error:', error);
@@ -267,28 +303,8 @@ router.post('/suggest-skills', auth, rejectGuest, async (req, res) => {
 // ========== UPLOAD RESUME TO CLOUDINARY ==========
 router.post('/upload', 
   auth, 
-  async (req, res, next) => {
-    try {
-      console.log(`[${new Date().toISOString()}] 🔑 Authentication successful for user ID: ${req.user._id}`);
-      if (req.isGuest || req.user?.isGuest || req.user?.role === 'guest') {
-        return res.status(403).json({
-          success: false,
-          error: 'Guest users cannot perform this action. Please sign up or log in.'
-        });
-      }
-      const count = await Resume.countDocuments({ user: req.user._id });
-      if (count >= 10) {
-        return res.status(400).json({
-          success: false,
-          error: 'Maximum 10 resumes allowed per user'
-        });
-      }
-      next();
-    } catch (err) {
-      console.error('Limit check error:', err);
-      res.status(500).json({ success: false, error: err.message });
-    }
-  },
+  rejectGuest,
+  checkResumeLimit,
   (req, res, next) => {
     console.log(`[${new Date().toISOString()}] 📥 File upload request received via Multer`);
     uploadResume.single('resume')(req, res, (err) => {
@@ -355,8 +371,10 @@ router.post('/upload',
       personalInfo: {
         firstName: parsedData.personalInfo?.firstName || '',
         lastName: parsedData.personalInfo?.lastName || '',
+        title: parsedData.personalInfo?.title || parsedData.professionalSummary?.title || optimizedData.targetRole || '',
         email: parsedData.personalInfo?.email || '',
         phone: parsedData.personalInfo?.phone || '',
+        location: parsedData.personalInfo?.location || (parsedData.personalInfo?.city ? `${parsedData.personalInfo.city}${parsedData.personalInfo.country ? ', ' + parsedData.personalInfo.country : ''}` : ''),
         address: parsedData.personalInfo?.address || '',
         city: parsedData.personalInfo?.city || '',
         state: parsedData.personalInfo?.state || '',
@@ -453,6 +471,9 @@ router.post('/upload',
     const dbStart = Date.now();
     const resume = new Resume(resumeData);
     await resume.save();
+
+    // Increment lifetime creation count for user
+    await User.findByIdAndUpdate(req.user._id, { $inc: { resumeCreationCount: 1 } });
     console.log(`[${new Date().toISOString()}] 💾 Database updated: Resume saved successfully in ${Date.now() - dbStart}ms (ID: ${resume._id})`);
 
     // Calculate AI parsing confidence score (0-100)
@@ -597,10 +618,38 @@ router.put('/:id', auth, rejectGuest, async (req, res) => {
     }
 
     if (req.body.personalInfo) {
-      resume.personalInfo = {
-        ...resume.personalInfo,
-        ...req.body.personalInfo
-      };
+      const existingPI = resume.personalInfo ? (resume.personalInfo.toObject ? resume.personalInfo.toObject() : resume.personalInfo) : {};
+      const pi = { ...existingPI, ...req.body.personalInfo };
+      
+      // Auto-parse city and country if location string provided
+      if (pi.location && typeof pi.location === 'string') {
+        const parts = pi.location.split(',').map(s => s.trim());
+        if (parts.length > 0 && parts[0] && !pi.city) {
+          pi.city = parts[0];
+        }
+        if (parts.length > 1 && parts[1] && !pi.country) {
+          pi.country = parts[1];
+        }
+      }
+
+      resume.personalInfo = pi;
+      resume.markModified('personalInfo');
+
+      if (pi.title) {
+        resume.professionalSummary = {
+          ...resume.professionalSummary,
+          title: pi.title
+        };
+        resume.markModified('professionalSummary');
+      }
+
+      if (pi.location) {
+        resume.targetJob = {
+          ...resume.targetJob,
+          location: pi.location
+        };
+        resume.markModified('targetJob');
+      }
     }
 
     if (req.body.professionalSummary) {
@@ -608,6 +657,7 @@ router.put('/:id', auth, rejectGuest, async (req, res) => {
         ...resume.professionalSummary,
         ...req.body.professionalSummary
       };
+      resume.markModified('professionalSummary');
     }
 
     if (req.body.targetJob) {
@@ -615,6 +665,7 @@ router.put('/:id', auth, rejectGuest, async (req, res) => {
         ...resume.targetJob,
         ...req.body.targetJob
       };
+      resume.markModified('targetJob');
     }
 
     if (req.body.targetJobs !== undefined) {
@@ -1106,6 +1157,9 @@ router.post('/:id/duplicate', auth, rejectGuest, checkResumeLimit, async (req, r
 
     const duplicate = new Resume(dupData);
     await duplicate.save();
+
+    // Increment lifetime creation count for user
+    await User.findByIdAndUpdate(req.user._id, { $inc: { resumeCreationCount: 1 } });
 
     // Trigger AI career profile enrichment for the copy too
     setImmediate(() => triggerCareerProfileEnrichment(

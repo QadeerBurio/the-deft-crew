@@ -100,12 +100,8 @@ function generateResumePDF(resume, res) {
   const contactParts = [];
   if (personalInfo?.email) contactParts.push(personalInfo.email);
   if (personalInfo?.phone) contactParts.push(personalInfo.phone);
-  if (personalInfo?.location) {
-    contactParts.push(personalInfo.location);
-  } else if (personalInfo?.city || personalInfo?.state) {
-    const loc = [personalInfo.city, personalInfo.state].filter(Boolean).join(', ');
-    if (loc) contactParts.push(loc);
-  }
+  const loc = personalInfo?.location || targetJob?.location || [personalInfo?.city, personalInfo?.state, personalInfo?.country].filter(Boolean).join(', ') || (Array.isArray(workExperience) && workExperience[0] ? workExperience[0].location : '');
+  if (loc) contactParts.push(loc);
   if (personalInfo?.linkedin) {
     let cleanLi = personalInfo.linkedin.replace(/^(https?:\/\/)?(www\.)?linkedin\.com\/in\//, 'li/');
     contactParts.push(cleanLi);

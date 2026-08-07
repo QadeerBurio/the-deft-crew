@@ -10,8 +10,10 @@ const resumeSchema = new mongoose.Schema({
   personalInfo: {
     firstName: { type: String, default: '' },
     lastName: { type: String, default: '' },
+    title: { type: String, default: '' },
     email: { type: String, default: '' },
     phone: { type: String, default: '' },
+    location: { type: String, default: '' },
     address: { type: String, default: '' },
     city: { type: String, default: '' },
     state: { type: String, default: '' },
@@ -827,6 +829,30 @@ resumeSchema.methods.trackDownload = function () {
     { $inc: { downloadCount: 1 } }
   );
 };
+
+// Pre-save hook to strictly enforce maximum 2 lifetime resume creations per user (race-condition protection)
+resumeSchema.pre('save', async function (next) {
+  if (this.isNew && this.user) {
+    const User = mongoose.model('User');
+    const userDoc = await User.findById(this.user);
+    let creationCount = userDoc ? userDoc.resumeCreationCount : 0;
+    
+    // Self-healing auto-migration for existing users if field is missing
+    if (userDoc && (userDoc.resumeCreationCount === undefined || userDoc.resumeCreationCount === null)) {
+      const existingCount = await this.constructor.countDocuments({ user: this.user });
+      creationCount = existingCount;
+      await User.findByIdAndUpdate(this.user, { resumeCreationCount: existingCount });
+    }
+
+    if (creationCount >= 2) {
+      const err = new Error('You have used all 2 resume creations available for your account. Deleting a resume will not restore your creation limit.');
+      err.code = 'RESUME_CREATION_LIMIT_REACHED';
+      err.status = 403;
+      return next(err);
+    }
+  }
+  next();
+});
 
 const Resume = mongoose.model('Resume', resumeSchema);
 module.exports = Resume;

@@ -180,6 +180,13 @@ const userSchema = new mongoose.Schema(
       targetRole: { type: String, default: "" },
       lastSyncedAt: { type: Date },
     },
+
+    // --- LIFETIME RESUME CREATION TRACKER ---
+    resumeCreationCount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
   },
   {
     timestamps: true,

@@ -15,6 +15,7 @@
 
 const OpenAI = require('openai');
 const Resume = require('../models/Resume');
+const User   = require('../models/User');
 const Job    = require('../models/Job');
 
 let openai;
@@ -199,6 +200,9 @@ Return ONLY a valid JSON object matching this structure (do not wrap in markdown
   // 5. Save as a new Resume document
   const newResume = new Resume(tailoredResumeData);
   await newResume.save();
+
+  // Increment user lifetime resume creation count
+  await User.findByIdAndUpdate(userId, { $inc: { resumeCreationCount: 1 } });
 
   console.log(`✅ [ResumeTailor] Saved new tailored resume version: ${newResume._id} with tag: "${newResume.versionTag}"`);
   return newResume;
