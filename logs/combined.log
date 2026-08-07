@@ -23766,3 +23766,460 @@
 {"level":"info","message":"Sync running for adapter: [resumes]","timestamp":"2026-08-06 19:30:39:3039"}
 {"level":"info","message":"Fetched 0 items from backend collection \"resumes\"","timestamp":"2026-08-06 19:30:39:3039"}
 {"level":"info","message":"Database synchronization completed successfully. Synced: 66, Failed: 0. Duration: 6519ms","timestamp":"2026-08-06 19:30:39:3039"}
+{"level":"info","message":"✅ Chat Service connected successfully to dedicated AI database.","timestamp":"2026-08-06 21:16:00:160"}
+{"level":"info","message":"Initializing Automatic Knowledge Synchronization Scheduler...","timestamp":"2026-08-06 21:16:00:160"}
+{"level":"info","message":"Scheduling database sync sweeps every 30 minutes (1800000ms).","timestamp":"2026-08-06 21:16:00:160"}
+{"level":"info","message":"Executing initial startup database synchronization check...","timestamp":"2026-08-06 21:16:05:165"}
+{"level":"info","message":"Starting incremental database synchronization engine...","timestamp":"2026-08-06 21:16:05:165"}
+{"level":"info","message":"Using shared persistent connection for backend sync.","timestamp":"2026-08-06 21:16:05:165"}
+{"level":"info","message":"Incremental sync reference date: 2026-08-06T15:53:42.300Z","timestamp":"2026-08-06 21:16:05:165"}
+{"level":"info","message":"Sync running for adapter: [scholarships]","timestamp":"2026-08-06 21:16:05:165"}
+{"level":"info","message":"Fetched 0 items from backend collection \"exchanges\"","timestamp":"2026-08-06 21:16:05:165"}
+{"level":"info","message":"Sync running for adapter: [jobs]","timestamp":"2026-08-06 21:16:05:165"}
+{"level":"info","message":"Fetched 0 items from backend collection \"jobs\"","timestamp":"2026-08-06 21:16:05:165"}
+{"level":"info","message":"Sync running for adapter: [offers]","timestamp":"2026-08-06 21:16:05:165"}
+{"level":"info","message":"Fetched 0 items from backend collection \"offers\"","timestamp":"2026-08-06 21:16:05:165"}
+{"level":"info","message":"Sync running for adapter: [events]","timestamp":"2026-08-06 21:16:05:165"}
+{"level":"info","message":"Fetched 5 items from backend collection \"events\"","timestamp":"2026-08-06 21:16:05:165"}
+{"level":"info","message":"Started indexing document ID: 6a74b346164b4e0e6cd23599 - \"Private vs. Government Schools: Which Dominated Punjab Matric Board Toppers in 2026?\"","timestamp":"2026-08-06 21:16:06:166"}
+{"level":"debug","message":"Chunked text (length 858) into 3 sentence-bounded chunks.","timestamp":"2026-08-06 21:16:06:166"}
+{"level":"info","message":"Embedding batch miss. Querying OpenAI for 2 items...","timestamp":"2026-08-06 21:16:06:166"}
+{"level":"info","message":"Generated batch of 2 embeddings in 2740ms","timestamp":"2026-08-06 21:16:08:168"}
+{"level":"info","message":"Persisted 3 vector chunks to MongoDB store for docId: 6a74b346164b4e0e6cd23599","timestamp":"2026-08-06 21:16:09:169"}
+{"level":"info","message":"Completed reindexing document ID: 6a74b346164b4e0e6cd23599. Created 3 chunks.","timestamp":"2026-08-06 21:16:09:169"}
+{"level":"info","message":"Started indexing document ID: 6a74b349164b4e0e6cd2359f - \"Punjab Announces Rs100,000 Cash Prize, Laptops for Matric Position Holders\"","timestamp":"2026-08-06 21:16:09:169"}
+{"level":"debug","message":"Chunked text (length 880) into 2 sentence-bounded chunks.","timestamp":"2026-08-06 21:16:09:169"}
+{"level":"info","message":"Embedding batch miss. Querying OpenAI for 2 items...","timestamp":"2026-08-06 21:16:09:169"}
+{"level":"info","message":"Generated batch of 2 embeddings in 414ms","timestamp":"2026-08-06 21:16:09:169"}
+{"level":"info","message":"Persisted 2 vector chunks to MongoDB store for docId: 6a74b349164b4e0e6cd2359f","timestamp":"2026-08-06 21:16:10:1610"}
+{"level":"info","message":"Completed reindexing document ID: 6a74b349164b4e0e6cd2359f. Created 2 chunks.","timestamp":"2026-08-06 21:16:10:1610"}
+{"level":"info","message":"Started indexing document ID: 6a74b34a164b4e0e6cd235a4 - \"Islamabad’s Largest IT Park Enters Final Phase of Construction\"","timestamp":"2026-08-06 21:16:10:1610"}
+{"level":"debug","message":"Chunked text (length 857) into 2 sentence-bounded chunks.","timestamp":"2026-08-06 21:16:10:1610"}
+{"level":"info","message":"Embedding batch miss. Querying OpenAI for 2 items...","timestamp":"2026-08-06 21:16:10:1610"}
+{"level":"info","message":"Generated batch of 2 embeddings in 445ms","timestamp":"2026-08-06 21:16:10:1610"}
+{"level":"info","message":"Persisted 2 vector chunks to MongoDB store for docId: 6a74b34a164b4e0e6cd235a4","timestamp":"2026-08-06 21:16:11:1611"}
+{"level":"info","message":"Completed reindexing document ID: 6a74b34a164b4e0e6cd235a4. Created 2 chunks.","timestamp":"2026-08-06 21:16:11:1611"}
+{"level":"info","message":"Started indexing document ID: 6a74b34b164b4e0e6cd235a9 - \"NEPRA Eases Solar Installations by Scrapping Approval for Up to 25kW\"","timestamp":"2026-08-06 21:16:11:1611"}
+{"level":"debug","message":"Chunked text (length 825) into 2 sentence-bounded chunks.","timestamp":"2026-08-06 21:16:11:1611"}
+{"level":"info","message":"Embedding batch miss. Querying OpenAI for 2 items...","timestamp":"2026-08-06 21:16:11:1611"}
+{"level":"info","message":"Generated batch of 2 embeddings in 1317ms","timestamp":"2026-08-06 21:16:12:1612"}
+{"level":"info","message":"Persisted 2 vector chunks to MongoDB store for docId: 6a74b34b164b4e0e6cd235a9","timestamp":"2026-08-06 21:16:12:1612"}
+{"level":"info","message":"Completed reindexing document ID: 6a74b34b164b4e0e6cd235a9. Created 2 chunks.","timestamp":"2026-08-06 21:16:12:1612"}
+{"level":"info","message":"Started indexing document ID: 6a74b34c164b4e0e6cd235ae - \"PTA Working With NADRA to Launch Home-Based SIM Issuance\"","timestamp":"2026-08-06 21:16:12:1612"}
+{"level":"debug","message":"Chunked text (length 792) into 2 sentence-bounded chunks.","timestamp":"2026-08-06 21:16:12:1612"}
+{"level":"info","message":"Embedding batch miss. Querying OpenAI for 2 items...","timestamp":"2026-08-06 21:16:13:1613"}
+{"level":"info","message":"Generated batch of 2 embeddings in 468ms","timestamp":"2026-08-06 21:16:13:1613"}
+{"level":"info","message":"Persisted 2 vector chunks to MongoDB store for docId: 6a74b34c164b4e0e6cd235ae","timestamp":"2026-08-06 21:16:13:1613"}
+{"level":"info","message":"Completed reindexing document ID: 6a74b34c164b4e0e6cd235ae. Created 2 chunks.","timestamp":"2026-08-06 21:16:13:1613"}
+{"level":"info","message":"Sync running for adapter: [universities]","timestamp":"2026-08-06 21:16:13:1613"}
+{"level":"info","message":"Fetched 45 items from backend collection \"universities\"","timestamp":"2026-08-06 21:16:13:1613"}
+{"level":"info","message":"Sync running for adapter: [packages]","timestamp":"2026-08-06 21:16:17:1617"}
+{"level":"info","message":"Fetched 3 items from backend collection \"packages\"","timestamp":"2026-08-06 21:16:17:1617"}
+{"level":"info","message":"Sync running for adapter: [templates]","timestamp":"2026-08-06 21:16:17:1617"}
+{"level":"info","message":"Fetched 0 items from backend collection \"templates\"","timestamp":"2026-08-06 21:16:17:1617"}
+{"level":"info","message":"Sync running for adapter: [sliders]","timestamp":"2026-08-06 21:16:17:1617"}
+{"level":"info","message":"Fetched 18 items from backend collection \"sliders\"","timestamp":"2026-08-06 21:16:17:1617"}
+{"level":"info","message":"Sync running for adapter: [notes]","timestamp":"2026-08-06 21:16:19:1619"}
+{"level":"info","message":"Fetched 0 items from backend collection \"notes\"","timestamp":"2026-08-06 21:16:19:1619"}
+{"level":"info","message":"Sync running for adapter: [books]","timestamp":"2026-08-06 21:16:19:1619"}
+{"level":"info","message":"Fetched 0 items from backend collection \"books\"","timestamp":"2026-08-06 21:16:19:1619"}
+{"level":"info","message":"Sync running for adapter: [lectures]","timestamp":"2026-08-06 21:16:19:1619"}
+{"level":"info","message":"Fetched 0 items from backend collection \"lectures\"","timestamp":"2026-08-06 21:16:19:1619"}
+{"level":"info","message":"Sync running for adapter: [pastPapers]","timestamp":"2026-08-06 21:16:19:1619"}
+{"level":"info","message":"Fetched 0 items from backend collection \"pastpapers\"","timestamp":"2026-08-06 21:16:19:1619"}
+{"level":"info","message":"Sync running for adapter: [resumes]","timestamp":"2026-08-06 21:16:19:1619"}
+{"level":"info","message":"Fetched 1 items from backend collection \"resumes\"","timestamp":"2026-08-06 21:16:19:1619"}
+{"level":"info","message":"Database synchronization completed successfully. Synced: 72, Failed: 0. Duration: 14633ms","timestamp":"2026-08-06 21:16:20:1620"}
+{"level":"info","message":"Timer triggered. Checking for automatic database sync run...","timestamp":"2026-08-06 21:46:00:460"}
+{"level":"info","message":"Starting incremental database synchronization engine...","timestamp":"2026-08-06 21:46:00:460"}
+{"level":"info","message":"Using shared persistent connection for backend sync.","timestamp":"2026-08-06 21:46:00:460"}
+{"level":"info","message":"Incremental sync reference date: 2026-08-06T16:17:10.508Z","timestamp":"2026-08-06 21:46:00:460"}
+{"level":"info","message":"Sync running for adapter: [scholarships]","timestamp":"2026-08-06 21:46:00:460"}
+{"level":"info","message":"Fetched 0 items from backend collection \"exchanges\"","timestamp":"2026-08-06 21:46:00:460"}
+{"level":"info","message":"Sync running for adapter: [jobs]","timestamp":"2026-08-06 21:46:00:460"}
+{"level":"info","message":"Fetched 0 items from backend collection \"jobs\"","timestamp":"2026-08-06 21:46:01:461"}
+{"level":"info","message":"Sync running for adapter: [offers]","timestamp":"2026-08-06 21:46:01:461"}
+{"level":"info","message":"Fetched 0 items from backend collection \"offers\"","timestamp":"2026-08-06 21:46:01:461"}
+{"level":"info","message":"Sync running for adapter: [events]","timestamp":"2026-08-06 21:46:01:461"}
+{"level":"info","message":"Fetched 0 items from backend collection \"events\"","timestamp":"2026-08-06 21:46:01:461"}
+{"level":"info","message":"Sync running for adapter: [universities]","timestamp":"2026-08-06 21:46:01:461"}
+{"level":"info","message":"Fetched 45 items from backend collection \"universities\"","timestamp":"2026-08-06 21:46:01:461"}
+{"level":"info","message":"Sync running for adapter: [packages]","timestamp":"2026-08-06 21:46:05:465"}
+{"level":"info","message":"Fetched 3 items from backend collection \"packages\"","timestamp":"2026-08-06 21:46:05:465"}
+{"level":"info","message":"Sync running for adapter: [templates]","timestamp":"2026-08-06 21:46:05:465"}
+{"level":"info","message":"Fetched 0 items from backend collection \"templates\"","timestamp":"2026-08-06 21:46:05:465"}
+{"level":"info","message":"Sync running for adapter: [sliders]","timestamp":"2026-08-06 21:46:05:465"}
+{"level":"info","message":"Fetched 18 items from backend collection \"sliders\"","timestamp":"2026-08-06 21:46:05:465"}
+{"level":"info","message":"Sync running for adapter: [notes]","timestamp":"2026-08-06 21:46:07:467"}
+{"level":"info","message":"Fetched 0 items from backend collection \"notes\"","timestamp":"2026-08-06 21:46:07:467"}
+{"level":"info","message":"Sync running for adapter: [books]","timestamp":"2026-08-06 21:46:07:467"}
+{"level":"info","message":"Fetched 0 items from backend collection \"books\"","timestamp":"2026-08-06 21:46:07:467"}
+{"level":"info","message":"Sync running for adapter: [lectures]","timestamp":"2026-08-06 21:46:07:467"}
+{"level":"info","message":"Fetched 0 items from backend collection \"lectures\"","timestamp":"2026-08-06 21:46:07:467"}
+{"level":"info","message":"Sync running for adapter: [pastPapers]","timestamp":"2026-08-06 21:46:07:467"}
+{"level":"info","message":"Fetched 0 items from backend collection \"pastpapers\"","timestamp":"2026-08-06 21:46:07:467"}
+{"level":"info","message":"Sync running for adapter: [resumes]","timestamp":"2026-08-06 21:46:07:467"}
+{"level":"info","message":"Fetched 0 items from backend collection \"resumes\"","timestamp":"2026-08-06 21:46:07:467"}
+{"level":"info","message":"Database synchronization completed successfully. Synced: 66, Failed: 0. Duration: 7232ms","timestamp":"2026-08-06 21:46:07:467"}
+{"level":"info","message":"✅ Chat Service connected successfully to dedicated AI database.","timestamp":"2026-08-06 22:25:49:2549"}
+{"level":"info","message":"Initializing Automatic Knowledge Synchronization Scheduler...","timestamp":"2026-08-06 22:25:49:2549"}
+{"level":"info","message":"Scheduling database sync sweeps every 30 minutes (1800000ms).","timestamp":"2026-08-06 22:25:49:2549"}
+{"level":"info","message":"Executing initial startup database synchronization check...","timestamp":"2026-08-06 22:25:54:2554"}
+{"level":"info","message":"Starting incremental database synchronization engine...","timestamp":"2026-08-06 22:25:54:2554"}
+{"level":"info","message":"Using shared persistent connection for backend sync.","timestamp":"2026-08-06 22:25:54:2554"}
+{"level":"info","message":"Incremental sync reference date: 2026-08-06T17:17:10.504Z","timestamp":"2026-08-06 22:25:54:2554"}
+{"level":"info","message":"Sync running for adapter: [scholarships]","timestamp":"2026-08-06 22:25:54:2554"}
+{"level":"info","message":"Fetched 0 items from backend collection \"exchanges\"","timestamp":"2026-08-06 22:25:54:2554"}
+{"level":"info","message":"Sync running for adapter: [jobs]","timestamp":"2026-08-06 22:25:54:2554"}
+{"level":"info","message":"Fetched 0 items from backend collection \"jobs\"","timestamp":"2026-08-06 22:25:54:2554"}
+{"level":"info","message":"Sync running for adapter: [offers]","timestamp":"2026-08-06 22:25:54:2554"}
+{"level":"info","message":"Fetched 0 items from backend collection \"offers\"","timestamp":"2026-08-06 22:25:54:2554"}
+{"level":"info","message":"Sync running for adapter: [events]","timestamp":"2026-08-06 22:25:54:2554"}
+{"level":"info","message":"Fetched 0 items from backend collection \"events\"","timestamp":"2026-08-06 22:25:54:2554"}
+{"level":"info","message":"Sync running for adapter: [universities]","timestamp":"2026-08-06 22:25:54:2554"}
+{"level":"info","message":"Fetched 45 items from backend collection \"universities\"","timestamp":"2026-08-06 22:25:54:2554"}
+{"level":"info","message":"Sync running for adapter: [packages]","timestamp":"2026-08-06 22:25:58:2558"}
+{"level":"info","message":"Fetched 3 items from backend collection \"packages\"","timestamp":"2026-08-06 22:25:58:2558"}
+{"level":"info","message":"Sync running for adapter: [templates]","timestamp":"2026-08-06 22:25:58:2558"}
+{"level":"info","message":"Fetched 0 items from backend collection \"templates\"","timestamp":"2026-08-06 22:25:58:2558"}
+{"level":"info","message":"Sync running for adapter: [sliders]","timestamp":"2026-08-06 22:25:58:2558"}
+{"level":"info","message":"Fetched 18 items from backend collection \"sliders\"","timestamp":"2026-08-06 22:25:58:2558"}
+{"level":"info","message":"Sync running for adapter: [notes]","timestamp":"2026-08-06 22:26:00:260"}
+{"level":"info","message":"Fetched 0 items from backend collection \"notes\"","timestamp":"2026-08-06 22:26:00:260"}
+{"level":"info","message":"Sync running for adapter: [books]","timestamp":"2026-08-06 22:26:00:260"}
+{"level":"info","message":"Fetched 0 items from backend collection \"books\"","timestamp":"2026-08-06 22:26:00:260"}
+{"level":"info","message":"Sync running for adapter: [lectures]","timestamp":"2026-08-06 22:26:00:260"}
+{"level":"info","message":"Fetched 0 items from backend collection \"lectures\"","timestamp":"2026-08-06 22:26:00:260"}
+{"level":"info","message":"Sync running for adapter: [pastPapers]","timestamp":"2026-08-06 22:26:00:260"}
+{"level":"info","message":"Fetched 0 items from backend collection \"pastpapers\"","timestamp":"2026-08-06 22:26:00:260"}
+{"level":"info","message":"Sync running for adapter: [resumes]","timestamp":"2026-08-06 22:26:00:260"}
+{"level":"info","message":"Fetched 0 items from backend collection \"resumes\"","timestamp":"2026-08-06 22:26:00:260"}
+{"level":"info","message":"Database synchronization completed successfully. Synced: 66, Failed: 0. Duration: 6424ms","timestamp":"2026-08-06 22:26:00:260"}
+{"level":"info","message":"Timer triggered. Checking for automatic database sync run...","timestamp":"2026-08-06 22:55:49:5549"}
+{"level":"info","message":"Starting incremental database synchronization engine...","timestamp":"2026-08-06 22:55:49:5549"}
+{"level":"info","message":"Using shared persistent connection for backend sync.","timestamp":"2026-08-06 22:55:49:5549"}
+{"level":"info","message":"Incremental sync reference date: 2026-08-06T17:47:10.524Z","timestamp":"2026-08-06 22:55:49:5549"}
+{"level":"info","message":"Sync running for adapter: [scholarships]","timestamp":"2026-08-06 22:55:49:5549"}
+{"level":"info","message":"Fetched 0 items from backend collection \"exchanges\"","timestamp":"2026-08-06 22:55:49:5549"}
+{"level":"info","message":"Sync running for adapter: [jobs]","timestamp":"2026-08-06 22:55:49:5549"}
+{"level":"info","message":"Fetched 0 items from backend collection \"jobs\"","timestamp":"2026-08-06 22:55:49:5549"}
+{"level":"info","message":"Sync running for adapter: [offers]","timestamp":"2026-08-06 22:55:49:5549"}
+{"level":"info","message":"Fetched 0 items from backend collection \"offers\"","timestamp":"2026-08-06 22:55:49:5549"}
+{"level":"info","message":"Sync running for adapter: [events]","timestamp":"2026-08-06 22:55:49:5549"}
+{"level":"info","message":"Fetched 0 items from backend collection \"events\"","timestamp":"2026-08-06 22:55:49:5549"}
+{"level":"info","message":"Sync running for adapter: [universities]","timestamp":"2026-08-06 22:55:49:5549"}
+{"level":"info","message":"Fetched 45 items from backend collection \"universities\"","timestamp":"2026-08-06 22:55:50:5550"}
+{"level":"info","message":"Sync running for adapter: [packages]","timestamp":"2026-08-06 22:55:53:5553"}
+{"level":"info","message":"Fetched 3 items from backend collection \"packages\"","timestamp":"2026-08-06 22:55:53:5553"}
+{"level":"info","message":"Sync running for adapter: [templates]","timestamp":"2026-08-06 22:55:54:5554"}
+{"level":"info","message":"Fetched 0 items from backend collection \"templates\"","timestamp":"2026-08-06 22:55:54:5554"}
+{"level":"info","message":"Sync running for adapter: [sliders]","timestamp":"2026-08-06 22:55:54:5554"}
+{"level":"info","message":"Fetched 18 items from backend collection \"sliders\"","timestamp":"2026-08-06 22:55:54:5554"}
+{"level":"info","message":"Sync running for adapter: [notes]","timestamp":"2026-08-06 22:55:55:5555"}
+{"level":"info","message":"Fetched 0 items from backend collection \"notes\"","timestamp":"2026-08-06 22:55:55:5555"}
+{"level":"info","message":"Sync running for adapter: [books]","timestamp":"2026-08-06 22:55:55:5555"}
+{"level":"info","message":"Fetched 0 items from backend collection \"books\"","timestamp":"2026-08-06 22:55:55:5555"}
+{"level":"info","message":"Sync running for adapter: [lectures]","timestamp":"2026-08-06 22:55:55:5555"}
+{"level":"info","message":"Fetched 0 items from backend collection \"lectures\"","timestamp":"2026-08-06 22:55:55:5555"}
+{"level":"info","message":"Sync running for adapter: [pastPapers]","timestamp":"2026-08-06 22:55:55:5555"}
+{"level":"info","message":"Fetched 0 items from backend collection \"pastpapers\"","timestamp":"2026-08-06 22:55:55:5555"}
+{"level":"info","message":"Sync running for adapter: [resumes]","timestamp":"2026-08-06 22:55:55:5555"}
+{"level":"info","message":"Fetched 0 items from backend collection \"resumes\"","timestamp":"2026-08-06 22:55:56:5556"}
+{"level":"info","message":"Database synchronization completed successfully. Synced: 66, Failed: 0. Duration: 6577ms","timestamp":"2026-08-06 22:55:56:5556"}
+{"level":"info","message":"Timer triggered. Checking for automatic database sync run...","timestamp":"2026-08-06 23:25:49:2549"}
+{"level":"info","message":"Starting incremental database synchronization engine...","timestamp":"2026-08-06 23:25:49:2549"}
+{"level":"info","message":"Using shared persistent connection for backend sync.","timestamp":"2026-08-06 23:25:49:2549"}
+{"level":"info","message":"Incremental sync reference date: 2026-08-06T18:24:25.749Z","timestamp":"2026-08-06 23:25:49:2549"}
+{"level":"info","message":"Sync running for adapter: [scholarships]","timestamp":"2026-08-06 23:25:49:2549"}
+{"level":"info","message":"Fetched 0 items from backend collection \"exchanges\"","timestamp":"2026-08-06 23:25:49:2549"}
+{"level":"info","message":"Sync running for adapter: [jobs]","timestamp":"2026-08-06 23:25:49:2549"}
+{"level":"info","message":"Fetched 0 items from backend collection \"jobs\"","timestamp":"2026-08-06 23:25:49:2549"}
+{"level":"info","message":"Sync running for adapter: [offers]","timestamp":"2026-08-06 23:25:49:2549"}
+{"level":"info","message":"Fetched 0 items from backend collection \"offers\"","timestamp":"2026-08-06 23:25:49:2549"}
+{"level":"info","message":"Sync running for adapter: [events]","timestamp":"2026-08-06 23:25:49:2549"}
+{"level":"info","message":"Fetched 0 items from backend collection \"events\"","timestamp":"2026-08-06 23:25:49:2549"}
+{"level":"info","message":"Sync running for adapter: [universities]","timestamp":"2026-08-06 23:25:49:2549"}
+{"level":"info","message":"Fetched 45 items from backend collection \"universities\"","timestamp":"2026-08-06 23:25:49:2549"}
+{"level":"info","message":"Sync running for adapter: [packages]","timestamp":"2026-08-06 23:25:53:2553"}
+{"level":"info","message":"Fetched 3 items from backend collection \"packages\"","timestamp":"2026-08-06 23:25:53:2553"}
+{"level":"info","message":"Sync running for adapter: [templates]","timestamp":"2026-08-06 23:25:53:2553"}
+{"level":"info","message":"Fetched 0 items from backend collection \"templates\"","timestamp":"2026-08-06 23:25:53:2553"}
+{"level":"info","message":"Sync running for adapter: [sliders]","timestamp":"2026-08-06 23:25:53:2553"}
+{"level":"info","message":"Fetched 18 items from backend collection \"sliders\"","timestamp":"2026-08-06 23:25:53:2553"}
+{"level":"info","message":"Sync running for adapter: [notes]","timestamp":"2026-08-06 23:25:55:2555"}
+{"level":"info","message":"Fetched 0 items from backend collection \"notes\"","timestamp":"2026-08-06 23:25:55:2555"}
+{"level":"info","message":"Sync running for adapter: [books]","timestamp":"2026-08-06 23:25:55:2555"}
+{"level":"info","message":"Fetched 0 items from backend collection \"books\"","timestamp":"2026-08-06 23:25:55:2555"}
+{"level":"info","message":"Sync running for adapter: [lectures]","timestamp":"2026-08-06 23:25:55:2555"}
+{"level":"info","message":"Fetched 0 items from backend collection \"lectures\"","timestamp":"2026-08-06 23:25:55:2555"}
+{"level":"info","message":"Sync running for adapter: [pastPapers]","timestamp":"2026-08-06 23:25:55:2555"}
+{"level":"info","message":"Fetched 0 items from backend collection \"pastpapers\"","timestamp":"2026-08-06 23:25:55:2555"}
+{"level":"info","message":"Sync running for adapter: [resumes]","timestamp":"2026-08-06 23:25:55:2555"}
+{"level":"info","message":"Fetched 0 items from backend collection \"resumes\"","timestamp":"2026-08-06 23:25:55:2555"}
+{"level":"info","message":"Database synchronization completed successfully. Synced: 66, Failed: 0. Duration: 6486ms","timestamp":"2026-08-06 23:25:55:2555"}
+{"level":"info","message":"✅ Chat Service connected successfully to dedicated AI database.","timestamp":"2026-08-07 12:04:43:443"}
+{"level":"info","message":"Initializing Automatic Knowledge Synchronization Scheduler...","timestamp":"2026-08-07 12:04:43:443"}
+{"level":"info","message":"Scheduling database sync sweeps every 30 minutes (1800000ms).","timestamp":"2026-08-07 12:04:43:443"}
+{"level":"info","message":"Executing initial startup database synchronization check...","timestamp":"2026-08-07 12:04:48:448"}
+{"level":"info","message":"Starting incremental database synchronization engine...","timestamp":"2026-08-07 12:04:48:448"}
+{"level":"info","message":"Using shared persistent connection for backend sync.","timestamp":"2026-08-07 12:04:48:448"}
+{"level":"info","message":"Incremental sync reference date: 2026-08-07T06:47:10.534Z","timestamp":"2026-08-07 12:04:48:448"}
+{"level":"info","message":"Sync running for adapter: [scholarships]","timestamp":"2026-08-07 12:04:48:448"}
+{"level":"info","message":"Fetched 0 items from backend collection \"exchanges\"","timestamp":"2026-08-07 12:04:48:448"}
+{"level":"info","message":"Sync running for adapter: [jobs]","timestamp":"2026-08-07 12:04:48:448"}
+{"level":"info","message":"Fetched 0 items from backend collection \"jobs\"","timestamp":"2026-08-07 12:04:49:449"}
+{"level":"info","message":"Sync running for adapter: [offers]","timestamp":"2026-08-07 12:04:49:449"}
+{"level":"info","message":"Fetched 0 items from backend collection \"offers\"","timestamp":"2026-08-07 12:04:49:449"}
+{"level":"info","message":"Sync running for adapter: [events]","timestamp":"2026-08-07 12:04:49:449"}
+{"level":"info","message":"Fetched 0 items from backend collection \"events\"","timestamp":"2026-08-07 12:04:49:449"}
+{"level":"info","message":"Sync running for adapter: [universities]","timestamp":"2026-08-07 12:04:49:449"}
+{"level":"info","message":"Fetched 45 items from backend collection \"universities\"","timestamp":"2026-08-07 12:04:49:449"}
+{"level":"info","message":"Sync running for adapter: [packages]","timestamp":"2026-08-07 12:04:52:452"}
+{"level":"info","message":"Fetched 3 items from backend collection \"packages\"","timestamp":"2026-08-07 12:04:52:452"}
+{"level":"info","message":"Sync running for adapter: [templates]","timestamp":"2026-08-07 12:04:52:452"}
+{"level":"info","message":"Fetched 0 items from backend collection \"templates\"","timestamp":"2026-08-07 12:04:52:452"}
+{"level":"info","message":"Sync running for adapter: [sliders]","timestamp":"2026-08-07 12:04:52:452"}
+{"level":"info","message":"Fetched 18 items from backend collection \"sliders\"","timestamp":"2026-08-07 12:04:53:453"}
+{"level":"info","message":"Sync running for adapter: [notes]","timestamp":"2026-08-07 12:04:54:454"}
+{"level":"info","message":"Fetched 0 items from backend collection \"notes\"","timestamp":"2026-08-07 12:04:54:454"}
+{"level":"info","message":"Sync running for adapter: [books]","timestamp":"2026-08-07 12:04:54:454"}
+{"level":"info","message":"Fetched 0 items from backend collection \"books\"","timestamp":"2026-08-07 12:04:54:454"}
+{"level":"info","message":"Sync running for adapter: [lectures]","timestamp":"2026-08-07 12:04:54:454"}
+{"level":"info","message":"Fetched 0 items from backend collection \"lectures\"","timestamp":"2026-08-07 12:04:54:454"}
+{"level":"info","message":"Sync running for adapter: [pastPapers]","timestamp":"2026-08-07 12:04:54:454"}
+{"level":"info","message":"Fetched 0 items from backend collection \"pastpapers\"","timestamp":"2026-08-07 12:04:54:454"}
+{"level":"info","message":"Sync running for adapter: [resumes]","timestamp":"2026-08-07 12:04:54:454"}
+{"level":"info","message":"Fetched 0 items from backend collection \"resumes\"","timestamp":"2026-08-07 12:04:54:454"}
+{"level":"info","message":"Database synchronization completed successfully. Synced: 66, Failed: 0. Duration: 5938ms","timestamp":"2026-08-07 12:04:54:454"}
+{"level":"info","message":"✅ Chat Service connected successfully to dedicated AI database.","timestamp":"2026-08-07 12:18:52:1852"}
+{"level":"info","message":"Initializing Automatic Knowledge Synchronization Scheduler...","timestamp":"2026-08-07 12:18:52:1852"}
+{"level":"info","message":"Scheduling database sync sweeps every 30 minutes (1800000ms).","timestamp":"2026-08-07 12:18:52:1852"}
+{"level":"info","message":"Executing initial startup database synchronization check...","timestamp":"2026-08-07 12:18:57:1857"}
+{"level":"info","message":"Starting incremental database synchronization engine...","timestamp":"2026-08-07 12:18:57:1857"}
+{"level":"info","message":"Using shared persistent connection for backend sync.","timestamp":"2026-08-07 12:18:57:1857"}
+{"level":"info","message":"Incremental sync reference date: 2026-08-07T07:17:10.530Z","timestamp":"2026-08-07 12:18:57:1857"}
+{"level":"info","message":"Sync running for adapter: [scholarships]","timestamp":"2026-08-07 12:18:57:1857"}
+{"level":"info","message":"Fetched 0 items from backend collection \"exchanges\"","timestamp":"2026-08-07 12:18:57:1857"}
+{"level":"info","message":"Sync running for adapter: [jobs]","timestamp":"2026-08-07 12:18:57:1857"}
+{"level":"info","message":"Fetched 0 items from backend collection \"jobs\"","timestamp":"2026-08-07 12:18:57:1857"}
+{"level":"info","message":"Sync running for adapter: [offers]","timestamp":"2026-08-07 12:18:57:1857"}
+{"level":"info","message":"Fetched 0 items from backend collection \"offers\"","timestamp":"2026-08-07 12:18:57:1857"}
+{"level":"info","message":"Sync running for adapter: [events]","timestamp":"2026-08-07 12:18:57:1857"}
+{"level":"info","message":"Fetched 0 items from backend collection \"events\"","timestamp":"2026-08-07 12:18:57:1857"}
+{"level":"info","message":"Sync running for adapter: [universities]","timestamp":"2026-08-07 12:18:57:1857"}
+{"level":"info","message":"Fetched 45 items from backend collection \"universities\"","timestamp":"2026-08-07 12:18:58:1858"}
+{"level":"info","message":"Sync running for adapter: [packages]","timestamp":"2026-08-07 12:19:01:191"}
+{"level":"info","message":"Fetched 3 items from backend collection \"packages\"","timestamp":"2026-08-07 12:19:01:191"}
+{"level":"info","message":"Sync running for adapter: [templates]","timestamp":"2026-08-07 12:19:02:192"}
+{"level":"info","message":"Fetched 0 items from backend collection \"templates\"","timestamp":"2026-08-07 12:19:02:192"}
+{"level":"info","message":"Sync running for adapter: [sliders]","timestamp":"2026-08-07 12:19:02:192"}
+{"level":"info","message":"Fetched 18 items from backend collection \"sliders\"","timestamp":"2026-08-07 12:19:02:192"}
+{"level":"info","message":"Sync running for adapter: [notes]","timestamp":"2026-08-07 12:19:05:195"}
+{"level":"info","message":"Fetched 0 items from backend collection \"notes\"","timestamp":"2026-08-07 12:19:05:195"}
+{"level":"info","message":"Sync running for adapter: [books]","timestamp":"2026-08-07 12:19:05:195"}
+{"level":"info","message":"Fetched 0 items from backend collection \"books\"","timestamp":"2026-08-07 12:19:05:195"}
+{"level":"info","message":"Sync running for adapter: [lectures]","timestamp":"2026-08-07 12:19:05:195"}
+{"level":"info","message":"Fetched 0 items from backend collection \"lectures\"","timestamp":"2026-08-07 12:19:05:195"}
+{"level":"info","message":"Sync running for adapter: [pastPapers]","timestamp":"2026-08-07 12:19:05:195"}
+{"level":"info","message":"Fetched 0 items from backend collection \"pastpapers\"","timestamp":"2026-08-07 12:19:05:195"}
+{"level":"info","message":"Sync running for adapter: [resumes]","timestamp":"2026-08-07 12:19:05:195"}
+{"level":"info","message":"Fetched 0 items from backend collection \"resumes\"","timestamp":"2026-08-07 12:19:05:195"}
+{"level":"info","message":"Database synchronization completed successfully. Synced: 66, Failed: 0. Duration: 7916ms","timestamp":"2026-08-07 12:19:05:195"}
+{"level":"info","message":"✅ Chat Service connected successfully to dedicated AI database.","timestamp":"2026-08-07 12:24:49:2449"}
+{"level":"info","message":"Initializing Automatic Knowledge Synchronization Scheduler...","timestamp":"2026-08-07 12:24:49:2449"}
+{"level":"info","message":"Scheduling database sync sweeps every 30 minutes (1800000ms).","timestamp":"2026-08-07 12:24:49:2449"}
+{"level":"info","message":"Executing initial startup database synchronization check...","timestamp":"2026-08-07 12:24:54:2454"}
+{"level":"info","message":"Starting incremental database synchronization engine...","timestamp":"2026-08-07 12:24:54:2454"}
+{"level":"info","message":"Using shared persistent connection for backend sync.","timestamp":"2026-08-07 12:24:54:2454"}
+{"level":"info","message":"Incremental sync reference date: 2026-08-07T07:18:57.476Z","timestamp":"2026-08-07 12:24:54:2454"}
+{"level":"info","message":"Sync running for adapter: [scholarships]","timestamp":"2026-08-07 12:24:54:2454"}
+{"level":"info","message":"Fetched 0 items from backend collection \"exchanges\"","timestamp":"2026-08-07 12:24:54:2454"}
+{"level":"info","message":"Sync running for adapter: [jobs]","timestamp":"2026-08-07 12:24:54:2454"}
+{"level":"info","message":"Fetched 0 items from backend collection \"jobs\"","timestamp":"2026-08-07 12:24:54:2454"}
+{"level":"info","message":"Sync running for adapter: [offers]","timestamp":"2026-08-07 12:24:54:2454"}
+{"level":"info","message":"Fetched 0 items from backend collection \"offers\"","timestamp":"2026-08-07 12:24:54:2454"}
+{"level":"info","message":"Sync running for adapter: [events]","timestamp":"2026-08-07 12:24:54:2454"}
+{"level":"info","message":"Fetched 1 items from backend collection \"events\"","timestamp":"2026-08-07 12:24:54:2454"}
+{"level":"info","message":"Started indexing document ID: 6a75884673a8898a4adf0ab1 - \"American Tech Companies Invited to Invest in Pakistan’s Agriculture Sector\"","timestamp":"2026-08-07 12:24:55:2455"}
+{"level":"debug","message":"Chunked text (length 901) into 2 sentence-bounded chunks.","timestamp":"2026-08-07 12:24:55:2455"}
+{"level":"info","message":"Embedding batch miss. Querying OpenAI for 2 items...","timestamp":"2026-08-07 12:24:55:2455"}
+{"level":"info","message":"Generated batch of 2 embeddings in 2376ms","timestamp":"2026-08-07 12:24:57:2457"}
+{"level":"info","message":"Persisted 2 vector chunks to MongoDB store for docId: 6a75884673a8898a4adf0ab1","timestamp":"2026-08-07 12:24:57:2457"}
+{"level":"info","message":"Completed reindexing document ID: 6a75884673a8898a4adf0ab1. Created 2 chunks.","timestamp":"2026-08-07 12:24:57:2457"}
+{"level":"info","message":"Sync running for adapter: [universities]","timestamp":"2026-08-07 12:24:57:2457"}
+{"level":"info","message":"Fetched 45 items from backend collection \"universities\"","timestamp":"2026-08-07 12:24:57:2457"}
+{"level":"info","message":"Sync running for adapter: [packages]","timestamp":"2026-08-07 12:25:01:251"}
+{"level":"info","message":"Fetched 3 items from backend collection \"packages\"","timestamp":"2026-08-07 12:25:01:251"}
+{"level":"info","message":"Sync running for adapter: [templates]","timestamp":"2026-08-07 12:25:01:251"}
+{"level":"info","message":"Fetched 0 items from backend collection \"templates\"","timestamp":"2026-08-07 12:25:01:251"}
+{"level":"info","message":"Sync running for adapter: [sliders]","timestamp":"2026-08-07 12:25:01:251"}
+{"level":"info","message":"Fetched 18 items from backend collection \"sliders\"","timestamp":"2026-08-07 12:25:01:251"}
+{"level":"info","message":"Sync running for adapter: [notes]","timestamp":"2026-08-07 12:25:03:253"}
+{"level":"info","message":"Fetched 0 items from backend collection \"notes\"","timestamp":"2026-08-07 12:25:03:253"}
+{"level":"info","message":"Sync running for adapter: [books]","timestamp":"2026-08-07 12:25:03:253"}
+{"level":"info","message":"Fetched 0 items from backend collection \"books\"","timestamp":"2026-08-07 12:25:03:253"}
+{"level":"info","message":"Sync running for adapter: [lectures]","timestamp":"2026-08-07 12:25:03:253"}
+{"level":"info","message":"Fetched 0 items from backend collection \"lectures\"","timestamp":"2026-08-07 12:25:03:253"}
+{"level":"info","message":"Sync running for adapter: [pastPapers]","timestamp":"2026-08-07 12:25:03:253"}
+{"level":"info","message":"Fetched 0 items from backend collection \"pastpapers\"","timestamp":"2026-08-07 12:25:03:253"}
+{"level":"info","message":"Sync running for adapter: [resumes]","timestamp":"2026-08-07 12:25:03:253"}
+{"level":"info","message":"Fetched 1 items from backend collection \"resumes\"","timestamp":"2026-08-07 12:25:03:253"}
+{"level":"info","message":"Started indexing document ID: 6a74cfbdcac367a45aebe9f8 - \"Resume: Anees Teevino - Game developer\"","timestamp":"2026-08-07 12:25:04:254"}
+{"level":"debug","message":"Chunked text (length 3148) into 8 sentence-bounded chunks.","timestamp":"2026-08-07 12:25:04:254"}
+{"level":"info","message":"Embedding batch miss. Querying OpenAI for 2 items...","timestamp":"2026-08-07 12:25:04:254"}
+{"level":"info","message":"Generated batch of 2 embeddings in 1459ms","timestamp":"2026-08-07 12:25:05:255"}
+{"level":"info","message":"Purged 8 old vector chunks for docId: 6a74cfbdcac367a45aebe9f8","timestamp":"2026-08-07 12:25:05:255"}
+{"level":"info","message":"Persisted 8 vector chunks to MongoDB store for docId: 6a74cfbdcac367a45aebe9f8","timestamp":"2026-08-07 12:25:06:256"}
+{"level":"info","message":"Completed reindexing document ID: 6a74cfbdcac367a45aebe9f8. Created 8 chunks.","timestamp":"2026-08-07 12:25:06:256"}
+{"level":"info","message":"Database synchronization completed successfully. Synced: 68, Failed: 0. Duration: 11811ms","timestamp":"2026-08-07 12:25:06:256"}
+{"level":"info","message":"✅ Chat Service connected successfully to dedicated AI database.","timestamp":"2026-08-07 12:50:42:5042"}
+{"level":"info","message":"Initializing Automatic Knowledge Synchronization Scheduler...","timestamp":"2026-08-07 12:50:42:5042"}
+{"level":"info","message":"Scheduling database sync sweeps every 30 minutes (1800000ms).","timestamp":"2026-08-07 12:50:42:5042"}
+{"level":"info","message":"Executing initial startup database synchronization check...","timestamp":"2026-08-07 12:50:47:5047"}
+{"level":"info","message":"Starting incremental database synchronization engine...","timestamp":"2026-08-07 12:50:47:5047"}
+{"level":"info","message":"Using shared persistent connection for backend sync.","timestamp":"2026-08-07 12:50:47:5047"}
+{"level":"info","message":"Incremental sync reference date: 2026-08-07T07:47:10.531Z","timestamp":"2026-08-07 12:50:47:5047"}
+{"level":"info","message":"Sync running for adapter: [scholarships]","timestamp":"2026-08-07 12:50:47:5047"}
+{"level":"info","message":"Fetched 0 items from backend collection \"exchanges\"","timestamp":"2026-08-07 12:50:48:5048"}
+{"level":"info","message":"Sync running for adapter: [jobs]","timestamp":"2026-08-07 12:50:48:5048"}
+{"level":"info","message":"Fetched 0 items from backend collection \"jobs\"","timestamp":"2026-08-07 12:50:48:5048"}
+{"level":"info","message":"Sync running for adapter: [offers]","timestamp":"2026-08-07 12:50:48:5048"}
+{"level":"info","message":"Fetched 0 items from backend collection \"offers\"","timestamp":"2026-08-07 12:50:48:5048"}
+{"level":"info","message":"Sync running for adapter: [events]","timestamp":"2026-08-07 12:50:48:5048"}
+{"level":"info","message":"Fetched 0 items from backend collection \"events\"","timestamp":"2026-08-07 12:50:48:5048"}
+{"level":"info","message":"Sync running for adapter: [universities]","timestamp":"2026-08-07 12:50:48:5048"}
+{"level":"info","message":"Fetched 45 items from backend collection \"universities\"","timestamp":"2026-08-07 12:50:48:5048"}
+{"level":"info","message":"Sync running for adapter: [packages]","timestamp":"2026-08-07 12:50:51:5051"}
+{"level":"info","message":"Fetched 3 items from backend collection \"packages\"","timestamp":"2026-08-07 12:50:52:5052"}
+{"level":"info","message":"Sync running for adapter: [templates]","timestamp":"2026-08-07 12:50:52:5052"}
+{"level":"info","message":"Fetched 0 items from backend collection \"templates\"","timestamp":"2026-08-07 12:50:52:5052"}
+{"level":"info","message":"Sync running for adapter: [sliders]","timestamp":"2026-08-07 12:50:52:5052"}
+{"level":"info","message":"Fetched 18 items from backend collection \"sliders\"","timestamp":"2026-08-07 12:50:52:5052"}
+{"level":"info","message":"Sync running for adapter: [notes]","timestamp":"2026-08-07 12:50:53:5053"}
+{"level":"info","message":"Fetched 0 items from backend collection \"notes\"","timestamp":"2026-08-07 12:50:53:5053"}
+{"level":"info","message":"Sync running for adapter: [books]","timestamp":"2026-08-07 12:50:53:5053"}
+{"level":"info","message":"Fetched 0 items from backend collection \"books\"","timestamp":"2026-08-07 12:50:53:5053"}
+{"level":"info","message":"Sync running for adapter: [lectures]","timestamp":"2026-08-07 12:50:53:5053"}
+{"level":"info","message":"Fetched 0 items from backend collection \"lectures\"","timestamp":"2026-08-07 12:50:53:5053"}
+{"level":"info","message":"Sync running for adapter: [pastPapers]","timestamp":"2026-08-07 12:50:53:5053"}
+{"level":"info","message":"Fetched 0 items from backend collection \"pastpapers\"","timestamp":"2026-08-07 12:50:53:5053"}
+{"level":"info","message":"Sync running for adapter: [resumes]","timestamp":"2026-08-07 12:50:53:5053"}
+{"level":"info","message":"Fetched 0 items from backend collection \"resumes\"","timestamp":"2026-08-07 12:50:54:5054"}
+{"level":"info","message":"Database synchronization completed successfully. Synced: 66, Failed: 0. Duration: 6291ms","timestamp":"2026-08-07 12:50:54:5054"}
+{"level":"info","message":"✅ Chat Service connected successfully to dedicated AI database.","timestamp":"2026-08-07 14:06:14:614"}
+{"level":"info","message":"Initializing Automatic Knowledge Synchronization Scheduler...","timestamp":"2026-08-07 14:06:14:614"}
+{"level":"info","message":"Scheduling database sync sweeps every 30 minutes (1800000ms).","timestamp":"2026-08-07 14:06:14:614"}
+{"level":"info","message":"Executing initial startup database synchronization check...","timestamp":"2026-08-07 14:06:19:619"}
+{"level":"info","message":"Starting incremental database synchronization engine...","timestamp":"2026-08-07 14:06:19:619"}
+{"level":"info","message":"Using shared persistent connection for backend sync.","timestamp":"2026-08-07 14:06:19:619"}
+{"level":"info","message":"Incremental sync reference date: 2026-08-07T08:47:10.530Z","timestamp":"2026-08-07 14:06:19:619"}
+{"level":"info","message":"Sync running for adapter: [scholarships]","timestamp":"2026-08-07 14:06:19:619"}
+{"level":"info","message":"Fetched 0 items from backend collection \"exchanges\"","timestamp":"2026-08-07 14:06:19:619"}
+{"level":"info","message":"Sync running for adapter: [jobs]","timestamp":"2026-08-07 14:06:19:619"}
+{"level":"info","message":"Fetched 0 items from backend collection \"jobs\"","timestamp":"2026-08-07 14:06:20:620"}
+{"level":"info","message":"Sync running for adapter: [offers]","timestamp":"2026-08-07 14:06:20:620"}
+{"level":"info","message":"Fetched 0 items from backend collection \"offers\"","timestamp":"2026-08-07 14:06:20:620"}
+{"level":"info","message":"Sync running for adapter: [events]","timestamp":"2026-08-07 14:06:20:620"}
+{"level":"info","message":"Fetched 0 items from backend collection \"events\"","timestamp":"2026-08-07 14:06:20:620"}
+{"level":"info","message":"Sync running for adapter: [universities]","timestamp":"2026-08-07 14:06:20:620"}
+{"level":"info","message":"Fetched 45 items from backend collection \"universities\"","timestamp":"2026-08-07 14:06:20:620"}
+{"level":"info","message":"✅ Chat Service connected successfully to dedicated AI database.","timestamp":"2026-08-07 14:06:26:626"}
+{"level":"info","message":"Initializing Automatic Knowledge Synchronization Scheduler...","timestamp":"2026-08-07 14:06:26:626"}
+{"level":"info","message":"Scheduling database sync sweeps every 30 minutes (1800000ms).","timestamp":"2026-08-07 14:06:26:626"}
+{"level":"info","message":"Executing initial startup database synchronization check...","timestamp":"2026-08-07 14:06:31:631"}
+{"level":"info","message":"Starting incremental database synchronization engine...","timestamp":"2026-08-07 14:06:31:631"}
+{"level":"info","message":"Using shared persistent connection for backend sync.","timestamp":"2026-08-07 14:06:31:631"}
+{"level":"info","message":"Incremental sync reference date: 2026-08-07T08:47:10.530Z","timestamp":"2026-08-07 14:06:31:631"}
+{"level":"info","message":"Sync running for adapter: [scholarships]","timestamp":"2026-08-07 14:06:31:631"}
+{"level":"info","message":"Fetched 0 items from backend collection \"exchanges\"","timestamp":"2026-08-07 14:06:31:631"}
+{"level":"info","message":"Sync running for adapter: [jobs]","timestamp":"2026-08-07 14:06:31:631"}
+{"level":"info","message":"Fetched 0 items from backend collection \"jobs\"","timestamp":"2026-08-07 14:06:31:631"}
+{"level":"info","message":"Sync running for adapter: [offers]","timestamp":"2026-08-07 14:06:31:631"}
+{"level":"info","message":"Fetched 0 items from backend collection \"offers\"","timestamp":"2026-08-07 14:06:31:631"}
+{"level":"info","message":"Sync running for adapter: [events]","timestamp":"2026-08-07 14:06:31:631"}
+{"level":"info","message":"Fetched 0 items from backend collection \"events\"","timestamp":"2026-08-07 14:06:32:632"}
+{"level":"info","message":"Sync running for adapter: [universities]","timestamp":"2026-08-07 14:06:32:632"}
+{"level":"info","message":"Fetched 45 items from backend collection \"universities\"","timestamp":"2026-08-07 14:06:32:632"}
+{"level":"info","message":"Sync running for adapter: [packages]","timestamp":"2026-08-07 14:06:35:635"}
+{"level":"info","message":"Fetched 3 items from backend collection \"packages\"","timestamp":"2026-08-07 14:06:35:635"}
+{"level":"info","message":"Sync running for adapter: [templates]","timestamp":"2026-08-07 14:06:36:636"}
+{"level":"info","message":"Fetched 0 items from backend collection \"templates\"","timestamp":"2026-08-07 14:06:36:636"}
+{"level":"info","message":"Sync running for adapter: [sliders]","timestamp":"2026-08-07 14:06:36:636"}
+{"level":"info","message":"Fetched 18 items from backend collection \"sliders\"","timestamp":"2026-08-07 14:06:36:636"}
+{"level":"info","message":"Sync running for adapter: [notes]","timestamp":"2026-08-07 14:06:37:637"}
+{"level":"info","message":"Fetched 0 items from backend collection \"notes\"","timestamp":"2026-08-07 14:06:38:638"}
+{"level":"info","message":"Sync running for adapter: [books]","timestamp":"2026-08-07 14:06:38:638"}
+{"level":"info","message":"Fetched 0 items from backend collection \"books\"","timestamp":"2026-08-07 14:06:38:638"}
+{"level":"info","message":"Sync running for adapter: [lectures]","timestamp":"2026-08-07 14:06:38:638"}
+{"level":"info","message":"Fetched 0 items from backend collection \"lectures\"","timestamp":"2026-08-07 14:06:38:638"}
+{"level":"info","message":"Sync running for adapter: [pastPapers]","timestamp":"2026-08-07 14:06:38:638"}
+{"level":"info","message":"Fetched 0 items from backend collection \"pastpapers\"","timestamp":"2026-08-07 14:06:38:638"}
+{"level":"info","message":"Sync running for adapter: [resumes]","timestamp":"2026-08-07 14:06:38:638"}
+{"level":"info","message":"Fetched 0 items from backend collection \"resumes\"","timestamp":"2026-08-07 14:06:38:638"}
+{"level":"info","message":"Database synchronization completed successfully. Synced: 66, Failed: 0. Duration: 7001ms","timestamp":"2026-08-07 14:06:38:638"}
+{"level":"info","message":"✅ Chat Service connected successfully to dedicated AI database.","timestamp":"2026-08-07 14:20:33:2033"}
+{"level":"info","message":"Initializing Automatic Knowledge Synchronization Scheduler...","timestamp":"2026-08-07 14:20:33:2033"}
+{"level":"info","message":"Scheduling database sync sweeps every 30 minutes (1800000ms).","timestamp":"2026-08-07 14:20:33:2033"}
+{"level":"info","message":"Executing initial startup database synchronization check...","timestamp":"2026-08-07 14:20:38:2038"}
+{"level":"info","message":"Starting incremental database synchronization engine...","timestamp":"2026-08-07 14:20:38:2038"}
+{"level":"info","message":"Using shared persistent connection for backend sync.","timestamp":"2026-08-07 14:20:38:2038"}
+{"level":"info","message":"Incremental sync reference date: 2026-08-07T09:17:10.531Z","timestamp":"2026-08-07 14:20:38:2038"}
+{"level":"info","message":"Sync running for adapter: [scholarships]","timestamp":"2026-08-07 14:20:38:2038"}
+{"level":"info","message":"Fetched 0 items from backend collection \"exchanges\"","timestamp":"2026-08-07 14:20:38:2038"}
+{"level":"info","message":"Sync running for adapter: [jobs]","timestamp":"2026-08-07 14:20:38:2038"}
+{"level":"info","message":"Fetched 0 items from backend collection \"jobs\"","timestamp":"2026-08-07 14:20:38:2038"}
+{"level":"info","message":"Sync running for adapter: [offers]","timestamp":"2026-08-07 14:20:38:2038"}
+{"level":"info","message":"Fetched 0 items from backend collection \"offers\"","timestamp":"2026-08-07 14:20:38:2038"}
+{"level":"info","message":"Sync running for adapter: [events]","timestamp":"2026-08-07 14:20:38:2038"}
+{"level":"info","message":"Fetched 0 items from backend collection \"events\"","timestamp":"2026-08-07 14:20:38:2038"}
+{"level":"info","message":"Sync running for adapter: [universities]","timestamp":"2026-08-07 14:20:38:2038"}
+{"level":"info","message":"Fetched 45 items from backend collection \"universities\"","timestamp":"2026-08-07 14:20:38:2038"}
+{"level":"info","message":"✅ Chat Service connected successfully to dedicated AI database.","timestamp":"2026-08-07 14:20:44:2044"}
+{"level":"info","message":"Initializing Automatic Knowledge Synchronization Scheduler...","timestamp":"2026-08-07 14:20:44:2044"}
+{"level":"info","message":"Scheduling database sync sweeps every 30 minutes (1800000ms).","timestamp":"2026-08-07 14:20:44:2044"}
+{"level":"info","message":"Executing initial startup database synchronization check...","timestamp":"2026-08-07 14:20:49:2049"}
+{"level":"info","message":"Starting incremental database synchronization engine...","timestamp":"2026-08-07 14:20:49:2049"}
+{"level":"info","message":"Using shared persistent connection for backend sync.","timestamp":"2026-08-07 14:20:50:2050"}
+{"level":"info","message":"Incremental sync reference date: 2026-08-07T09:17:10.531Z","timestamp":"2026-08-07 14:20:50:2050"}
+{"level":"info","message":"Sync running for adapter: [scholarships]","timestamp":"2026-08-07 14:20:50:2050"}
+{"level":"info","message":"Fetched 0 items from backend collection \"exchanges\"","timestamp":"2026-08-07 14:20:50:2050"}
+{"level":"info","message":"Sync running for adapter: [jobs]","timestamp":"2026-08-07 14:20:50:2050"}
+{"level":"info","message":"Fetched 0 items from backend collection \"jobs\"","timestamp":"2026-08-07 14:20:50:2050"}
+{"level":"info","message":"Sync running for adapter: [offers]","timestamp":"2026-08-07 14:20:50:2050"}
+{"level":"info","message":"Fetched 0 items from backend collection \"offers\"","timestamp":"2026-08-07 14:20:50:2050"}
+{"level":"info","message":"Sync running for adapter: [events]","timestamp":"2026-08-07 14:20:50:2050"}
+{"level":"info","message":"Fetched 0 items from backend collection \"events\"","timestamp":"2026-08-07 14:20:50:2050"}
+{"level":"info","message":"Sync running for adapter: [universities]","timestamp":"2026-08-07 14:20:50:2050"}
+{"level":"info","message":"Fetched 45 items from backend collection \"universities\"","timestamp":"2026-08-07 14:20:50:2050"}
+{"level":"info","message":"Sync running for adapter: [packages]","timestamp":"2026-08-07 14:20:54:2054"}
+{"level":"info","message":"Fetched 3 items from backend collection \"packages\"","timestamp":"2026-08-07 14:20:54:2054"}
+{"level":"info","message":"Sync running for adapter: [templates]","timestamp":"2026-08-07 14:20:54:2054"}
+{"level":"info","message":"Fetched 0 items from backend collection \"templates\"","timestamp":"2026-08-07 14:20:54:2054"}
+{"level":"info","message":"Sync running for adapter: [sliders]","timestamp":"2026-08-07 14:20:54:2054"}
+{"level":"info","message":"Fetched 18 items from backend collection \"sliders\"","timestamp":"2026-08-07 14:20:54:2054"}
+{"level":"info","message":"✅ Chat Service connected successfully to dedicated AI database.","timestamp":"2026-08-07 14:21:00:210"}
+{"level":"info","message":"Initializing Automatic Knowledge Synchronization Scheduler...","timestamp":"2026-08-07 14:21:00:210"}
+{"level":"info","message":"Scheduling database sync sweeps every 30 minutes (1800000ms).","timestamp":"2026-08-07 14:21:00:210"}
+{"level":"info","message":"Executing initial startup database synchronization check...","timestamp":"2026-08-07 14:21:05:215"}
+{"level":"info","message":"Starting incremental database synchronization engine...","timestamp":"2026-08-07 14:21:05:215"}
+{"level":"info","message":"Using shared persistent connection for backend sync.","timestamp":"2026-08-07 14:21:05:215"}
+{"level":"info","message":"Incremental sync reference date: 2026-08-07T09:17:10.531Z","timestamp":"2026-08-07 14:21:05:215"}
+{"level":"info","message":"Sync running for adapter: [scholarships]","timestamp":"2026-08-07 14:21:05:215"}
+{"level":"info","message":"Fetched 0 items from backend collection \"exchanges\"","timestamp":"2026-08-07 14:21:05:215"}
+{"level":"info","message":"Sync running for adapter: [jobs]","timestamp":"2026-08-07 14:21:05:215"}
+{"level":"info","message":"Fetched 0 items from backend collection \"jobs\"","timestamp":"2026-08-07 14:21:05:215"}
+{"level":"info","message":"Sync running for adapter: [offers]","timestamp":"2026-08-07 14:21:05:215"}
+{"level":"info","message":"Fetched 0 items from backend collection \"offers\"","timestamp":"2026-08-07 14:21:05:215"}
+{"level":"info","message":"Sync running for adapter: [events]","timestamp":"2026-08-07 14:21:05:215"}
+{"level":"info","message":"Fetched 0 items from backend collection \"events\"","timestamp":"2026-08-07 14:21:05:215"}
+{"level":"info","message":"Sync running for adapter: [universities]","timestamp":"2026-08-07 14:21:05:215"}
+{"level":"info","message":"Fetched 45 items from backend collection \"universities\"","timestamp":"2026-08-07 14:21:05:215"}
+{"level":"info","message":"Sync running for adapter: [packages]","timestamp":"2026-08-07 14:21:09:219"}
+{"level":"info","message":"Fetched 3 items from backend collection \"packages\"","timestamp":"2026-08-07 14:21:09:219"}
+{"level":"info","message":"Sync running for adapter: [templates]","timestamp":"2026-08-07 14:21:09:219"}
+{"level":"info","message":"Fetched 0 items from backend collection \"templates\"","timestamp":"2026-08-07 14:21:09:219"}
+{"level":"info","message":"Sync running for adapter: [sliders]","timestamp":"2026-08-07 14:21:09:219"}
+{"level":"info","message":"Fetched 18 items from backend collection \"sliders\"","timestamp":"2026-08-07 14:21:09:219"}
+{"level":"info","message":"✅ Chat Service connected successfully to dedicated AI database.","timestamp":"2026-08-07 14:21:13:2113"}
+{"level":"info","message":"Initializing Automatic Knowledge Synchronization Scheduler...","timestamp":"2026-08-07 14:21:13:2113"}
+{"level":"info","message":"Scheduling database sync sweeps every 30 minutes (1800000ms).","timestamp":"2026-08-07 14:21:13:2113"}
