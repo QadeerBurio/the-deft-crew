@@ -224,15 +224,20 @@ router.get("/public/all", async (req, res) => {
             location, minSalary, maxSalary, page = 1, limit = 20
         } = req.query;
         
-        // Always filter to external pipeline jobs only — TDC openings never appear here
-        // Strictly restrict to Pakistan
+        const now = new Date();
         let query = {
             active: true,
-            type: 'Internship',
-            isExternal: true,
-            applicationDeadline: { $gte: new Date() },
+            applicationDeadline: { $gte: now },
+            $or: [
+                { batchExpiresAt: { $gte: now } },
+                { batchExpiresAt: { $exists: false } }
+            ],
             location: { $regex: 'pakistan|karachi|lahore|islamabad|rawalpindi|faisalabad|multan|peshawar|quetta|sialkot|gujranwala|hyderabad|abbottabad|sargodha|bahawalpur|sukkur|larkana|gujrat|sheikhupura|jhelum|sahiwal|pk|remote', $options: 'i' }
         };
+
+        if (req.query.isExternal !== undefined) {
+            query.isExternal = req.query.isExternal === 'true';
+        }
 
         if (search) {
             query.$and = [
@@ -248,7 +253,7 @@ router.get("/public/all", async (req, res) => {
         }
         if (department) query.department = department;
         if (category) query.category = category;
-        query.type = 'Internship';
+        if (type && type !== 'All') query.type = type;
         if (locationType) query.locationType = locationType;
         if (experienceLevel) query.experienceLevel = experienceLevel;
         if (location) {
