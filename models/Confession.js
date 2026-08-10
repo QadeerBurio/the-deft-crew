@@ -54,9 +54,9 @@ const ConfessionSchema = new mongoose.Schema({
   }
 });
 
-// Index for better query performance
+// Indexes for better query performance
+ConfessionSchema.index({ createdAt: -1 });
 ConfessionSchema.index({ university: 1, createdAt: -1 });
 ConfessionSchema.index({ authorId: 1 });
-ConfessionSchema.index({ createdAt: -1 });
 
 module.exports = mongoose.model('Confession', ConfessionSchema);

@@ -620,42 +620,32 @@ router.put('/profile/update', auth, async (req, res) => {
 // ==================== CONFESSION ROUTES ====================
 router.get('/confessions/feed', auth, async (req, res) => {
   try {
-    const currentUser = await User.findById(req.user._id)
-      .populate('connections', '_id');
-    
-    if (!currentUser) {
-      return res.status(404).json({ error: "User not found" });
-    }
+    // Fetch ALL confessions without filtering by university or connections
+    const confessions = await Confession.find({})
+      .select('-authorId') // Always hide the author
+      .sort({ createdAt: -1 })
+      .populate('comments.user', 'name profileImage')
+      .lean();
 
-    const connectedUserIds = currentUser.connections.map(conn => conn._id);
-    const currentUniversityId = currentUser.university;
-    
-    const confessions = await Confession.find({
-      $or: [
-        { university: currentUniversityId },
-        { authorId: { $in: connectedUserIds } }
-      ]
-    })
-    .select('-authorId')
-    .sort({ createdAt: -1 })
-    .populate('comments.user', 'name profileImage')
-    .lean();
-
+    // Format the response - mark if current user liked each confession
     const formattedConfessions = confessions.map(confession => ({
       ...confession,
       authorName: "Anonymous",
       authorAvatar: null,
-      likedByCurrentUser: confession.likedBy?.includes(req.user._id) || false
+      likedByCurrentUser: confession.likedBy?.some(id => 
+        id.toString() === req.user._id.toString()
+      ) || false
     }));
 
     res.status(200).json(formattedConfessions);
   } catch (err) {
     console.error("Feed Error:", err);
-    res.status(500).json({ error: "Could not fetch feed." });
+    res.status(500).json({ error: "Could not fetch confessions." });
   }
 });
 
 // --- Create Confession ---
+// Create Confession - UPDATED
 router.post('/confessions/create', auth, async (req, res) => {
   try {
     const { text, image } = req.body;
@@ -683,6 +673,7 @@ router.post('/confessions/create', auth, async (req, res) => {
 
     await confession.save();
     
+    // Return the created confession without author info
     const createdConfession = await Confession.findById(confession._id)
       .select('-authorId')
       .lean();
@@ -813,7 +804,19 @@ router.delete('/confessions/:id', auth, async (req, res) => {
     res.status(500).json({ error: "Server error" });
   }
 });
-
+// Get User's Own Confessions
+router.get('/confessions/my-confessions', auth, async (req, res) => {
+  try {
+    const myConfessions = await Confession.find({ authorId: req.user.id })
+      .select('-authorId')
+      .populate('comments.user', 'name profileImage')
+      .sort({ createdAt: -1 });
+    res.json(myConfessions);
+  } catch (err) {
+    console.error("My Confessions Fetch Error:", err);
+    res.status(500).json({ error: "Could not fetch your confessions." });
+  }
+});
 // ==================== STORIES ROUTES ====================
 // Helper function to check if users can see each other's stories
 const canViewStories = async (viewerId, targetId) => {
@@ -1946,7 +1949,6 @@ router.post('/conversations/:id/archive', auth, async (req, res) => {
   }
 });
 
-// ==================== GET UNREAD COUNT ====================
 // ==================== GET UNREAD COUNT ====================
 router.get('/unread-count', auth, async (req, res) => {
   try {
