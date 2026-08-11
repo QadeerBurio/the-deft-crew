@@ -799,4 +799,40 @@ router.get("/student/:studentId", auth, async (req, res) => {
   }
 });
 
+router.get("/brandss", async (req, res) => {
+  try {
+    const brands = await User.find({ role: "brand" })
+      .select("name logo category description location")
+      .lean()
+      .exec();
+
+    // Get offers for each brand
+    const brandsWithOffers = await Promise.all(
+      brands.map(async (brand) => {
+        const offers = await Offer.find({ brand: brand._id })
+          .select("title description discountPercentage category image isOnline isInStore location createdAt")
+          .lean()
+          .exec();
+        
+        return {
+          ...brand,
+          offersCount: offers.length,
+          offers: offers
+        };
+      })
+    );
+
+    res.json({
+      success: true,
+      count: brandsWithOffers.length,
+      brands: brandsWithOffers
+    });
+  } catch (err) {
+    console.error("Error fetching brands:", err);
+    res.status(500).json({ 
+      success: false, 
+      message: err.message 
+    });
+  }
+});
 module.exports = router;
