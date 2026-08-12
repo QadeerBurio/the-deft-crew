@@ -54,6 +54,24 @@ const userSchema = new mongoose.Schema(
       default: "Not Verified",
     },
 
+    // --- ACCOUNT STATUS (NEW) ---
+    accountStatus: {
+      type: String,
+      enum: ['active', 'suspended', 'banned', 'deactivated'],
+      default: 'active'
+    },
+    suspensionReason: {
+      type: String,
+      default: ''
+    },
+    suspensionExpiry: {
+      type: Date
+    },
+    isBlocked: {
+      type: Boolean,
+      default: false
+    },
+
     // --- KYC / DOCUMENTATION ---
     profileImage: { type: String, default: "" },
     idCardFront: { type: String, default: "" },
@@ -161,7 +179,11 @@ const userSchema = new mongoose.Schema(
     connections: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
     sentRequests: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
     receivedRequests: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
-
+ // --- BLOCKED USERS (NEW) ---
+    blockedUsers: [{
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    }],
     // --- CAREER INTELLIGENCE ---
     savedJobs: [
       {
@@ -197,6 +219,8 @@ const userSchema = new mongoose.Schema(
 userSchema.index({ role: 1, status: 1 });
 userSchema.index({ university: 1, role: 1 });
 userSchema.index({ brandApprovalStatus: 1, role: 1 }); // For filtering brands
+userSchema.index({ accountStatus: 1 });
+userSchema.index({ blockedUsers: 1 });
 
 // --- PRE-SAVE HOOK: AUTOMATIC REFERRAL CODE GENERATION ---
 userSchema.pre("save", async function () {

@@ -25,12 +25,14 @@ router.post("/send", auth, async (req, res) => {
       screenToOpen
     } = req.body;
 
+    // IMPORTANT: Always set recipient for user-specific notifications
     const newNotification = await Notification.create({
-      recipient: recipientId,
+      recipient: recipientId, // Never null for user-specific notifications
       title,
       description,
-      type,
-      unread: true
+      type: type || "System",
+      readBy: [],
+      deletedBy: []
     });
 
     const user = await User.findById(recipientId);
@@ -50,31 +52,13 @@ router.post("/send", auth, async (req, res) => {
   }
 });
 
-// 3. GET USER NOTIFICATIONS - FIXED: Filter by user creation date
+// 3. GET USER NOTIFICATIONS - FIXED: Only return user's own notifications
 router.get("/my-notifications", auth, async (req, res) => {
   try {
-    // Get the user's creation date
-    const user = await User.findById(req.userId).select('createdAt');
-    
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
-
-    // Get user's join date (when they signed up)
-    const userJoinDate = user.createdAt;
-
+    // ✅ CRITICAL FIX: Only fetch notifications where the user is the recipient
     const notifications = await Notification.find({
-      $or: [
-        // Personal notifications - always show
-        { recipient: req.userId },
-        { 
-          // Global notifications - ONLY show those created AFTER user joined
-          recipient: null,
-          createdAt: { $gte: userJoinDate }
-        }
-      ],
-      // Exclude notifications the user has deleted
-      deletedBy: { $ne: req.userId }
+      recipient: req.userId, // This ensures only this user's notifications
+      deletedBy: { $ne: req.userId } // Exclude soft-deleted
     })
     .sort({ createdAt: -1 })
     .lean();
@@ -92,25 +76,11 @@ router.get("/my-notifications", auth, async (req, res) => {
   }
 });
 
-// 4. GET UNREAD COUNT - NEW ENDPOINT
+// 4. GET UNREAD COUNT - FIXED
 router.get("/unread-count", auth, async (req, res) => {
   try {
-    const user = await User.findById(req.userId).select('createdAt');
-    
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
-
-    const userJoinDate = user.createdAt;
-
     const count = await Notification.countDocuments({
-      $or: [
-        { recipient: req.userId },
-        { 
-          recipient: null,
-          createdAt: { $gte: userJoinDate }
-        }
-      ],
+      recipient: req.userId, // Only this user's notifications
       deletedBy: { $ne: req.userId },
       readBy: { $ne: req.userId } // Only count unread
     });
@@ -122,40 +92,42 @@ router.get("/unread-count", auth, async (req, res) => {
   }
 });
 
-// 5. MARK SINGLE AS READ
+// 5. MARK SINGLE AS READ - FIXED
 router.patch("/mark-read/:id", auth, async (req, res) => {
   try {
-    const notification = await Notification.findOneAndUpdate(
-      {
-        _id: req.params.id,
-        $or: [{ recipient: req.userId }, { recipient: null }]
-      },
-      { $addToSet: { readBy: req.userId } }, 
-      { new: true }
-    );
+    const notification = await Notification.findOne({
+      _id: req.params.id,
+      recipient: req.userId // Only allow if user owns it
+    });
 
-    if (!notification) return res.status(404).json({ message: "Notification not found" });
+    if (!notification) {
+      return res.status(404).json({ message: "Notification not found" });
+    }
+
+    // Add user to readBy if not already there
+    if (!notification.readBy) {
+      notification.readBy = [];
+    }
+    
+    if (!notification.readBy.some(id => id.toString() === req.userId)) {
+      notification.readBy.push(req.userId);
+      await notification.save();
+    }
+
     res.json({ success: true });
   } catch (err) {
+    console.error("Error marking as read:", err);
     res.status(500).json({ message: "Server error" });
   }
 });
 
-// 6. MARK ALL AS READ
+// 6. MARK ALL AS READ - FIXED
 router.put("/mark-all-read", auth, async (req, res) => {
   try {
-    const user = await User.findById(req.userId).select('createdAt');
-    const userJoinDate = user.createdAt;
-
+    // Only update notifications belonging to the user
     await Notification.updateMany(
       {
-        $or: [
-          { recipient: req.userId },
-          { 
-            recipient: null,
-            createdAt: { $gte: userJoinDate }
-          }
-        ],
+        recipient: req.userId,
         readBy: { $ne: req.userId },
         deletedBy: { $ne: req.userId }
       },
@@ -164,41 +136,55 @@ router.put("/mark-all-read", auth, async (req, res) => {
 
     res.json({ success: true });
   } catch (err) {
+    console.error("Error marking all as read:", err);
     res.status(500).json({ message: "Server error" });
   }
 });
 
-// 7. DELETE SINGLE NOTIFICATION
+// 7. DELETE SINGLE NOTIFICATION - FIXED
 router.delete("/delete/:id", auth, async (req, res) => {
   try {
-    const note = await Notification.findById(req.params.id);
-    if (!note) return res.status(404).json({ message: "Not found" });
-
-    if (note.recipient && note.recipient.toString() === req.userId) {
-      await Notification.findByIdAndDelete(req.params.id);
-    } else {
-      await Notification.findByIdAndUpdate(req.params.id, { 
-        $addToSet: { deletedBy: req.userId }
-      });
+    const notification = await Notification.findOne({
+      _id: req.params.id,
+      recipient: req.userId // Only allow if user owns it
+    });
+    
+    if (!notification) {
+      return res.status(404).json({ message: "Notification not found" });
     }
+
+    // Soft delete - add to deletedBy array
+    if (!notification.deletedBy) {
+      notification.deletedBy = [];
+    }
+    
+    if (!notification.deletedBy.some(id => id.toString() === req.userId)) {
+      notification.deletedBy.push(req.userId);
+      await notification.save();
+    }
+
     res.json({ success: true });
   } catch (err) {
+    console.error("Error deleting notification:", err);
     res.status(500).json({ message: "Delete failed" });
   }
 });
 
-// 8. CLEAR ALL
+// 8. CLEAR ALL - FIXED
 router.delete("/clear-all", auth, async (req, res) => {
   try {
-    // Delete private ones
-    await Notification.deleteMany({ recipient: req.userId });
-    // Hide global ones
+    // Soft delete all notifications for this user
     await Notification.updateMany(
-      { recipient: null, deletedBy: { $ne: req.userId } },
+      { 
+        recipient: req.userId,
+        deletedBy: { $ne: req.userId }
+      },
       { $addToSet: { deletedBy: req.userId } }
     );
+    
     res.json({ success: true });
   } catch (err) {
+    console.error("Error clearing all notifications:", err);
     res.status(500).json({ message: "Clear failed" });
   }
 });

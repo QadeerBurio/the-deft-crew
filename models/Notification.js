@@ -4,7 +4,8 @@ const NotificationSchema = new mongoose.Schema({
   recipient: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "User",
-    default: null
+    required: true, // Make this required - never null
+    index: true // Add index for faster queries
   },
   sender: { 
     type: mongoose.Schema.Types.ObjectId, 
@@ -61,10 +62,17 @@ const NotificationSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId, 
     ref: 'User' 
   }],
-  expoPushToken: { 
-    type: String, 
-    default: null 
+  metadata: {
+    type: mongoose.Schema.Types.Mixed,
+    default: {}
   }
-}, { timestamps: true });
+}, { 
+  timestamps: true 
+});
+
+// Index for faster queries
+NotificationSchema.index({ recipient: 1, createdAt: -1 });
+NotificationSchema.index({ readBy: 1 });
+NotificationSchema.index({ deletedBy: 1 });
 
 module.exports = mongoose.model("Notification", NotificationSchema);

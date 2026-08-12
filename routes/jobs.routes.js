@@ -385,6 +385,9 @@ router.get("/public/tdc", async (req, res) => {
 // ==================== APPLICATION ROUTES ====================
 
 // Apply for a job with resume upload to Cloudinary
+// ==================== APPLICATION ROUTES ====================
+
+// Apply for a job with resume upload to Cloudinary
 router.post("/apply/:jobId", authMiddleware, uploadResume.single('resume'), async (req, res) => {
     try {
         const { jobId } = req.params;
@@ -449,22 +452,35 @@ router.post("/apply/:jobId", authMiddleware, uploadResume.single('resume'), asyn
             console.error('Error logging apply interaction:', interErr.message);
         }
 
-        // Notifications
-        await Notification.create({
-            recipient: job.postedBy,
-            title: "New Job Application! 🎯",
-            description: `${fullName} applied for ${job.title}`,
-            type: "Job Application",
-            icon: "briefcase",
-            metadata: { jobId: job._id, applicationId: application._id }
-        });
+        // ✅ FIX: Send notification to job poster ONLY
+        if (job.postedBy) {
+            await Notification.create({
+                recipient: job.postedBy, // Only the job poster gets this notification
+                title: "New Job Application! 🎯",
+                description: `${fullName} applied for ${job.title}`,
+                type: "Job Application",
+                icon: "briefcase",
+                metadata: { 
+                    jobId: job._id, 
+                    applicationId: application._id,
+                    applicantName: fullName,
+                    applicantEmail: email
+                }
+            });
+        }
 
+        // ✅ FIX: Send confirmation to applicant ONLY
         await Notification.create({
-            recipient: req.userId,
+            recipient: req.userId, // Only the applicant gets this notification
             title: "Application Submitted! ✅",
-            description: `Your application for ${job.title} has been submitted.`,
-            type: "System",
-            icon: "checkmark-circle"
+            description: `Your application for "${job.title}" has been submitted successfully.`,
+            type: "Application Status",
+            icon: "checkmark-circle",
+            metadata: { 
+                jobId: job._id, 
+                applicationId: application._id,
+                status: "pending"
+            }
         });
 
         res.status(201).json({ 
@@ -473,6 +489,73 @@ router.post("/apply/:jobId", authMiddleware, uploadResume.single('resume'), asyn
         });
     } catch (err) {
         console.error(err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Update application status
+router.patch("/application/:id/status", authMiddleware, async (req, res) => {
+    try {
+        const { status, notes, interviewDate, interviewNotes, rating } = req.body;
+        const application = await JobApplication.findById(req.params.id).populate('jobId');
+        
+        if (!application) return res.status(404).json({ message: "Application not found" });
+        
+        const job = await Job.findById(application.jobId._id);
+        if (req.user.role !== "admin" && job.postedBy.toString() !== req.userId) {
+            return res.status(403).json({ message: "Only the job poster can update application status" });
+        }
+        
+        application.status = status;
+        if (notes) application.notes = notes;
+        if (interviewDate) application.interviewDate = new Date(interviewDate);
+        if (interviewNotes) application.interviewNotes = interviewNotes;
+        if (rating) application.rating = rating;
+        application.reviewedAt = Date.now();
+        application.lastUpdated = Date.now();
+        
+        await application.save();
+        
+        let statusMessage = "";
+        let icon = "information-circle";
+        switch(status) {
+            case "shortlisted":
+                statusMessage = "Congratulations! You've been shortlisted. We'll contact you soon for an interview.";
+                icon = "trophy";
+                break;
+            case "interview":
+                statusMessage = `Interview scheduled for ${new Date(interviewDate).toLocaleDateString()}. ${interviewNotes || "Please check your email for details."}`;
+                icon = "calendar";
+                break;
+            case "rejected":
+                statusMessage = "Thank you for your interest. We've decided to move forward with other candidates.";
+                icon = "alert-circle";
+                break;
+            case "hired":
+                statusMessage = "Congratulations! Welcome to the team! HR will contact you with onboarding details.";
+                icon = "checkmark-circle";
+                break;
+            default:
+                statusMessage = `Your application status has been updated to ${status}`;
+        }
+        
+        // ✅ FIX: Only send notification to the applicant
+        await Notification.create({
+            recipient: application.userId, // Only the applicant gets this notification
+            title: `Application Update - ${application.jobId.title}`,
+            description: statusMessage,
+            type: "Application Status",
+            icon: icon,
+            metadata: { 
+                jobId: job._id, 
+                applicationId: application._id,
+                status: status,
+                previousStatus: application.status
+            }
+        });
+        
+        res.json({ message: "Application status updated", application });
+    } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
