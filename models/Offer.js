@@ -1,3 +1,4 @@
+// models/Offer.js - UPDATED
 const mongoose = require("mongoose");
 
 const offerSchema = new mongoose.Schema({
@@ -10,26 +11,26 @@ const offerSchema = new mongoose.Schema({
     required: true,
     enum: [
       "Restaurant",
-  "Cafe & Coffee",
-  "Food & Drinks",
-  "Salon",
-  "Spa & Wellness",
-  "Health & Beauty",
-  "Perfumes & Fragrances",
-  "Fashion & Clothing",
-  "Shoes & Footwear",
-  "Bags & Accessories",
-  "Electronics & Gadgets",
-  "Mobile & Accessories",
-  "Education & Institutes",
-  "Travel & Tourism",
-  "Hotels & Resorts",
-  "Gym & Fitness",
-  "Sports",
-  "Entertainment",
-  "Photography",
-  "Services",
-  "Others"
+      "Cafe & Coffee",
+      "Food & Drinks",
+      "Salon",
+      "Spa & Wellness",
+      "Health & Beauty",
+      "Perfumes & Fragrances",
+      "Fashion & Clothing",
+      "Shoes & Footwear",
+      "Bags & Accessories",
+      "Electronics & Gadgets",
+      "Mobile & Accessories",
+      "Education & Institutes",
+      "Travel & Tourism",
+      "Hotels & Resorts",
+      "Gym & Fitness",
+      "Sports",
+      "Entertainment",
+      "Photography",
+      "Services",
+      "Others"
     ]
   },
   location: String,
@@ -56,9 +57,22 @@ const offerSchema = new mongoose.Schema({
       student: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
       billAmount: Number,
       savedAmount: Number,
-      redeemedAt: { type: Date, default: Date.now }
+      redeemedAt: { type: Date, default: Date.now },
+      promoCode: { type: String }, // Track which promo code was used
+      promoCodeId: { type: mongoose.Schema.Types.ObjectId, ref: 'PromoCode' }
     }
-  ]
+  ],
+  // Track promo codes generated for this offer
+  promoCodesGenerated: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'PromoCode'
+  }]
 }, { timestamps: true });
+
+// Indexes
+offerSchema.index({ brand: 1, isOnline: 1, isInStore: 1 });
+offerSchema.index({ category: 1 });
+offerSchema.index({ 'claimedBy': 1 });
+offerSchema.index({ 'redemptions.student': 1 });
 
 module.exports = mongoose.model("Offer", offerSchema);

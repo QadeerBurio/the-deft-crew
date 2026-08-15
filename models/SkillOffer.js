@@ -1,3 +1,4 @@
+// models/SkillOffer.js
 const mongoose = require('mongoose');
 
 const skillOfferSchema = new mongoose.Schema({
@@ -55,14 +56,17 @@ const skillOfferSchema = new mongoose.Schema({
   }
 });
 
+// ✅ FIX: Remove any unique indexes - use regular indexes instead
 // Index for fast lookups
 skillOfferSchema.index({ listingId: 1, status: 1 });
 skillOfferSchema.index({ offerorId: 1, listingId: 1 });
+// Compound index for checking duplicates (non-unique)
+skillOfferSchema.index({ listingId: 1, offerorId: 1, status: 1 });
 
 // Pre-save middleware to update updatedAt
 skillOfferSchema.pre('save', function(next) {
   this.updatedAt = new Date();
-//   next();
+  // next(); // ✅ FIX: Uncomment this!
 });
 
 module.exports = mongoose.model('SkillOffer', skillOfferSchema);

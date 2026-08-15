@@ -140,21 +140,81 @@ router.get("/my-offers", auth, async (req, res) => {
   }
 });
 
-// CLAIM: Add offer to "My Discounts"
+// routes/offer.routes.js - Add this CLAIM endpoint fix
+
+// CLAIM: Add offer to "My Discounts" - FIXED
 router.post("/claim/:offerId", auth, async (req, res) => {
   try {
     const offer = await Offer.findById(req.params.offerId);
     if (!offer) return res.status(404).json({ message: "Offer not found" });
 
+    // Check if already claimed
     if (offer.claimedBy.includes(req.userId)) {
-      return res.status(400).json({ message: "Voucher already in your 'My Discounts'" });
+      return res.status(400).json({ 
+        message: "Voucher already in your 'My Discounts'",
+        alreadyClaimed: true 
+      });
     }
 
     offer.claimedBy.push(req.userId);
     await offer.save();
 
-    res.json({ message: "Discount added to your profile!", offer });
+    // Clear cache for this user's claimed offers
+    await cache.del(`offers:claimed:${req.userId}`);
+
+    res.json({ 
+      message: "Discount added to your profile!", 
+      offer,
+      claimed: true
+    });
   } catch (err) {
+    console.error("Error claiming offer:", err);
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// GET: Student's active vouchers with redemption info - FIXED
+router.get("/claimed", auth, async (req, res) => {
+  try {
+    const cacheKey = `offers:claimed:${req.userId}`;
+    
+    // Try cache first
+    const cached = await cache.get(cacheKey);
+    if (cached) {
+      return res.json(JSON.parse(cached));
+    }
+
+    const claimedOffers = await Offer.find({ claimedBy: req.userId })
+      .populate("brand", "name logo")
+      .lean()
+      .exec();
+    
+    // Add redemption info to each offer
+    const offersWithInfo = claimedOffers.map(offer => {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      const todayRedemptions = offer.redemptions?.filter(r => {
+        const redeemDate = new Date(r.redeemedAt);
+        redeemDate.setHours(0, 0, 0, 0);
+        return r.student?.toString() === req.userId && redeemDate.getTime() === today.getTime();
+      }) || [];
+      
+      return {
+        ...offer,
+        redemptionsToday: todayRedemptions.length,
+        maxRedemptionsPerDay: 2,
+        canRedeem: todayRedemptions.length < 2,
+        isClaimed: true // Explicit flag
+      };
+    });
+    
+    // Cache for 30 seconds
+    await cache.set(cacheKey, JSON.stringify(offersWithInfo), 30);
+    
+    res.json(offersWithInfo);
+  } catch (err) {
+    console.error("Error fetching claimed offers:", err);
     res.status(500).json({ message: err.message });
   }
 });
@@ -325,38 +385,38 @@ router.get("/summary", auth, async (req, res) => {
   }
 });
 
-// GET: Student's active vouchers with redemption info
-router.get("/claimed", auth, async (req, res) => {
-  try {
-    const claimedOffers = await Offer.find({ claimedBy: req.userId })
-      .populate("brand", "name logo")
-      .lean()
-      .exec();
+// // GET: Student's active vouchers with redemption info
+// router.get("/claimed", auth, async (req, res) => {
+//   try {
+//     const claimedOffers = await Offer.find({ claimedBy: req.userId })
+//       .populate("brand", "name logo")
+//       .lean()
+//       .exec();
     
-    // Add redemption info to each offer
-    const offersWithInfo = claimedOffers.map(offer => {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
+//     // Add redemption info to each offer
+//     const offersWithInfo = claimedOffers.map(offer => {
+//       const today = new Date();
+//       today.setHours(0, 0, 0, 0);
       
-      const todayRedemptions = offer.redemptions.filter(r => {
-        const redeemDate = new Date(r.redeemedAt);
-        redeemDate.setHours(0, 0, 0, 0);
-        return r.student.toString() === req.userId && redeemDate.getTime() === today.getTime();
-      });
+//       const todayRedemptions = offer.redemptions.filter(r => {
+//         const redeemDate = new Date(r.redeemedAt);
+//         redeemDate.setHours(0, 0, 0, 0);
+//         return r.student.toString() === req.userId && redeemDate.getTime() === today.getTime();
+//       });
       
-      return {
-        ...offer,
-        redemptionsToday: todayRedemptions.length,
-        maxRedemptionsPerDay: 2,
-        canRedeem: todayRedemptions.length < 2
-      };
-    });
+//       return {
+//         ...offer,
+//         redemptionsToday: todayRedemptions.length,
+//         maxRedemptionsPerDay: 2,
+//         canRedeem: todayRedemptions.length < 2
+//       };
+//     });
     
-    res.json(offersWithInfo);
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
+//     res.json(offersWithInfo);
+//   } catch (err) {
+//     res.status(500).json({ message: err.message });
+//   }
+// });
 
 // STATS: Total student savings
 router.get("/my-total-savings", auth, async (req, res) => {
@@ -829,6 +889,222 @@ router.get("/brandss", async (req, res) => {
     });
   } catch (err) {
     console.error("Error fetching brands:", err);
+    res.status(500).json({ 
+      success: false, 
+      message: err.message 
+    });
+  }
+});
+
+
+
+
+// routes/offer.routes.js - Add these new routes to existing file
+
+// ==================== GENERATE PROMO CODE FROM OFFER ====================
+// POST /api/offers/generate-promo/:offerId
+// This is a convenience route that calls the promo code generation
+router.post("/generate-promo/:offerId", auth, async (req, res) => {
+  try {
+    const { offerId } = req.params;
+    const studentId = req.userId;
+    
+    // Forward to promo code generation
+    const promoCodeGen = require('./promoCode.routes');
+    
+    // Find offer first
+    const offer = await Offer.findById(offerId)
+      .populate('brand', 'name')
+      .lean();
+    
+    if (!offer) {
+      return res.status(404).json({ 
+        success: false, 
+        message: "Offer not found" 
+      });
+    }
+    
+    // Check if student has claimed this offer
+    if (!offer.claimedBy.includes(studentId)) {
+      return res.status(403).json({ 
+        success: false, 
+        message: "You must claim this offer first" 
+      });
+    }
+    
+    // Check if offer is online
+    if (!offer.isOnline) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "This offer is not available online" 
+      });
+    }
+    
+    // Check if student already has an active promo code
+    const PromoCode = require("../models/PromoCode");
+    const existingActive = await PromoCode.findOne({
+      offer: offerId,
+      student: studentId,
+      status: 'active'
+    });
+    
+    if (existingActive) {
+      return res.status(400).json({
+        success: false,
+        message: "You already have an active promo code for this offer",
+        promoCode: existingActive.code
+      });
+    }
+    
+    // Check daily limit
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const todayRedemptions = offer.redemptions.filter(r => {
+      const redeemDate = new Date(r.redeemedAt);
+      redeemDate.setHours(0, 0, 0, 0);
+      return r.student.toString() === studentId && redeemDate.getTime() === today.getTime();
+    });
+    
+    if (todayRedemptions.length >= 2) {
+      return res.status(400).json({
+        success: false,
+        message: "You have already used this discount 2 times today",
+        redemptionsUsed: todayRedemptions.length,
+        maxRedemptions: 2
+      });
+    }
+    
+    // Generate promo code
+    const brandPrefix = offer.brand?.name?.substring(0, 3).toUpperCase() || 'TDC';
+    const random = Math.random().toString(36).substring(2, 8).toUpperCase();
+    const promoCode = `${brandPrefix}${random}`;
+    
+    // Create promo code
+    const newPromoCode = await PromoCode.create({
+      code: promoCode,
+      offer: offerId,
+      student: studentId,
+      brand: offer.brand._id,
+      discountPercentage: offer.discountPercentage,
+      offerTitle: offer.title,
+      brandName: offer.brand?.name || 'Brand',
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      maxUses: 1
+    });
+    
+    // Add to offer's promo codes
+    await Offer.findByIdAndUpdate(offerId, {
+      $push: { promoCodesGenerated: newPromoCode._id }
+    });
+    
+    // Create notification
+    await Notification.create({
+      recipient: studentId,
+      title: "🎉 Promo Code Generated!",
+      description: `Your promo code ${promoCode} for ${offer.title} is ready. Use it at checkout to get ${offer.discountPercentage}% OFF!`,
+      type: "System",
+      icon: "ticket-outline"
+    });
+    
+    res.json({
+      success: true,
+      message: "Promo code generated successfully",
+      promoCode: {
+        code: newPromoCode.code,
+        offerTitle: newPromoCode.offerTitle,
+        brandName: newPromoCode.brandName,
+        discountPercentage: newPromoCode.discountPercentage,
+        expiresAt: newPromoCode.expiresAt,
+        qrData: newPromoCode.qrData
+      }
+    });
+    
+  } catch (err) {
+    console.error("Error generating promo from offer:", err);
+    res.status(500).json({ 
+      success: false, 
+      message: err.message 
+    });
+  }
+});
+
+// ==================== GET OFFER WITH PROMO CODE INFO ====================
+// GET /api/offers/:offerId/promo-info
+router.get("/:offerId/promo-info", auth, async (req, res) => {
+  try {
+    const { offerId } = req.params;
+    const userId = req.userId;
+    
+    const PromoCode = require("../models/PromoCode");
+    
+    const offer = await Offer.findById(offerId)
+      .populate('brand', 'name logo')
+      .lean();
+    
+    if (!offer) {
+      return res.status(404).json({ 
+        success: false, 
+        message: "Offer not found" 
+      });
+    }
+    
+    // Check if user has claimed this offer
+    const hasClaimed = offer.claimedBy.includes(userId);
+    
+    // Check if user has an active promo code
+    const activePromo = await PromoCode.findOne({
+      offer: offerId,
+      student: userId,
+      status: 'active'
+    }).lean();
+    
+    // Get today's redemptions for this user
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const todayRedemptions = offer.redemptions.filter(r => {
+      const redeemDate = new Date(r.redeemedAt);
+      redeemDate.setHours(0, 0, 0, 0);
+      return r.student.toString() === userId && redeemDate.getTime() === today.getTime();
+    });
+    
+    // Get total redemptions for this user
+    const totalRedemptions = offer.redemptions.filter(r => 
+      r.student.toString() === userId
+    );
+    
+    res.json({
+      success: true,
+      offer: {
+        id: offer._id,
+        title: offer.title,
+        discountPercentage: offer.discountPercentage,
+        isOnline: offer.isOnline,
+        isInStore: offer.isInStore
+      },
+      userStatus: {
+        hasClaimed,
+        hasActivePromo: !!activePromo,
+        activePromo: activePromo ? {
+          code: activePromo.code,
+          expiresAt: activePromo.expiresAt,
+          qrData: activePromo.qrData
+        } : null,
+        redemptionsToday: todayRedemptions.length,
+        maxRedemptionsPerDay: 2,
+        totalRedemptions: totalRedemptions.length,
+        maxTotalRedemptions: 2,
+        canGeneratePromo: hasClaimed && 
+                          offer.isOnline && 
+                          !activePromo && 
+                          todayRedemptions.length < 2 &&
+                          totalRedemptions.length < 2
+      }
+    });
+    
+  } catch (err) {
+    console.error("Error getting promo info:", err);
     res.status(500).json({ 
       success: false, 
       message: err.message 

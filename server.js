@@ -106,6 +106,7 @@ app.use("/api/jobs", require("./routes/jobs.routes"));
 app.use("/api/traveler", require("./routes/traveler.routes"));
 app.use("/api/resume", require("./routes/resume.routes"));
 app.use("/api/brand-approval", require("./routes/brandApproval.routes"));
+app.use("/api/promo-codes", require("./routes/promoCode.routes"));
 app.use("/api/v1", require("./chat-service/dist/routes/index").default);
 
 // ============ SKILLSWAP ROUTES ============

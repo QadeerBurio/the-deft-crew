@@ -16,12 +16,27 @@ const getUserId = (req) => {
 // ==================== CREATE OFFER ====================
 router.post('/', auth, async (req, res) => {
   try {
-    const { listingId, message, offeredSkillName, offeredSkillLevel, proposedPrice, applicationNotes } = req.body;
+    const { 
+      listingId, 
+      message, 
+      offeredSkillName, 
+      offeredSkillLevel, 
+      proposedPrice, 
+      applicationNotes 
+    } = req.body;
+    
     const offerorId = getUserId(req);
 
+    // ✅ FIX: Validate offerorId exists
     if (!offerorId) {
-      return res.status(401).json({ error: 'User ID required' });
+      return res.status(401).json({ 
+        error: 'User authentication required',
+        details: 'Please login to make an offer'
+      });
     }
+
+    // Convert to string for consistency
+    const offerorIdStr = offerorId.toString();
 
     // Check if listing exists
     const listing = await Listing.findById(listingId);
@@ -34,32 +49,43 @@ router.post('/', auth, async (req, res) => {
       return res.status(400).json({ error: 'This listing is no longer accepting offers' });
     }
 
-    // Check if user is the owner - FIXED comparison
-    if (listing.ownerId.toString() === offerorId.toString()) {
+    // Check if user is the owner
+    if (listing.ownerId.toString() === offerorIdStr) {
       return res.status(400).json({ error: 'You cannot offer on your own listing' });
     }
 
-    // Check for existing pending offer
+    // ✅ FIX: Check for existing pending offer more carefully
     const existingOffer = await SkillOffer.findOne({
-      listingId,
-      offerorId: offerorId.toString(),
+      listingId: listingId,
+      offerorId: offerorIdStr,
       status: { $in: ['pending', 'accepted'] }
     });
 
     if (existingOffer) {
-      return res.status(409).json({ error: 'You already have a pending offer for this listing' });
+      return res.status(409).json({ 
+        error: 'You already have a pending offer for this listing',
+        offerId: existingOffer._id,
+        status: existingOffer.status
+      });
     }
 
-    // Create the offer
-    const offer = new SkillOffer({
-      listingId,
-      offerorId: offerorId.toString(),
-      message,
-      offeredSkillName,
-      offeredSkillLevel,
-      proposedPrice,
-      applicationNotes
-    });
+    // ✅ FIX: Create the offer with all fields properly set
+    const offerData = {
+      listingId: listingId,
+      offerorId: offerorIdStr,
+      status: 'pending',
+      message: message || '',
+    };
+
+    // Add optional fields based on listing type
+    if (offeredSkillName) offerData.offeredSkillName = offeredSkillName;
+    if (offeredSkillLevel) offerData.offeredSkillLevel = offeredSkillLevel;
+    if (proposedPrice) offerData.proposedPrice = parseFloat(proposedPrice);
+    if (applicationNotes) offerData.applicationNotes = applicationNotes;
+
+    const offer = new SkillOffer(offerData);
+
+    console.log('Creating offer with data:', offerData);
 
     await offer.save();
 
@@ -71,7 +97,18 @@ router.post('/', auth, async (req, res) => {
 
   } catch (err) {
     console.error('Error creating offer:', err);
-    res.status(500).json({ error: err.message || 'Failed to create offer' });
+    
+    // ✅ FIX: Handle duplicate key error specifically
+    if (err.code === 11000) {
+      return res.status(409).json({ 
+        error: 'You already have a pending offer for this listing',
+        details: 'Duplicate offer detected'
+      });
+    }
+    
+    res.status(500).json({ 
+      error: err.message || 'Failed to create offer'
+    });
   }
 });
 
@@ -90,16 +127,14 @@ router.get('/listing/:listingId', auth, async (req, res) => {
       return res.status(404).json({ error: 'Listing not found' });
     }
 
-    // FIXED: Convert both to strings for comparison
+    // Convert both to strings for comparison
     const listingOwnerId = listing.ownerId.toString();
     const currentUserId = userId.toString();
 
     // Only listing owner can view all offers
     if (listingOwnerId !== currentUserId) {
-      console.log('Auth failed - Listing owner:', listingOwnerId, 'Current user:', currentUserId);
       return res.status(403).json({ 
-        error: 'Unauthorized: Only the listing owner can view offers',
-        debug: { listingOwnerId, currentUserId }
+        error: 'Unauthorized: Only the listing owner can view offers'
       });
     }
 
@@ -166,7 +201,10 @@ router.patch('/:offerId/status', auth, async (req, res) => {
 
     // Check if offer is still pending
     if (offer.status !== 'pending') {
-      return res.status(400).json({ error: 'This offer has already been processed' });
+      return res.status(400).json({ 
+        error: 'This offer has already been processed',
+        currentStatus: offer.status
+      });
     }
 
     // Get the listing
@@ -175,7 +213,7 @@ router.patch('/:offerId/status', auth, async (req, res) => {
       return res.status(404).json({ error: 'Listing not found' });
     }
 
-    // FIXED: Convert both to strings for comparison
+    // Convert both to strings for comparison
     if (listing.ownerId.toString() !== userId.toString()) {
       return res.status(403).json({ error: 'Unauthorized: You are not the listing owner' });
     }
@@ -246,18 +284,25 @@ router.patch('/:offerId/withdraw', auth, async (req, res) => {
     const { offerId } = req.params;
     const userId = getUserId(req);
 
+    if (!userId) {
+      return res.status(401).json({ error: 'User ID required' });
+    }
+
     const offer = await SkillOffer.findById(offerId);
     if (!offer) {
       return res.status(404).json({ error: 'Offer not found' });
     }
 
-    // FIXED: Convert both to strings for comparison
+    // Convert both to strings for comparison
     if (offer.offerorId.toString() !== userId.toString()) {
       return res.status(403).json({ error: 'Unauthorized: You are not the offeror' });
     }
 
     if (offer.status !== 'pending') {
-      return res.status(400).json({ error: 'This offer cannot be withdrawn' });
+      return res.status(400).json({ 
+        error: 'This offer cannot be withdrawn',
+        currentStatus: offer.status
+      });
     }
 
     offer.status = 'withdrawn';
