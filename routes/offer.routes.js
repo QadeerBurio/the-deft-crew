@@ -556,44 +556,77 @@ router.get("/:offerId/image", auth, async (req, res) => {
 });
 
 // GET: Fetch offer images with filters - FIXED VERSION
+// GET: Fetch offer images with filters - SHOW ONLY APPROVED BRANDS' OFFERS
 router.get("/images/all", auth, async (req, res) => {
   try {
-    const { brandId, category, limit = 50 } = req.query;
+    const { brandId, category, limit = 100 } = req.query;
     
     // Build filter - only get offers with images
     const filter = { 
-      image: { $ne: null, $ne: '' } // Only offers with images
+      image: { $ne: null, $ne: '' }
     };
     
     if (brandId) filter.brand = brandId;
     if (category) filter.category = category;
 
-    const cacheKey = `offers:images:filter:${JSON.stringify(filter)}`;
+    const cacheKey = `offers:images:approved:${JSON.stringify(filter)}`;
     
     const cached = await cache.get(cacheKey);
     if (cached) {
       return res.json(JSON.parse(cached));
     }
 
-    // Get offers with populated brand data
+    // Get all offers with images
     const offers = await Offer.find(filter)
       .select('_id title image brand discountPercentage category isOnline isInStore')
-      .populate('brand', 'name logo')
-      .limit(parseInt(limit))
+      .populate({
+        path: 'brand',
+        select: 'name logo brandApprovalStatus role',
+        match: { 
+          role: 'brand',
+          brandApprovalStatus: 'approved' // ONLY approved brands
+        }
+      })
       .lean()
       .exec();
 
-    // Filter out offers where brand doesn't exist or is null
-    const validOffers = offers.filter(offer => 
-      offer.brand && 
-      offer.brand._id && 
-      offer.image && 
-      offer.image !== null && 
-      offer.image !== ''
-    );
+    // Filter out offers where brand doesn't exist or is not approved
+    const validOffers = offers.filter(offer => {
+      // Check if brand exists and has an _id
+      if (!offer.brand || !offer.brand._id) {
+        console.log(`Offer ${offer._id} filtered: No brand found`);
+        return false;
+      }
+      
+      // Check if brand is approved
+      if (offer.brand.brandApprovalStatus !== 'approved') {
+        console.log(`Offer ${offer._id} filtered: Brand ${offer.brand.name} status: ${offer.brand.brandApprovalStatus}`);
+        return false;
+      }
+      
+      // Check if image exists and is valid
+      if (!offer.image || offer.image === null || offer.image === '') {
+        console.log(`Offer ${offer._id} filtered: No image`);
+        return false;
+      }
+      
+      // Check if image is not a placeholder
+      if (offer.image.includes('via.placeholder.com') || 
+          offer.image.includes('placeholder')) {
+        console.log(`Offer ${offer._id} filtered: Placeholder image`);
+        return false;
+      }
+      
+      return true;
+    });
+
+    console.log(`Total offers found: ${offers.length}`);
+    console.log(`Valid offers from approved brands: ${validOffers.length}`);
 
     const response = {
       count: validOffers.length,
+      totalOffers: offers.length,
+      approvedBrandOffers: validOffers.length,
       offers: validOffers.map(offer => ({
         offerId: offer._id,
         title: offer.title || 'Offer',
@@ -601,7 +634,8 @@ router.get("/images/all", auth, async (req, res) => {
         brand: {
           id: offer.brand._id,
           name: offer.brand.name || 'Brand',
-          logo: offer.brand.logo
+          logo: offer.brand.logo || null,
+          approved: offer.brand.brandApprovalStatus === 'approved'
         },
         discountPercentage: offer.discountPercentage || 0,
         category: offer.category || 'General',
@@ -618,7 +652,9 @@ router.get("/images/all", auth, async (req, res) => {
     res.status(500).json({ 
       message: err.message,
       offers: [],
-      count: 0 
+      count: 0,
+      totalOffers: 0,
+      approvedBrandOffers: 0
     });
   }
 });
