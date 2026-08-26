@@ -67,47 +67,15 @@ module.exports = async (req, res, next) => {
     next();
     
   } catch (err) {
-    // If token is invalid but not expired, treat as guest
+    // Return proper 401 Unauthorized if token verification fails
     if (err.name === 'JsonWebTokenError') {
-      req.user = {
-        id: 'guest-user',
-        role: 'guest',
-        email: 'guest@example.com',
-        name: 'Guest User',
-        isGuest: true
-      };
-      req.isGuest = true;
-      req.userId = 'guest-user';
-      req.userRole = 'guest';
-      return next();
+      return res.status(401).json({ message: "Invalid token" });
     }
     
-    // If token is expired, treat as guest
     if (err.name === 'TokenExpiredError') {
-      req.user = {
-        id: 'guest-user',
-        role: 'guest',
-        email: 'guest@example.com',
-        name: 'Guest User',
-        isGuest: true
-      };
-      req.isGuest = true;
-      req.userId = 'guest-user';
-      req.userRole = 'guest';
-      return next();
+      return res.status(401).json({ message: "Token expired" });
     }
     
-    // Other errors - treat as guest
-    req.user = {
-      id: 'guest-user',
-      role: 'guest',
-      email: 'guest@example.com',
-      name: 'Guest User',
-      isGuest: true
-    };
-    req.isGuest = true;
-    req.userId = 'guest-user';
-    req.userRole = 'guest';
-    next();
+    return res.status(401).json({ message: "Authentication failed", error: err.message });
   }
 };

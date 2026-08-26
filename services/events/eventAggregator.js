@@ -17,13 +17,13 @@ class EventAggregator {
    */
   async runAggregation(targetProvider = null) {
     if (this.isSyncing) {
-      console.log('⚠️ [EventAggregator] Ingestion pipeline is already running. Skipping concurrent run.');
+      // console.log('⚠️ [EventAggregator] Ingestion pipeline is already running. Skipping concurrent run.');
       return { status: 'busy', message: 'Sync already in progress' };
     }
 
     this.isSyncing = true;
     const startTime = Date.now();
-    console.log(`🌐 [EventAggregator] Starting automated Karachi event aggregation pipeline...`);
+    // console.log(`🌐 [EventAggregator] Starting automated Karachi event aggregation pipeline...`);
 
     const summary = {
       startTime: new Date(),
@@ -96,7 +96,7 @@ class EventAggregator {
             }
           }
 
-          console.log(`📊 Provider: ${providerMetrics.name}\n   Fetched: ${providerMetrics.fetched}\n   Normalized: ${providerMetrics.normalized}\n   Inserted: ${providerMetrics.inserted}\n   Updated: ${providerMetrics.updated}\n   Duplicates: ${providerMetrics.duplicates}`);
+          // console.log(`📊 Provider: ${providerMetrics.name}\n   Fetched: ${providerMetrics.fetched}\n   Normalized: ${providerMetrics.normalized}\n   Inserted: ${providerMetrics.inserted}\n   Updated: ${providerMetrics.updated}\n   Duplicates: ${providerMetrics.duplicates}`);
 
         } catch (pErr) {
           console.error(`❌ [EventAggregator] Provider ${provider.name} failed: ${pErr.message}`);
@@ -116,7 +116,7 @@ class EventAggregator {
       }
 
       const durationMs = Date.now() - startTime;
-      console.log(`✅ [EventAggregator] Pipeline completed in ${durationMs}ms. Inserted: ${summary.insertedCount}, Updated: ${summary.updatedCount}, Duplicates: ${summary.duplicateCount}, Expired: ${summary.expiredCount}`);
+      // console.log(`✅ [EventAggregator] Pipeline completed in ${durationMs}ms. Inserted: ${summary.insertedCount}, Updated: ${summary.updatedCount}, Duplicates: ${summary.duplicateCount}, Expired: ${summary.expiredCount}`);
 
       this.lastSyncResult = {
         success: true,

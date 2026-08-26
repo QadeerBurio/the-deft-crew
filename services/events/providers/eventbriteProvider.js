@@ -11,10 +11,10 @@ class EventbriteProvider extends BaseProvider {
 
   async fetchEvents() {
     return this.executeWithRetry(async () => {
-      console.log(`🔎 [EventbriteProvider] Fetching events for ${this.city}...`);
+      // console.log(`🔎 [EventbriteProvider] Fetching events for ${this.city}...`);
 
       if (!this.apiToken) {
-        console.log(`ℹ️ [EventbriteProvider] No EVENTBRITE_API_TOKEN configured. Ingesting curated live Karachi Eventbrite events.`);
+        // console.log(`ℹ️ [EventbriteProvider] No EVENTBRITE_API_TOKEN configured. Ingesting curated live Karachi Eventbrite events.`);
         return this.getCuratedKarachiEvents();
       }
 
@@ -64,7 +64,7 @@ class EventbriteProvider extends BaseProvider {
           rawType: event.category_id || 'Tech & Education'
         }));
       } catch (err) {
-        console.warn(`⚠️ [EventbriteProvider] API fetch notice: ${err.message}. Returning Karachi Eventbrite events.`);
+        // console.warn(`⚠️ [EventbriteProvider] API fetch notice: ${err.message}. Returning Karachi Eventbrite events.`);
         return this.getCuratedKarachiEvents();
       }
     });

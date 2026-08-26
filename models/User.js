@@ -97,6 +97,24 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+
+    websiteUrl: {
+      type: String,
+      default: "",
+    },
+    webhookSecret: {
+      type: String,
+      default: "",
+    },
+    wooConsumerKey: {
+      type: String,
+      default: "",
+    },
+    wooConsumerSecret: {
+      type: String,
+      default: "",
+    },
+
     address: {
       type: String,
       default: "",
@@ -179,7 +197,7 @@ const userSchema = new mongoose.Schema(
     connections: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
     sentRequests: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
     receivedRequests: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
- // --- BLOCKED USERS (NEW) ---
+    // --- BLOCKED USERS (NEW) ---
     blockedUsers: [{
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User'

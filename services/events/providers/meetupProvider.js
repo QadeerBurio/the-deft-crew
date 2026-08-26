@@ -10,10 +10,10 @@ class MeetupProvider extends BaseProvider {
 
   async fetchEvents() {
     return this.executeWithRetry(async () => {
-      console.log(`🔎 [MeetupProvider] Fetching Meetups for ${this.city}...`);
+      // console.log(`🔎 [MeetupProvider] Fetching Meetups for ${this.city}...`);
 
       if (!this.apiKey) {
-        console.log(`ℹ️ [MeetupProvider] No MEETUP_API_KEY configured. Ingesting curated Karachi Meetups.`);
+        // console.log(`ℹ️ [MeetupProvider] No MEETUP_API_KEY configured. Ingesting curated Karachi Meetups.`);
         return this.getCuratedMeetups();
       }
 

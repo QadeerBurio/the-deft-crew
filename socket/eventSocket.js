@@ -8,7 +8,7 @@ let ioInstance = null;
 module.exports = {
   init: (io) => {
     ioInstance = io;
-    console.log('📡 [EventSocket] Socket.io event broadcaster initialized.');
+    // console.log('📡 [EventSocket] Socket.io event broadcaster initialized.');
 
     io.on('connection', (socket) => {
       socket.on('subscribe_events', () => {

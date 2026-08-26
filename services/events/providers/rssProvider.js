@@ -17,14 +17,14 @@ class RssProvider extends BaseProvider {
 
   async fetchEvents() {
     return this.executeWithRetry(async () => {
-      console.log(`🔎 [RssProvider] Processing ${this.feeds.length} RSS feeds for Karachi...`);
+      // console.log(`🔎 [RssProvider] Processing ${this.feeds.length} RSS feeds for Karachi...`);
       const events = [];
 
       for (const feedConfig of this.feeds) {
         try {
           const feed = await this.parser.parseURL(feedConfig.url);
           const itemCount = feed.items?.length || 0;
-          console.log(`📡 [RssProvider] Parsed feed ${feedConfig.name}: ${itemCount} items.`);
+          // console.log(`📡 [RssProvider] Parsed feed ${feedConfig.name}: ${itemCount} items.`);
 
           for (const item of (feed.items || []).slice(0, 10)) {
             if (item.title) {
@@ -52,7 +52,7 @@ class RssProvider extends BaseProvider {
 
       // Merge curated RSS events so rich ecosystem events are always present
       const curated = this.getCuratedRssEvents();
-      console.log(`✅ [RssProvider] Returning ${events.length + curated.length} total events (${events.length} live feed + ${curated.length} curated).`);
+      // console.log(`✅ [RssProvider] Returning ${events.length + curated.length} total events (${events.length} live feed + ${curated.length} curated).`);
       return [...events, ...curated];
     });
   }

@@ -9,7 +9,7 @@ class EventCleanup {
    * Run expiration scan to flag past events as expired
    */
   async expirePastEvents() {
-    console.log('⏰ [EventCleanup] Running event expiration pass...');
+    // console.log('⏰ [EventCleanup] Running event expiration pass...');
     const now = new Date();
     let expiredCount = 0;
 
@@ -37,7 +37,7 @@ class EventCleanup {
       }
     }
 
-    console.log(`✅ [EventCleanup] Flagged ${expiredCount} past events as expired.`);
+    // console.log(`✅ [EventCleanup] Flagged ${expiredCount} past events as expired.`);
     return expiredCount;
   }
 
@@ -45,7 +45,7 @@ class EventCleanup {
    * Permanently purge expired events older than retention duration
    */
   async purgeExpiredEvents() {
-    console.log(`🧹 [EventCleanup] Purging expired events older than ${this.retentionDays} days...`);
+    // console.log(`🧹 [EventCleanup] Purging expired events older than ${this.retentionDays} days...`);
     const cutoffDate = new Date(Date.now() - this.retentionDays * 86400000);
 
     const result = await Event.deleteMany({
@@ -56,7 +56,7 @@ class EventCleanup {
       ]
     });
 
-    console.log(`✅ [EventCleanup] Permanently deleted ${result.deletedCount} old expired events.`);
+    // console.log(`✅ [EventCleanup] Permanently deleted ${result.deletedCount} old expired events.`);
     return result.deletedCount;
   }
 }

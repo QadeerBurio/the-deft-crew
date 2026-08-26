@@ -30,7 +30,7 @@ class ProviderManager {
       totalFetched: 0,
       lastError: null
     });
-    console.log(`🔌 [ProviderManager] Registered provider: ${providerInstance.name}`);
+    // console.log(`🔌 [ProviderManager] Registered provider: ${providerInstance.name}`);
   }
 
   getProvider(name) {
@@ -55,7 +55,7 @@ class ProviderManager {
       stats.lastSync = new Date();
 
       try {
-        console.log(`🚀 [ProviderManager] Running provider sync: ${provider.name}...`);
+        // console.log(`🚀 [ProviderManager] Running provider sync: ${provider.name}...`);
         const events = await provider.fetchEvents();
         stats.status = 'success';
         stats.totalFetched += events.length;

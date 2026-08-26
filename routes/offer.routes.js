@@ -185,7 +185,7 @@ router.get("/claimed", auth, async (req, res) => {
     }
 
     const claimedOffers = await Offer.find({ claimedBy: req.userId })
-      .populate("brand", "name logo")
+      .populate("brand", "name logo websiteUrl")
       .lean()
       .exec();
     
@@ -330,7 +330,7 @@ router.get("/brand/:brandId", auth, async (req, res) => {
     }
 
     const offers = await Offer.find({ brand: req.params.brandId })
-      .populate("brand", "name logo category")
+      .populate("brand", "name logo category websiteUrl")
       .lean()
       .exec();
 
@@ -389,7 +389,7 @@ router.get("/summary", auth, async (req, res) => {
 // router.get("/claimed", auth, async (req, res) => {
 //   try {
 //     const claimedOffers = await Offer.find({ claimedBy: req.userId })
-//       .populate("brand", "name logo")
+//       .populate("brand", "name logo websiteUrl")
 //       .lean()
 //       .exec();
     

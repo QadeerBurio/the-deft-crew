@@ -10,7 +10,7 @@ class ScraperProvider extends BaseProvider {
 
   async fetchEvents() {
     return this.executeWithRetry(async () => {
-      console.log(`🔎 [ScraperProvider] Scraping Karachi university & venue portals...`);
+      // console.log(`🔎 [ScraperProvider] Scraping Karachi university & venue portals...`);
 
       const scrapedEvents = [];
       const sourceCounts = {
@@ -69,9 +69,9 @@ class ScraperProvider extends BaseProvider {
         }
       });
 
-      console.log(`📊 [ScraperProvider] Scraping Summary:`);
+      // console.log(`📊 [ScraperProvider] Scraping Summary:`);
       Object.entries(sourceCounts).forEach(([src, count]) => {
-        console.log(`   Source: ${src} -> Found: ${count}`);
+        // console.log(`   Source: ${src} -> Found: ${count}`);
       });
 
       return [...scrapedEvents, ...curated];

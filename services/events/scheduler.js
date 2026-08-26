@@ -13,7 +13,7 @@ class EventScheduler {
     if (this.initialized) return;
     this.initialized = true;
 
-    console.log(`⏱️ [EventScheduler] Initializing automated event cron scheduler (${this.cronSchedule})...`);
+    // console.log(`⏱️ [EventScheduler] Initializing automated event cron scheduler (${this.cronSchedule})...`);
 
     if (cron.validate(this.cronSchedule)) {
       this.task = cron.schedule(this.cronSchedule, async () => {
@@ -37,7 +37,7 @@ class EventScheduler {
 
     // Trigger initial startup aggregation pass after 10 seconds delay to populate feed
     setTimeout(() => {
-      console.log('🚀 [EventScheduler] Running initial startup Karachi event aggregation pass...');
+      // console.log('🚀 [EventScheduler] Running initial startup Karachi event aggregation pass...');
       eventAggregator.runAggregation().catch(err => {
         console.error('❌ [EventScheduler] Initial startup aggregation failed:', err);
       });
