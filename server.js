@@ -29,6 +29,52 @@ dns.setServers(["1.1.1.1", "8.8.8.8"]);
 
 // ---------------- MIDDLEWARE ----------------
 app.use(cors());
+
+// ==================== CRITICAL FIX: Handle webhooks BEFORE JSON parser ====================
+// Custom middleware to handle webhook raw body
+app.use('/api/webhooks', (req, res, next) => {
+    let data = '';
+    req.on('data', chunk => {
+        data += chunk;
+    });
+    req.on('end', () => {
+        // Store raw body
+        req.rawBody = data;
+        
+        // Try to parse JSON, but don't throw error
+        try {
+            if (data && data.trim()) {
+                // Clean the data first - remove BOM, \r\n, etc.
+                let cleaned = data;
+                // Remove BOM (Byte Order Mark)
+                if (cleaned.charCodeAt(0) === 0xFEFF) {
+                    cleaned = cleaned.slice(1);
+                }
+                // Remove \r\n and normalize line endings
+                cleaned = cleaned.replace(/\r\n/g, ' ').replace(/\n/g, ' ');
+                // Remove multiple spaces
+                cleaned = cleaned.replace(/\s+/g, ' ');
+                // Trim
+                cleaned = cleaned.trim();
+                
+                if (cleaned) {
+                    req.body = JSON.parse(cleaned);
+                } else {
+                    req.body = {};
+                }
+            } else {
+                req.body = {};
+            }
+        } catch (e) {
+            // If parsing fails, store as string
+            console.log('⚠️ Webhook body parsing failed, storing as string:', e.message);
+            req.body = data;
+        }
+        next();
+    });
+});
+
+// THEN use JSON parser for all other routes
 app.use(express.json({ limit: "5mb" }));
 app.use(express.urlencoded({ extended: true, limit: "5mb" }));
 
@@ -91,6 +137,10 @@ connectDB().then(() => {
 });
 
 // ---------------- ROUTES ----------------
+// IMPORTANT: Register webhook routes FIRST
+app.use("/api/webhooks", require("./routes/webhook.routes"));
+
+// Now register all other routes
 app.use("/api/auth", require("./routes/auth.routes"));
 app.use("/api/universities", require("./routes/university.routes"));
 app.use("/api/offers", require("./routes/offer.routes"));
@@ -107,7 +157,6 @@ app.use("/api/traveler", require("./routes/traveler.routes"));
 app.use("/api/resume", require("./routes/resume.routes"));
 app.use("/api/brand-approval", require("./routes/brandApproval.routes"));
 app.use("/api/promo-codes", require("./routes/promoCode.routes"));
-app.use("/api/webhooks", require("./routes/webhook.routes"));
 app.use("/api/v1", require("./chat-service/dist/routes/index").default);
 
 // ============ SKILLSWAP ROUTES ============
@@ -257,9 +306,6 @@ io.on('connection', (socket) => {
       console.error('Mark read socket error:', err);
     }
   });
-  // In server.js - Inside io.on('connection') block
-
-  // In server.js - Inside io.on('connection') block
 
   // --- DELETE MESSAGE ---
   socket.on('delete_message', async ({ messageId, conversationId }) => {
