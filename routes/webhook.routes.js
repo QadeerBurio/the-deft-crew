@@ -8,13 +8,14 @@ const crypto = require("crypto");
 
 // ==================== BRAND ORDER CONFIRMATION WEBHOOK ====================
 // POST /api/webhooks/confirm
+// Called by brand's WordPress/WooCommerce (or any external site) when an order completes
+// No user login — verified instead via secret key header
+
 
 router.post("/confirm", async (req, res) => {
     try {
         const { coupon_code, order_id, amount, status } = req.body;
         const incomingSignature = req.headers["x-webhook-signature"];
-
-        console.log("Webhook received:", { coupon_code, order_id }); // Debug log
 
         if (!coupon_code || !order_id) {
             return res.status(400).json({
@@ -23,20 +24,19 @@ router.post("/confirm", async (req, res) => {
             });
         }
 
-        // Find the promo code
+        // Find the promo code first (need it to know which brand's secret to check)
         const promoCodeDoc = await PromoCode.findOne({
             code: coupon_code.toUpperCase().trim()
         });
 
         if (!promoCodeDoc) {
-            console.log("Promo code not found:", coupon_code); // Debug log
             return res.status(404).json({
                 success: false,
                 message: "Promo code not found"
             });
         }
 
-        // Get the brand and verify signature
+        // Get the brand and verify the HMAC signature using THIS brand's secret
         const brand = await User.findById(promoCodeDoc.brand);
         if (!brand || !brand.webhookSecret) {
             return res.status(403).json({
@@ -45,17 +45,11 @@ router.post("/confirm", async (req, res) => {
             });
         }
 
-        // Verify signature
         const rawBody = JSON.stringify(req.body);
         const expectedSignature = crypto
             .createHmac("sha256", brand.webhookSecret)
             .update(rawBody)
             .digest("hex");
-
-        console.log("Signature check:", { 
-            incoming: incomingSignature, 
-            expected: expectedSignature 
-        }); // Debug log
 
         if (!incomingSignature || incomingSignature !== expectedSignature) {
             return res.status(403).json({
@@ -64,7 +58,7 @@ router.post("/confirm", async (req, res) => {
             });
         }
 
-        // Check if already used
+        // Already used? Don't double-process
         if (promoCodeDoc.status === "used") {
             return res.status(400).json({
                 success: false,
@@ -89,8 +83,6 @@ router.post("/confirm", async (req, res) => {
             type: "System",
             icon: "checkmark-circle"
         });
-
-        console.log("Promo code confirmed:", promoCodeDoc.code); // Debug log
 
         res.json({
             success: true,
