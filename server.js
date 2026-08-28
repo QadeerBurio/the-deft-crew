@@ -29,53 +29,12 @@ dns.setServers(["1.1.1.1", "8.8.8.8"]);
 
 // ---------------- MIDDLEWARE ----------------
 app.use(cors());
-
-// ==================== CRITICAL FIX: Handle webhooks BEFORE JSON parser ====================
-// Custom middleware to handle webhook raw body
-app.use('/api/webhooks', (req, res, next) => {
-    let data = '';
-    req.on('data', chunk => {
-        data += chunk;
-    });
-    req.on('end', () => {
-        // Store raw body
-        req.rawBody = data;
-        
-        // Try to parse JSON, but don't throw error
-        try {
-            if (data && data.trim()) {
-                // Clean the data first - remove BOM, \r\n, etc.
-                let cleaned = data;
-                // Remove BOM (Byte Order Mark)
-                if (cleaned.charCodeAt(0) === 0xFEFF) {
-                    cleaned = cleaned.slice(1);
-                }
-                // Remove \r\n and normalize line endings
-                cleaned = cleaned.replace(/\r\n/g, ' ').replace(/\n/g, ' ');
-                // Remove multiple spaces
-                cleaned = cleaned.replace(/\s+/g, ' ');
-                // Trim
-                cleaned = cleaned.trim();
-                
-                if (cleaned) {
-                    req.body = JSON.parse(cleaned);
-                } else {
-                    req.body = {};
-                }
-            } else {
-                req.body = {};
-            }
-        } catch (e) {
-            // If parsing fails, store as string
-            console.log('⚠️ Webhook body parsing failed, storing as string:', e.message);
-            req.body = data;
-        }
-        next();
-    });
-});
-
-// THEN use JSON parser for all other routes
-app.use(express.json({ limit: "5mb" }));
+app.use(express.json({
+  limit: "5mb",
+  verify: (req, res, buf) => {
+    req.rawBody = buf;
+  }
+}));
 app.use(express.urlencoded({ extended: true, limit: "5mb" }));
 
 // Static files

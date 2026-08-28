@@ -8,6 +8,9 @@ const crypto = require("crypto");
 
 // ==================== BRAND ORDER CONFIRMATION WEBHOOK ====================
 // POST /api/webhooks/confirm
+// Called by brand's WordPress/WooCommerce (or any external site) when an order completes
+// No user login — verified instead via HMAC signature header, checked against raw request bytes
+
 router.post("/confirm", async (req, res) => {
     let requestBody;
     let parsedBody;
@@ -58,6 +61,13 @@ router.post("/confirm", async (req, res) => {
             return res.status(400).json({
                 success: false,
                 message: "Missing required field: order_id"
+            });
+        }
+
+        if (!req.rawBody) {
+            return res.status(400).json({
+                success: false,
+                message: "Raw body unavailable for signature verification"
             });
         }
 
