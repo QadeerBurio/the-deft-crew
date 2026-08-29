@@ -106,7 +106,7 @@ router.post("/confirm", async (req, res) => {
         if (brand.webhookSecret) {
             const expectedSignature = crypto
                 .createHmac("sha256", brand.webhookSecret)
-                .update(requestBody)
+                .update(req.rawBody)
                 .digest("hex");
 
             console.log('🔐 Signature verification:', {
@@ -126,7 +126,7 @@ router.post("/confirm", async (req, res) => {
             const defaultSecret = process.env.DEFAULT_WEBHOOK_SECRET || 'be0adcf4b7444c1cf51f9f2507f25f0c';
             const expectedSignature = crypto
                 .createHmac("sha256", defaultSecret)
-                .update(requestBody)
+                .update(req.rawBody)
                 .digest("hex");
 
             if (!incomingSignature || incomingSignature !== expectedSignature) {
