@@ -98,6 +98,11 @@ const userSchema = new mongoose.Schema(
       default: false,
     },
 
+    platform: {
+      type: String,
+      enum: ["woocommerce", "shopify", "custom"],
+      default: "woocommerce",
+    },
     websiteUrl: {
       type: String,
       default: "",
@@ -111,6 +116,29 @@ const userSchema = new mongoose.Schema(
       default: "",
     },
     wooConsumerSecret: {
+      type: String,
+      default: "",
+    },
+    shopifyStoreUrl: {
+      type: String,
+      default: "",
+    },
+    shopifyAccessToken: {
+      type: String,
+      default: "",
+    },
+    shopifyClientId: {
+      type: String,
+      default: "",
+    },
+    shopifyClientSecret: {
+      type: String,
+      default: "",
+    },
+    shopifyTokenExpiresAt: {
+      type: Date,
+    },
+    shopifyWebhookSecret: {
       type: String,
       default: "",
     },

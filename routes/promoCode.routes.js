@@ -11,6 +11,141 @@ const auth = require("../middleware/auth.middleware");
 
 const axios = require("axios");
 
+// Helper to get or refresh Shopify access token
+async function getValidShopifyAccessToken(brand) {
+  let storeUrl = brand?.shopifyStoreUrl || process.env.SHOPIFY_SHOP || "";
+  if (!storeUrl) return { success: false, reason: "No Shopify shop URL configured" };
+
+  const cleanDomain = storeUrl.replace(/^https?:\/\//, "").replace(/\/$/, "");
+  const fullStoreDomain = cleanDomain.includes(".") ? cleanDomain : `${cleanDomain}.myshopify.com`;
+
+  const existingToken = brand?.shopifyAccessToken || process.env.SHOPIFY_ACCESS_TOKEN;
+  const expiresAt = brand?.shopifyTokenExpiresAt;
+
+  // Use existing token if valid (not expired or expires in > 5 mins)
+  if (existingToken && (!expiresAt || new Date(expiresAt) > new Date(Date.now() + 5 * 60 * 1000))) {
+    return { success: true, accessToken: existingToken, storeDomain: fullStoreDomain };
+  }
+
+  // Attempt client credentials token request if clientId & clientSecret exist
+  const clientId = brand?.shopifyClientId || process.env.SHOPIFY_CLIENT_ID;
+  const clientSecret = brand?.shopifyClientSecret || process.env.SHOPIFY_CLIENT_SECRET;
+
+  if (clientId && clientSecret) {
+    try {
+      const response = await axios.post(`https://${fullStoreDomain}/admin/oauth/access_token`, {
+        client_id: clientId,
+        client_secret: clientSecret,
+        grant_type: "client_credentials"
+      });
+
+      const { access_token, expires_in } = response.data || {};
+      if (access_token) {
+        if (brand && typeof brand.save === 'function') {
+          brand.shopifyAccessToken = access_token;
+          if (expires_in) {
+            brand.shopifyTokenExpiresAt = new Date(Date.now() + (expires_in - 300) * 1000);
+          }
+          await brand.save().catch(e => console.error("Error saving updated Shopify token to DB:", e.message));
+        }
+        return { success: true, accessToken: access_token, storeDomain: fullStoreDomain };
+      }
+    } catch (tokenErr) {
+      console.error("Shopify client credentials token exchange error:", tokenErr.response?.data || tokenErr.message);
+    }
+  }
+
+  if (existingToken) {
+    return { success: true, accessToken: existingToken, storeDomain: fullStoreDomain };
+  }
+
+  return { success: false, reason: "Shopify access token unavailable or invalid credentials" };
+}
+
+// Creates a matching discount code on the brand's Shopify store via GraphQL API
+async function createShopifyDiscount(brand, code, discountPercentage, expiresAt) {
+  try {
+    const authResult = await getValidShopifyAccessToken(brand);
+    if (!authResult.success) {
+      console.log(`Skipping Shopify sync — brand ${brand?.brandName || brand?.name || 'unknown'} issue: ${authResult.reason}`);
+      return { success: false, reason: authResult.reason };
+    }
+
+    const { accessToken, storeDomain } = authResult;
+    const graphqlUrl = `https://${storeDomain}/admin/api/2024-01/graphql.json`;
+    const headers = {
+      "X-Shopify-Access-Token": accessToken,
+      "Content-Type": "application/json"
+    };
+
+    const percentageDecimal = Number(discountPercentage) / 100;
+
+    const query = `
+      mutation discountCodeBasicCreate($basicCodeDiscount: DiscountCodeBasicInput!) {
+        discountCodeBasicCreate(basicCodeDiscount: $basicCodeDiscount) {
+          codeDiscountNode {
+            id
+            codeDiscount {
+              ... on DiscountCodeBasic {
+                title
+                codes(first: 1) {
+                  nodes {
+                    code
+                  }
+                }
+              }
+            }
+          }
+          userErrors {
+            field
+            message
+          }
+        }
+      }
+    `;
+
+    const variables = {
+      basicCodeDiscount: {
+        title: code,
+        code: code,
+        startsAt: new Date().toISOString(),
+        endsAt: new Date(expiresAt).toISOString(),
+        usageLimit: 1,
+        customerSelection: {
+          all: true
+        },
+        customerGets: {
+          value: {
+            percentage: percentageDecimal
+          },
+          items: {
+            all: true
+          }
+        }
+      }
+    };
+
+    const response = await axios.post(graphqlUrl, { query, variables }, { headers });
+    const result = response.data?.data?.discountCodeBasicCreate;
+
+    if (result?.userErrors && result.userErrors.length > 0) {
+      console.error("Shopify GraphQL Discount User Errors:", result.userErrors);
+      return { success: false, reason: result.userErrors[0].message };
+    }
+
+    const discountNodeId = result?.codeDiscountNode?.id;
+    console.log(`✅ Shopify discount code ${code} created successfully on ${storeDomain} (Node ID: ${discountNodeId})`);
+    return { success: true, discountNodeId };
+  } catch (err) {
+    console.error("Shopify discount creation failed:", JSON.stringify({
+      message: err.message,
+      status: err.response?.status,
+      data: err.response?.data
+    }, null, 2));
+    return { success: false, reason: err.response?.data?.errors || err.message };
+  }
+}
+
 // Creates a matching coupon on the brand's WooCommerce site
 async function createWooCommerceCoupon(brand, code, discountPercentage, expiresAt) {
   if (!brand.websiteUrl || !brand.wooConsumerKey || !brand.wooConsumerSecret) {
@@ -176,15 +311,24 @@ router.post("/generate", auth, async (req, res) => {
     await Offer.findByIdAndUpdate(offerId, {
       $push: { promoCodesGenerated: newPromoCode._id }
     });
-    // Sync coupon to brand's WooCommerce site (if configured)
+    // Sync coupon to brand's WooCommerce or Shopify site (if configured)
     const brandUser = await User.findById(offer.brand._id);
     if (brandUser) {
-      await createWooCommerceCoupon(
-        brandUser,
-        newPromoCode.code,
-        newPromoCode.discountPercentage,
-        newPromoCode.expiresAt
-      );
+      if (brandUser.platform === "shopify" || brandUser.shopifyStoreUrl || process.env.SHOPIFY_SHOP) {
+        await createShopifyDiscount(
+          brandUser,
+          newPromoCode.code,
+          newPromoCode.discountPercentage,
+          newPromoCode.expiresAt
+        );
+      } else {
+        await createWooCommerceCoupon(
+          brandUser,
+          newPromoCode.code,
+          newPromoCode.discountPercentage,
+          newPromoCode.expiresAt
+        );
+      }
     }
 
     // Clear cache safely

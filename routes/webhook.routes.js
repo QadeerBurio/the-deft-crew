@@ -239,6 +239,161 @@ router.post("/confirm", async (req, res) => {
     }
 });
 
+// ==================== SHOPIFY ORDER CONFIRMATION WEBHOOK ====================
+// POST /api/webhooks/shopify/confirm
+// Called automatically by Shopify when orders/paid fires
+router.post("/shopify/confirm", async (req, res) => {
+  try {
+    const incomingSignature = req.headers["x-shopify-hmac-sha256"];
+    const shopDomain = req.headers["x-shopify-shop-domain"];
+
+    console.log("📨 Shopify Webhook Received:", {
+      shopDomain,
+      topic: req.headers["x-shopify-topic"],
+      hasSignature: !!incomingSignature,
+      timestamp: new Date().toISOString()
+    });
+
+    const order = req.body || {};
+    const discountCodes = order.discount_codes || [];
+
+    if (discountCodes.length === 0) {
+      console.log("ℹ️ Shopify Webhook: No discount codes found on order #", order.id || order.name);
+      return res.status(200).json({ success: true, message: "No discount code on order" });
+    }
+
+    const appliedCode = discountCodes[0]?.code;
+    if (!appliedCode) {
+      return res.status(200).json({ success: true, message: "Empty discount code string" });
+    }
+
+    // STEP 1: Find the promo code
+    const promoCodeDoc = await PromoCode.findOne({
+      code: appliedCode.toUpperCase().trim()
+    });
+
+    if (!promoCodeDoc) {
+      console.log("❌ Shopify Webhook: Promo code not found in DB:", appliedCode);
+      return res.status(200).json({
+        success: true,
+        message: "Promo code not tracked by app"
+      });
+    }
+
+    // STEP 2: Find the brand
+    let brand = await User.findById(promoCodeDoc.brand);
+    if (!brand && shopDomain) {
+      const cleanDomain = shopDomain.replace(/^https?:\/\//, "").replace(/\/$/, "");
+      brand = await User.findOne({ shopifyStoreUrl: { $regex: new RegExp(cleanDomain, "i") } });
+    }
+
+    // STEP 3: Validate Webhook Signature
+    const webhookSecret = brand?.shopifyWebhookSecret || process.env.SHOPIFY_CLIENT_SECRET || process.env.SHOPIFY_WEBHOOK_SECRET;
+
+    if (webhookSecret && req.rawBody && incomingSignature) {
+      const expectedSignature = crypto
+        .createHmac("sha256", webhookSecret)
+        .update(req.rawBody)
+        .digest("base64");
+
+      if (incomingSignature !== expectedSignature) {
+        console.log("🔐 Shopify Signature mismatch!", {
+          received: incomingSignature,
+          expected: expectedSignature
+        });
+        return res.status(403).json({
+          success: false,
+          message: "Invalid Shopify webhook signature"
+        });
+      }
+      console.log("✅ Shopify Webhook signature verified successfully");
+    }
+
+    // STEP 4: Check if already redeemed
+    if (promoCodeDoc.status === "used") {
+      console.log("⚠️ Promo code already marked as used:", promoCodeDoc.code);
+      return res.status(200).json({
+        success: true,
+        message: "Promo code already redeemed"
+      });
+    }
+
+    // STEP 5: Calculate Savings & Mark as Used
+    const billAmount = Number(order.total_price) || Number(order.subtotal_price) || 0;
+    const discountAmount = (billAmount * promoCodeDoc.discountPercentage) / 100;
+    const savedAmount = Math.round(discountAmount);
+    const orderIdStr = (order.name || order.id || "").toString();
+
+    promoCodeDoc.status = "used";
+    promoCodeDoc.usedAt = new Date();
+    promoCodeDoc.redeemedVia = "webhook";
+    promoCodeDoc.externalOrderId = orderIdStr;
+    promoCodeDoc.externalAmount = billAmount;
+    promoCodeDoc.usedCount = (promoCodeDoc.usedCount || 0) + 1;
+
+    await promoCodeDoc.save();
+    console.log("✅ Shopify Promo Code marked as used:", promoCodeDoc.code);
+
+    // STEP 6: Update Offer redemptions
+    if (promoCodeDoc.offer) {
+      const offer = await Offer.findById(promoCodeDoc.offer);
+      if (offer) {
+        offer.redemptions.push({
+          student: promoCodeDoc.student,
+          billAmount: billAmount,
+          savedAmount: savedAmount,
+          redeemedAt: new Date(),
+          promoCode: promoCodeDoc.code,
+          promoCodeId: promoCodeDoc._id,
+          source: "shopify_webhook",
+          externalOrderId: orderIdStr
+        });
+        await offer.save();
+      }
+    }
+
+    // STEP 7: Notifications
+    try {
+      await Notification.create({
+        recipient: promoCodeDoc.student,
+        title: "✅ Promo Code Used!",
+        description: `Your promo code ${promoCodeDoc.code} was confirmed at ${promoCodeDoc.brandName || "Shopify store"}! You saved Rs. ${savedAmount}.`,
+        type: "System",
+        icon: "checkmark-circle"
+      });
+
+      if (brand) {
+        await Notification.create({
+          recipient: brand._id,
+          title: "💰 Shopify Order Confirmed",
+          description: `Order #${orderIdStr} completed with promo code ${promoCodeDoc.code}. Savings: Rs. ${savedAmount}`,
+          type: "System",
+          icon: "cash-outline"
+        });
+      }
+    } catch (notifErr) {
+      console.error("⚠️ Notification creation warning:", notifErr.message);
+    }
+
+    res.json({
+      success: true,
+      message: "Shopify order confirmation processed successfully",
+      data: {
+        code: promoCodeDoc.code,
+        orderId: orderIdStr,
+        savedAmount
+      }
+    });
+
+  } catch (err) {
+    console.error("❌ Shopify webhook error:", err);
+    res.status(500).json({
+      success: false,
+      message: err.message || "Shopify webhook processing failed"
+    });
+  }
+});
+
 // ==================== TEST WEBHOOK ENDPOINT ====================
 // GET /api/webhooks/test
 router.get("/test", async (req, res) => {
