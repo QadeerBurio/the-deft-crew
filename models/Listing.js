@@ -1,11 +1,12 @@
 const mongoose = require('mongoose');
 
 const listingSchema = new mongoose.Schema({
-  ownerId: {
-    type: mongoose.Schema.Types.ObjectId,
-    required: true,
-    index: true
-  },
+ ownerId: {
+  type: mongoose.Schema.Types.ObjectId,
+  ref: 'User',           // 👈 add this
+  required: true,
+  index: true
+},
   type: {
     type: String,
     required: true,
@@ -56,6 +57,7 @@ const listingSchema = new mongoose.Schema({
         message: 'Portfolio links must be valid URLs'
       }
     },
+    
     experienceDetails: { 
       type: String,
       trim: true
@@ -94,6 +96,27 @@ const listingSchema = new mongoose.Schema({
   syllabus: {
     type: String,
     trim: true
+  },
+  // Add this new field to listingSchema, right after `syllabus`:
+
+  attachments: {
+    type: [
+      {
+        url: { type: String, required: true },
+        type: { type: String, enum: ['image', 'video'], required: true },
+        thumbnailUrl: { type: String } // for videos, optional
+      }
+    ],
+    default: [],
+    validate: {
+      validator: function(arr) {
+        // Only allow attachments on paid listings, and cap at 6
+        if (arr.length > 6) return false;
+        if (arr.length > 0 && this.type !== 'paid') return false;
+        return true;
+      },
+      message: 'Attachments are only allowed on paid listings, max 6 files'
+    }
   },
   skillNeeded: {
     skillName: {

@@ -119,10 +119,12 @@ app.use("/api/promo-codes", require("./routes/promoCode.routes"));
 app.use("/api/v1", require("./chat-service/dist/routes/index").default);
 
 // ============ SKILLSWAP ROUTES ============
+app.use('/api/professional-profile', require('./routes/professionalProfile.routes'));
 app.use('/api/listings', require('./routes/listing.routes'));
 app.use('/api/skill-offers', require('./routes/skillOffer.routes'));
 app.use('/api/chat', require('./routes/chat.routes'));
 app.use('/api/inquiries', require('./routes/inquiry.routes'));
+app.use('/api/chat/upload', require('./routes/chatUpload.routes'));
 
 // ---------------- SOCKET.IO CHAT & CALL HANDLER ----------------
 const { Message, Conversation } = require('./models/Chat');
@@ -174,7 +176,7 @@ io.on('connection', (socket) => {
   // --- SEND MESSAGE ---
   socket.on('send_message', async (data) => {
     try {
-      const { conversationId, senderId, text, messageType, mediaUrl, location, duration } = data;
+      const { conversationId, senderId, text, messageType, mediaUrl,mediaMetadata, location, duration } = data;
 
       // Validate required fields
       if (!conversationId || !senderId) {
@@ -183,6 +185,7 @@ io.on('connection', (socket) => {
       }
 
       const newMessage = new Message({
+<<<<<<< Updated upstream
         conversationId,
         sender: senderId,
         text: text || '',
@@ -192,6 +195,18 @@ io.on('connection', (socket) => {
         duration: duration || null
       });
 
+=======
+      conversationId,
+      sender: senderId,
+      text: text || '',
+      messageType: messageType || 'text',
+      mediaUrl: mediaUrl || '',
+      mediaMetadata: mediaMetadata || undefined,
+      location: location || null,
+      duration: duration || null
+    });
+      
+>>>>>>> Stashed changes
       const savedMessage = await newMessage.save();
       const populatedMessage = await Message.findById(savedMessage._id)
         .populate('sender', 'name profileImage');

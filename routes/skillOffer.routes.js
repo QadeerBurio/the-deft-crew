@@ -7,6 +7,7 @@ const Match = require('../models/Match');
 const auth = require('../middleware/auth.middleware');
 const { Conversation } = require('../models/Chat');
 const mongoose = require('mongoose');
+const attachProfessionalProfiles = require('../utils/attachProfessionalProfiles');
 
 // Helper to get user ID consistently
 const getUserId = (req) => {
@@ -140,13 +141,13 @@ router.get('/listing/:listingId', auth, async (req, res) => {
 
     // Fetch offers with populated data
     const offers = await SkillOffer.find({ listingId })
-      .sort({ createdAt: -1 })
-      .populate('offerorId', 'name email profileImage');
+  .sort({ createdAt: -1 })
+  .populate('offerorId', 'name email profileImage')
+  .lean();
 
-    res.json({
-      success: true,
-      offers
-    });
+await attachProfessionalProfiles(offers, 'offerorId');
+
+res.json({ success: true, offers });
 
   } catch (err) {
     console.error('Error fetching offers:', err);
@@ -163,15 +164,19 @@ router.get('/my-offers', auth, async (req, res) => {
       return res.status(401).json({ error: 'User ID required' });
     }
 
-    const offers = await SkillOffer.find({ offerorId: userId.toString() })
-      .sort({ createdAt: -1 })
-      .populate('listingId', 'title type status ownerId skillOffered skillWanted')
-      .populate('matchId');
+   const offers = await SkillOffer.find({ offerorId: userId.toString() })
+  .sort({ createdAt: -1 })
+  .populate({
+    path: 'listingId',
+    select: 'title type status ownerId skillOffered skillWanted',
+    populate: { path: 'ownerId', select: 'name email profileImage role' }, // 👈 this was missing
+  })
+  .populate('matchId')
+  .lean();
 
-    res.json({
-      success: true,
-      offers
-    });
+await attachProfessionalProfiles(offers, 'listingId.ownerId');
+
+res.json({ success: true, offers });
 
   } catch (err) {
     console.error('Error fetching my offers:', err);

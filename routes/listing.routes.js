@@ -2,11 +2,39 @@ const express = require('express');
 const router = express.Router();
 const Listing = require('../models/Listing');
 const auth = require('../middleware/auth.middleware');
+const SkillOffer = require('../models/SkillOffer');
+const upload = require('../middleware/listingUpload.middleware');
+const attachProfessionalProfiles = require('../utils/attachProfessionalProfiles');
 
 // Helper function to get user ID consistently
 const getUserId = (req) => {
   return req.userId || req.user?._id || req.user?.id;
 };
+
+// 0. POST /api/listings/upload - Upload a single attachment (image/video) for a paid listing
+router.post('/upload', auth, (req, res) => {
+  upload.single('file')(req, res, (err) => {
+    if (err) {
+      // multer errors (bad type, file too large) land here, not in the outer try/catch
+      return res.status(400).json({ error: err.message || 'Upload failed' });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    try {
+      const baseUrl = `${req.protocol}://${req.get('host')}`;
+      const url = `${baseUrl}/uploads/listings/${req.file.filename}`;
+      const type = req.file.mimetype.startsWith('video') ? 'video' : 'image';
+
+      res.status(201).json({ url, type });
+    } catch (innerErr) {
+      console.error('Error building upload response:', innerErr);
+      res.status(500).json({ error: 'Internal Server Error' });
+    }
+  });
+});
 
 // 1. POST /api/listings - Create a new listing
 router.post('/', auth, async (req, res) => {
@@ -29,7 +57,10 @@ router.post('/', auth, async (req, res) => {
     
     // ✅ Fix: Only populate fields that exist in User schema
     const populatedListing = await Listing.findById(listing._id)
-      .populate('ownerId', 'name email profileImage role');
+      .populate('ownerId', 'name email profileImage role')
+      .lean();
+
+    await attachProfessionalProfiles(populatedListing, 'ownerId');
     
     res.status(201).json(populatedListing);
   } catch (err) {
@@ -48,29 +79,39 @@ router.post('/', auth, async (req, res) => {
 // 2. GET /api/listings - Get all open listings with filters
 router.get('/', async (req, res) => {
   try {
-    const { type, skillName, page = 1, limit = 20 } = req.query;
-    
+    const { type, search, skillName, page = 1, limit = 20 } = req.query;
+
     const query = { status: 'open' };
-    
+
     if (type && type !== 'All') {
       query.type = type.toLowerCase();
     }
-    
-    if (skillName) {
-      query['skillOffered.skillName'] = { $regex: skillName, $options: 'i' };
+
+    // `search` matches title + both skill fields; `skillName` kept for backward compatibility
+    const term = search || skillName;
+    if (term) {
+      const regex = { $regex: term, $options: 'i' };
+      query.$or = [
+        { title: regex },
+        { 'skillOffered.skillName': regex },
+        { 'skillWanted.skillName': regex },
+        { 'skillNeeded.skillName': regex },
+      ];
     }
-    
+
     const pageNum = parseInt(page, 10);
     const limitNum = parseInt(limit, 10);
     const skip = (pageNum - 1) * limitNum;
-    
-    // ✅ Fix: Only populate fields that exist
+
     const listings = await Listing.find(query)
       .populate('ownerId', 'name email profileImage role')
       .sort({ createdAt: -1 })
       .skip(skip)
-      .limit(limitNum);
-    
+      .limit(limitNum)
+      .lean();
+
+    await attachProfessionalProfiles(listings, 'ownerId');
+
     res.json(listings);
   } catch (err) {
     console.error('Error fetching listings:', err);
@@ -83,33 +124,57 @@ router.get('/mine', auth, async (req, res) => {
   try {
     const { page = 1, limit = 20 } = req.query;
     const userId = getUserId(req);
-    
+
     if (!userId) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
-    
+
     const pageNum = parseInt(page, 10);
     const limitNum = parseInt(limit, 10);
     const skip = (pageNum - 1) * limitNum;
-    
-    // ✅ Fix: Use current user ID from auth
+
     const listings = await Listing.find({ ownerId: userId })
       .populate('ownerId', 'name email profileImage role')
       .sort({ createdAt: -1 })
       .skip(skip)
-      .limit(limitNum);
-    
-    // Get total count for pagination
+      .limit(limitNum)
+      .lean();
+
+    await attachProfessionalProfiles(listings, 'ownerId');
+
     const total = await Listing.countDocuments({ ownerId: userId });
-      
+
+    // Attach real offer counts (total + pending) per listing
+    const listingIds = listings.map((l) => l._id);
+    const offerCounts = await SkillOffer.aggregate([
+      { $match: { listingId: { $in: listingIds } } },
+      { $group: { _id: { listingId: '$listingId', status: '$status' }, count: { $sum: 1 } } },
+    ]);
+
+    const countsMap = {};
+    offerCounts.forEach(({ _id, count }) => {
+      const key = _id.listingId.toString();
+      if (!countsMap[key]) countsMap[key] = { total: 0, pending: 0 };
+      countsMap[key].total += count;
+      if (_id.status === 'pending') countsMap[key].pending += count;
+    });
+
+    const listingsWithCounts = listings.map((l) => {
+      // l is already a plain object because of .lean() above — no .toObject() needed
+      const counts = countsMap[l._id.toString()] || { total: 0, pending: 0 };
+      l.offerCount = counts.total;
+      l.pendingOfferCount = counts.pending;
+      return l;
+    });
+
     res.json({
-      listings,
+      listings: listingsWithCounts,
       pagination: {
         total,
         page: pageNum,
         limit: limitNum,
-        pages: Math.ceil(total / limitNum)
-      }
+        pages: Math.ceil(total / limitNum),
+      },
     });
   } catch (err) {
     console.error('Error fetching my listings:', err);
@@ -121,11 +186,14 @@ router.get('/mine', auth, async (req, res) => {
 router.get('/:id', async (req, res) => {
   try {
     const listing = await Listing.findById(req.params.id)
-      .populate('ownerId', 'name email profileImage role');
+      .populate('ownerId', 'name email profileImage role')
+      .lean();
       
     if (!listing) {
       return res.status(404).json({ error: 'Listing not found' });
     }
+
+    await attachProfessionalProfiles(listing, 'ownerId');
     
     res.json(listing);
   } catch (err) {
@@ -158,7 +226,10 @@ router.get('/:id/suggested-matches', async (req, res) => {
       'skillWanted.skillName': { $regex: new RegExp(myOfferedSkill, 'i') }
     })
     .populate('ownerId', 'name email profileImage role')
-    .limit(10);
+    .limit(10)
+    .lean();
+
+    await attachProfessionalProfiles(matches, 'ownerId');
     
     res.json(matches);
   } catch (err) {
@@ -191,7 +262,10 @@ router.patch('/:id/close', auth, async (req, res) => {
     
     // Return populated listing
     const updatedListing = await Listing.findById(listing._id)
-      .populate('ownerId', 'name email profileImage role');
+      .populate('ownerId', 'name email profileImage role')
+      .lean();
+
+    await attachProfessionalProfiles(updatedListing, 'ownerId');
     
     res.json(updatedListing);
   } catch (err) {
