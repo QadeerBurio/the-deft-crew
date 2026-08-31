@@ -176,7 +176,16 @@ io.on('connection', (socket) => {
   // --- SEND MESSAGE ---
   socket.on('send_message', async (data) => {
     try {
-      const { conversationId, senderId, text, messageType, mediaUrl,mediaMetadata, location, duration } = data;
+      const { 
+        conversationId, 
+        senderId, 
+        text, 
+        messageType, 
+        mediaUrl,
+        mediaMetadata, 
+        location, 
+        duration 
+      } = data;
 
       // Validate required fields
       if (!conversationId || !senderId) {
@@ -185,28 +194,16 @@ io.on('connection', (socket) => {
       }
 
       const newMessage = new Message({
-<<<<<<< Updated upstream
         conversationId,
         sender: senderId,
         text: text || '',
         messageType: messageType || 'text',
         mediaUrl: mediaUrl || '',
+        mediaMetadata: mediaMetadata || undefined,
         location: location || null,
         duration: duration || null
       });
 
-=======
-      conversationId,
-      sender: senderId,
-      text: text || '',
-      messageType: messageType || 'text',
-      mediaUrl: mediaUrl || '',
-      mediaMetadata: mediaMetadata || undefined,
-      location: location || null,
-      duration: duration || null
-    });
-      
->>>>>>> Stashed changes
       const savedMessage = await newMessage.save();
       const populatedMessage = await Message.findById(savedMessage._id)
         .populate('sender', 'name profileImage');
