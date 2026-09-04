@@ -6,7 +6,7 @@ const auth = require("../middleware/auth.middleware");
 
 const router = express.Router();
 
-// GET brands - Only show APPROVED brands
+// GET brands - Only show APPROVED brands, sorted by newest first
 router.get("/", async (req, res) => {
   try {
     // Only fetch brands that are approved
@@ -14,7 +14,8 @@ router.get("/", async (req, res) => {
       role: "brand",
       brandApprovalStatus: "approved" // Only show approved brands
     })
-      .select("name email logo category brandName address isOnline isInStore phone")
+      .select("name email logo category brandName address isOnline isInStore phone createdAt")
+      .sort({ createdAt: -1 }) // NEWEST FIRST
       .lean()
       .exec();
     
@@ -30,6 +31,7 @@ router.get("/", async (req, res) => {
       address: brand.address || "",
       phone: brand.phone || "",
       displayImage: brand.logo || null,
+      createdAt: brand.createdAt || new Date().toISOString(),
     }));
     
     res.json(formattedBrands);
@@ -58,7 +60,8 @@ router.get("/:brandId/offers", auth, async (req, res) => {
 
     const offers = await Offer.find({ brand: req.params.brandId })
       .populate("brand", "name brandName logo")
-      .populate("university", "name");
+      .populate("university", "name")
+      .sort({ createdAt: -1 }); // NEWEST OFFERS FIRST
     
     res.json(offers);
   } catch (err) {
@@ -69,7 +72,6 @@ router.get("/:brandId/offers", auth, async (req, res) => {
     });
   }
 });
-// routes/brands.js - Add these endpoints
 
 // ==========================================
 // GET BRAND DETAILS (with auth check)
@@ -132,7 +134,9 @@ router.get("/:brandId/offers/details", auth, async (req, res) => {
     const offers = await Offer.find({ brand: req.params.brandId })
       .populate("brand", "name brandName logo")
       .populate("claimedBy", "name email rollNo")
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 }) // NEWEST OFFERS FIRST
+      .lean()
+      .exec();
     
     // Calculate stats
     const stats = {
@@ -201,7 +205,5 @@ router.get("/:brandId/stats", auth, async (req, res) => {
     });
   }
 });
-
-
 
 module.exports = router;

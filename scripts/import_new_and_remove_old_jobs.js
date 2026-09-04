@@ -101,7 +101,7 @@ function mapLocationType(location) {
 
 async function performReplacement() {
     try {
-        const uri = process.env.MONGO_URI || process.env.BACKEND_MONGO_URI;
+        const uri = process.env.MONGO_URI;
         console.log("🔗 Connecting to MongoDB...");
         await mongoose.connect(uri);
         console.log("✅ Connected to MongoDB.\n");
@@ -125,7 +125,9 @@ async function performReplacement() {
             { name: 'Karachi_Internships_2026 (1).xlsx', path: path.join(__dirname, '../Karachi_Internships_2026 (1).xlsx') },
             { name: 'Karachi_Internships_2026.xlsx', path: path.join(__dirname, '../Karachi_Internships_2026.xlsx') },
             { name: 'Karachi_Lahore_Islamabad_Jobs_Internships.csv', path: path.join(__dirname, '../Karachi_Lahore_Islamabad_Jobs_Internships.csv') },
-            { name: 'ai_studio_code.csv', path: path.join(__dirname, '../ai_studio_code.csv') }
+            { name: 'ai_studio_code.csv', path: path.join(__dirname, '../ai_studio_code.csv') },
+            { name: 'FRESH_Verified_Live_7Aug2026_Jobs.csv', path: path.join(__dirname, '../FRESH_Verified_Live_7Aug2026_Jobs.csv') },
+            { name: 'NEW_Jobs_Batch2_7Aug2026.csv', path: path.join(__dirname, '../NEW_Jobs_Batch2_7Aug2026.csv') }
         ];
 
         const oldKeysSet = new Set();
@@ -166,8 +168,8 @@ async function performReplacement() {
 
         // 2. Import the 2 NEW CSV files
         const newFiles = [
-            { name: 'FRESH_Verified_Live_7Aug2026_Jobs.csv', path: path.join(__dirname, '../FRESH_Verified_Live_7Aug2026_Jobs.csv') },
-            { name: 'NEW_Jobs_Batch2_7Aug2026.csv', path: path.join(__dirname, '../NEW_Jobs_Batch2_7Aug2026.csv') }
+            { name: 'NEW_Jobd_Batch4_01Sep2026.csv', path: path.join(__dirname, '../NEW_Jobs_Batch4_01Sep2026.csv') },
+            
         ];
 
         const importDate = new Date('2026-08-07T00:00:00.000Z');
