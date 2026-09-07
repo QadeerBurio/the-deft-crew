@@ -2,7 +2,7 @@ const mongoose = require('mongoose');
 
 const EventSchema = new mongoose.Schema({
   title: { type: String, required: true, trim: true },
-  organizer: { type: String, required: true, trim: true },
+  organizer: { type: String, required: false, trim: true, default: 'Organizer' },
   city: { type: String, required: true, trim: true, default: 'Karachi' },
   type: { type: String, required: true, default: 'General' },
   description: { type: String, default: '' },
@@ -16,7 +16,7 @@ const EventSchema = new mongoose.Schema({
   creator: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: false },
   creatorEmail: { type: String, required: false, default: 'system@tdc.app' },
   creatorName: { type: String, default: 'System Aggregator' },
-  
+
   // Extended Automatic Aggregation Fields
   source: { type: String, default: 'manual', index: true },
   sourceId: { type: String, default: null },
@@ -26,11 +26,11 @@ const EventSchema = new mongoose.Schema({
   latitude: { type: Number, default: null },
   longitude: { type: Number, default: null },
   organizerWebsite: { type: String, default: '' },
-  status: { 
-    type: String, 
-    enum: ['approved', 'pending', 'rejected', 'expired'], 
-    default: 'approved', 
-    index: true 
+  status: {
+    type: String,
+    enum: ['approved', 'pending', 'rejected', 'expired'],
+    default: 'approved',
+    index: true
   },
   verified: { type: Boolean, default: false },
   featured: { type: Boolean, default: false },
@@ -41,6 +41,7 @@ const EventSchema = new mongoose.Schema({
   isImported: { type: Boolean, default: false, index: true },
   isExpired: { type: Boolean, default: false, index: true },
   expiredAt: { type: Date, default: null },
+  parsedDate: { type: Date, default: null },
   tags: [{ type: String }],
   categories: [{ type: String }],
   searchKeywords: [{ type: String }],

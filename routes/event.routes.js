@@ -1,9 +1,45 @@
 const express = require('express');
 const router = express.Router();
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
 const auth = require('../middleware/auth.middleware');
 const { Event, Registration, EventNotification } = require('../models/Event');
 const eventAggregator = require('../services/events/eventAggregator');
 const eventCleanup = require('../services/events/eventCleanup');
+const { importEventsToDatabase } = require('../services/events/csvImporter');
+
+// Admin role check middleware
+const isAdmin = (req, res, next) => {
+  if (!req.user || req.isGuest || (req.user.role !== 'admin' && req.userRole !== 'admin')) {
+    return res.status(403).json({ success: false, message: 'Access denied. Admin role required.' });
+  }
+  next();
+};
+
+// Configure Multer for CSV & XLSX files
+const uploadCsvMulter = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    const allowedExts = ['.csv', '.xlsx', '.xls'];
+    const allowedMimetypes = [
+      'text/csv',
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/octet-stream',
+      'application/csv'
+    ];
+
+    if (allowedExts.includes(ext) || allowedMimetypes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('INVALID_FILE_TYPE'));
+    }
+  }
+});
+
 
 // ==========================================
 // PUBLIC & USER FEED ENDPOINTS
@@ -600,6 +636,49 @@ router.delete('/expired', auth, async (req, res) => {
     res.json({ message: `Purged ${count} expired events.`, count });
   } catch (err) {
     res.status(500).json({ message: "Purge failed" });
+  }
+});
+
+/**
+ * POST /api/events/admin/import-csv
+ * Admin CSV/XLSX Event Importer Endpoint
+ */
+router.post('/admin/import-csv', auth, isAdmin, (req, res, next) => {
+  uploadCsvMulter.single('file')(req, res, (err) => {
+    if (err) {
+      if (err.message === 'INVALID_FILE_TYPE' || err.code === 'LIMIT_UNEXPECTED_FILE') {
+        return res.status(400).json({ success: false, message: 'Invalid file type. Only .csv and .xlsx files are allowed.' });
+      }
+      return res.status(400).json({ success: false, message: err.message || 'File upload failed.' });
+    }
+    next();
+  });
+}, async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'No file uploaded. Please attach a .csv or .xlsx file.' });
+    }
+
+    const fileSource = req.file.buffer || req.file.path;
+    const result = await importEventsToDatabase(fileSource, req.file.originalname);
+
+    // Clean up temporary disk file if diskStorage was used
+    if (req.file.path && fs.existsSync(req.file.path)) {
+      try {
+        fs.unlinkSync(req.file.path);
+      } catch (cleanupErr) {
+        console.warn('⚠️ Temp file cleanup failed:', cleanupErr.message);
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      added: result.added,
+      skipped: result.skipped
+    });
+  } catch (err) {
+    console.error('❌ Error in /admin/import-csv endpoint:', err);
+    return res.status(500).json({ success: false, message: err.message || 'Internal server error' });
   }
 });
 

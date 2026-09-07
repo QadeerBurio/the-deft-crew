@@ -6,10 +6,9 @@ class EventCleanup {
   }
 
   /**
-   * Run expiration scan to flag past events as expired
+   * Run expiration scan to flag past events as expired based on parsedDate
    */
   async expirePastEvents() {
-    // console.log('⏰ [EventCleanup] Running event expiration pass...');
     const now = new Date();
     let expiredCount = 0;
 
@@ -20,10 +19,9 @@ class EventCleanup {
     for (const event of activeEvents) {
       let isPast = false;
 
-      // Only expire if event.date is a valid date strictly before start of today
-      if (event.date && event.date !== 'TBA') {
-        const eventDate = new Date(event.date);
-        if (!isNaN(eventDate.getTime()) && eventDate < startOfToday) {
+      // Only expire if event.parsedDate is a valid date strictly before start of today
+      if (event.parsedDate && event.parsedDate instanceof Date && !isNaN(event.parsedDate.getTime())) {
+        if (event.parsedDate < startOfToday) {
           isPast = true;
         }
       }
@@ -37,7 +35,6 @@ class EventCleanup {
       }
     }
 
-    // console.log(`✅ [EventCleanup] Flagged ${expiredCount} past events as expired.`);
     return expiredCount;
   }
 
@@ -45,7 +42,6 @@ class EventCleanup {
    * Permanently purge expired events older than retention duration
    */
   async purgeExpiredEvents() {
-    // console.log(`🧹 [EventCleanup] Purging expired events older than ${this.retentionDays} days...`);
     const cutoffDate = new Date(Date.now() - this.retentionDays * 86400000);
 
     const result = await Event.deleteMany({
@@ -56,7 +52,6 @@ class EventCleanup {
       ]
     });
 
-    // console.log(`✅ [EventCleanup] Permanently deleted ${result.deletedCount} old expired events.`);
     return result.deletedCount;
   }
 }
