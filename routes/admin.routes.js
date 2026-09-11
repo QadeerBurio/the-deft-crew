@@ -14,6 +14,13 @@ const Package = require("../models/Package");
 const Booking = require("../models/Booking");
 const Scholarships = require("../models/Scholarships");
 const Course = require('../models/Course');
+const XLSX = require('xlsx');
+
+// Configure multer for memory storage bulk upload
+const bulkUploadMulter = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
+});
 
 // Configure multer for course image uploads using Cloudinary
 const courseUpload = multer({ 
@@ -505,14 +512,16 @@ router.post("/exchange/add", auth, isAdmin, async (req, res) => {
     }
 
     try {
-      await Notification.create({
-        recipient: null,
-        title: `🌍 New Exchange Program: ${title}`,
-        description: `${university} is now accepting applications! Deadline: ${new Date(deadline).toLocaleDateString()}`,
-        type: "Exchange",
-        icon: "globe",
-        link: newProgram._id.toString()
-      });
+      if (req.user?._id) {
+        await Notification.create({
+          recipient: req.user._id,
+          title: `🌍 New Exchange Program: ${title}`,
+          description: `${university} is now accepting applications! Deadline: ${new Date(deadline).toLocaleDateString()}`,
+          type: "Exchange",
+          icon: "globe",
+          link: newProgram._id.toString()
+        });
+      }
     } catch (nError) {
       console.error("Notification failed:", nError);
     }
@@ -524,6 +533,188 @@ router.post("/exchange/add", auth, isAdmin, async (req, res) => {
   } catch (err) {
     console.error("Error creating exchange program:", err);
     res.status(500).json({ error: "Server Error: " + err.message });
+  }
+});
+
+// ==================== BULK IMPORT EXCHANGE / SCHOLARSHIP PROGRAMS ====================
+router.post("/exchange/bulk-import", auth, isAdmin, bulkUploadMulter.single("file"), async (req, res) => {
+  try {
+    if (!req.file || !req.file.buffer) {
+      return res.status(400).json({ success: false, message: "No file uploaded. Please attach a .csv or .xlsx file." });
+    }
+
+    const workbook = XLSX.read(req.file.buffer, { type: "buffer" });
+    const sheetName = workbook.SheetNames[0];
+    if (!sheetName) {
+      return res.status(400).json({ success: false, message: "Uploaded file has no sheets." });
+    }
+
+    const rawRows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
+    if (!rawRows || rawRows.length === 0) {
+      return res.status(400).json({ success: false, message: "Uploaded file has no data rows." });
+    }
+
+    const getVal = (row, ...keys) => {
+      for (const k of keys) {
+        if (row[k] !== undefined && row[k] !== null && String(row[k]).trim() !== '') {
+          return String(row[k]).trim();
+        }
+        const lowerKey = k.toLowerCase();
+        for (const rowKey of Object.keys(row)) {
+          if (rowKey.toLowerCase() === lowerKey && row[rowKey] !== undefined && row[rowKey] !== null && String(row[rowKey]).trim() !== '') {
+            return String(row[rowKey]).trim();
+          }
+        }
+      }
+      return '';
+    };
+
+    const detectDegree = (val) => {
+      if (!val) return 'Bachelors';
+      const str = String(val).toLowerCase().trim();
+      if (str.includes('phd') || str.includes('doctor')) return 'PhD';
+      if (str.includes('master') || str.includes('msc') || str.includes('ma')) return 'Masters';
+      if (str.includes('bachelor') || str.includes('bsc') || str.includes('ba')) return 'Bachelors';
+      if (str.includes('exchange')) return 'Exchange';
+      return 'Bachelors';
+    };
+
+    const parseReqs = (val) => {
+      if (!val) return [];
+      if (Array.isArray(val)) return val.map(s => String(s).trim()).filter(Boolean);
+      return String(val).split(/;|\n|,/).map(s => s.trim()).filter(Boolean);
+    };
+
+    const formatDate = (val) => {
+      if (!val) return '';
+      try {
+        const date = new Date(val);
+        if (!isNaN(date.getTime())) {
+          return date.toISOString().split('T')[0];
+        }
+        return String(val);
+      } catch {
+        return String(val);
+      }
+    };
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    let createdCount = 0;
+    let skippedCount = 0;
+    const skippedRows = [];
+
+    for (let i = 0; i < rawRows.length; i++) {
+      const row = rawRows[i];
+
+      const title = getVal(row, 'Program Title', 'Title', 'title', 'name', 'Program');
+      const university = getVal(row, 'University', 'Institution', 'university', 'school');
+
+      // Only skip if title or university is completely missing
+      if (!title || !university) {
+        skippedCount++;
+        skippedRows.push({
+          row: i + 1,
+          title: title || 'N/A',
+          university: university || 'N/A',
+          reason: 'Missing mandatory field: Program Title or University is required'
+        });
+        continue;
+      }
+
+      // Duplicate check: Exchange.findOne({ title, university })
+      const existing = await Exchange.findOne({
+        title: { $regex: new RegExp(`^${title.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')}$`, 'i') },
+        university: { $regex: new RegExp(`^${university.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')}$`, 'i') }
+      });
+
+      if (existing) {
+        skippedCount++;
+        skippedRows.push({
+          row: i + 1,
+          title,
+          university,
+          reason: 'Duplicate program already exists'
+        });
+        continue;
+      }
+
+      // Fallback defaults
+      const location = getVal(row, 'Location', 'City/Country', 'location', 'city', 'country') || 'Worldwide';
+      const degree = detectDegree(getVal(row, 'Degree', 'Program Type', 'degree'));
+
+      const rawAppStart = getVal(row, 'Application Start', 'Start Date', 'appStart', 'start_date');
+      const appStart = rawAppStart ? formatDate(rawAppStart) : todayStr;
+
+      const rawDeadline = getVal(row, 'Application Deadline', 'Deadline', 'deadline', 'end_date');
+      const deadline = rawDeadline ? formatDate(rawDeadline) : 'TBA';
+
+      const duration = getVal(row, 'Duration', 'Program Length', 'duration') || '1 Year';
+      const link = getVal(row, 'Application URL', 'Link', 'URL', 'link', 'url');
+      const requirements = parseReqs(getVal(row, 'Requirements', 'Prerequisites', 'requirements'));
+
+      const newProgram = new Exchange({
+        title,
+        university,
+        location,
+        degree,
+        appStart,
+        deadline,
+        duration,
+        link,
+        requirements,
+        active: true
+      });
+
+      await newProgram.save();
+
+      // Linked scholarship document
+      const scholarshipName = getVal(row, 'Scholarship Name', 'Scholarship', 'scholarshipName', 'scholarship_name');
+      if (scholarshipName) {
+        const amount = getVal(row, 'Scholarship Amount', 'Amount', 'scholarshipAmount', 'amount');
+        const currency = getVal(row, 'Currency', 'currency') || 'USD';
+        const description = getVal(row, 'Scholarship Description', 'Description', 'scholarshipDescription', 'description');
+        const rawScholarshipDeadline = getVal(row, 'Scholarship Deadline', 'scholarshipDeadline');
+        const scholarshipDeadlineStr = rawScholarshipDeadline ? formatDate(rawScholarshipDeadline) : (deadline !== 'TBA' ? deadline : '');
+
+        let parsedScholarshipDeadline = undefined;
+        if (scholarshipDeadlineStr) {
+          const parsed = new Date(scholarshipDeadlineStr);
+          if (!isNaN(parsed.getTime())) {
+            parsedScholarshipDeadline = parsed;
+          }
+        }
+
+        const scholarshipReqs = parseReqs(getVal(row, 'Scholarship Requirements', 'scholarshipRequirements'));
+
+        const newScholarship = new Scholarships({
+          programId: newProgram._id,
+          name: scholarshipName,
+          amount,
+          currency,
+          description,
+          deadline: parsedScholarshipDeadline,
+          requirements: scholarshipReqs,
+          active: true
+        });
+
+        await newScholarship.save();
+        newProgram.scholarship = newScholarship._id;
+        await newProgram.save();
+      }
+
+      createdCount++;
+    }
+
+    return res.json({
+      success: true,
+      created: createdCount,
+      skipped: skippedCount,
+      totalRows: rawRows.length,
+      skippedRows
+    });
+  } catch (err) {
+    console.error("Error in exchange bulk-import:", err);
+    return res.status(500).json({ success: false, error: "Bulk import failed: " + err.message });
   }
 });
 

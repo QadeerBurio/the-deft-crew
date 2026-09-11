@@ -1,5 +1,7 @@
 const express = require("express");
 const router = express.Router();
+const multer = require("multer");
+const path = require("path");
 const Job = require("../models/Job");
 const JobApplication = require("../models/JobApplication");
 const Notification = require("../models/Notification");
@@ -8,6 +10,30 @@ const { uploadResume, cloudinary } = require("../config/cloudinary");
 const { generateJobEmbedding } = require('../services/jobEmbeddingService');
 const { getHybridRecommendations, getSimilarJobs } = require('../services/recommendationService');
 const { analyseSkillGap, validateApplication } = require('../services/skillGapService');
+const { importJobsFromFile } = require("../services/jobs/csvJobImporter");
+
+// Configure Multer for Job CSV & XLSX files
+const uploadJobCsvMulter = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    const allowedExts = ['.csv', '.xlsx', '.xls'];
+    const allowedMimetypes = [
+      'text/csv',
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/octet-stream',
+      'application/csv'
+    ];
+
+    if (allowedExts.includes(ext) || allowedMimetypes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('INVALID_FILE_TYPE'), false);
+    }
+  }
+});
 
 // Auth middleware
 const authMiddleware = async (req, res, next) => {
@@ -90,6 +116,37 @@ router.post("/add", authMiddleware, isAdminOrEmployee, async (req, res) => {
         console.error(err);
         res.status(500).json({ error: err.message });
     }
+});
+
+// Admin CSV/XLSX Job Importer Endpoint
+router.post('/admin/import-csv', authMiddleware, isAdminOrEmployee, (req, res, next) => {
+  uploadJobCsvMulter.single('file')(req, res, (err) => {
+    if (err) {
+      if (err.message === 'INVALID_FILE_TYPE' || err.code === 'LIMIT_UNEXPECTED_FILE') {
+        return res.status(400).json({ success: false, message: 'Invalid file type. Only .csv and .xlsx files are allowed.' });
+      }
+      return res.status(400).json({ success: false, message: err.message || 'File upload failed.' });
+    }
+    next();
+  });
+}, async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'No file uploaded. Please attach a .csv or .xlsx file.' });
+    }
+
+    const result = await importJobsFromFile(req.file.buffer, req.file.originalname);
+
+    return res.status(200).json({
+      success: true,
+      created: result.created,
+      updated: result.updated,
+      skipped: result.skipped
+    });
+  } catch (err) {
+    console.error('❌ Error in /admin/import-csv endpoint:', err);
+    return res.status(500).json({ success: false, message: err.message || 'Internal server error' });
+  }
 });
 
 // Get all jobs with advanced filters
@@ -1675,5 +1732,6 @@ router.post('/ingest/trigger', authMiddleware, isAdminOrEmployee, async (req, re
     });
   }
 });
+
 
 module.exports = router;
