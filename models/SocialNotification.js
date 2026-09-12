@@ -1,4 +1,4 @@
-// models/SocialNotification.js - COMPLETE
+// models/SocialNotification.js
 const mongoose = require('mongoose');
 
 const notificationSchema = new mongoose.Schema({
@@ -6,12 +6,13 @@ const notificationSchema = new mongoose.Schema({
   sender: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   type: { 
     type: String, 
-    enum: ['like', 'comment', 'request', 'alert', 'connection_accepted', 'request_declined'],
+    // ✅ ADDED 'mention' and 'reply'
+    enum: ['like', 'comment', 'reply', 'mention', 'request', 'alert', 'connection_accepted', 'request_declined'],
     required: true 
   },
   text: { type: String, required: true },
   postId: { type: mongoose.Schema.Types.ObjectId, ref: 'Post' },
-  relatedId: { type: mongoose.Schema.Types.ObjectId },
+  relatedId: { type: mongoose.Schema.Types.ObjectId }, // Can store commentId
   status: { 
     type: String, 
     enum: ['pending', 'accepted', 'declined'], 
@@ -22,7 +23,6 @@ const notificationSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
-// Add compound index to prevent duplicate pending requests
 notificationSchema.index({ 
   recipient: 1, 
   sender: 1, 
@@ -30,7 +30,6 @@ notificationSchema.index({
   status: 1 
 });
 
-// Index for performance
 notificationSchema.index({ recipient: 1, createdAt: -1 });
 
 module.exports = mongoose.model('SocialNotification', notificationSchema);

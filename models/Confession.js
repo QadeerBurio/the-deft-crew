@@ -33,6 +33,10 @@ const ConfessionSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId, 
     ref: 'User' 
   }],
+
+  // ============================================
+  // ✅ COMMENTS with parentComment + mentions
+  // ============================================
   comments: [{
     user: { 
       type: mongoose.Schema.Types.ObjectId, 
@@ -41,13 +45,25 @@ const ConfessionSchema = new mongoose.Schema({
     },
     text: { 
       type: String, 
-      required: true 
+      required: true,
+      trim: true
     },
+    // Parent comment for threading
+    parentComment: { 
+      type: mongoose.Schema.Types.ObjectId, 
+      default: null 
+    },
+    // Mentioned user IDs
+    mentions: [{ 
+      type: mongoose.Schema.Types.ObjectId, 
+      ref: 'User' 
+    }],
     createdAt: { 
       type: Date, 
       default: Date.now 
     }
   }],
+
   createdAt: { 
     type: Date, 
     default: Date.now 

@@ -41,6 +41,7 @@ const offerSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: "User"
   },
+  
   university: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "University",

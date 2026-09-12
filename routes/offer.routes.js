@@ -496,12 +496,16 @@ router.get("/claimed-users", auth, async (req, res) => {
 });
 
 // REPORT: Brand's total savings/sales report
+// REPORT: Brand's total savings/sales report - ENHANCED to include promo codes
 router.get("/savings-report", auth, async (req, res) => {
   try {
+    const PromoCode = require("../models/PromoCode");
+
+    // 1. Get QR / in-store redemptions from offers
     const offers = await Offer.find({ brand: req.userId })
       .populate({
         path: "redemptions.student",
-        select: "name rollNo university",
+        select: "name rollNo university email",
         populate: {
           path: "university",
           select: "name",
@@ -510,24 +514,91 @@ router.get("/savings-report", auth, async (req, res) => {
       .lean()
       .exec();
 
-    const report = offers.reduce((acc, offer) => {
+    const qrRedemptions = offers.reduce((acc, offer) => {
       offer.redemptions.forEach(r => {
         acc.push({
           name: r.student?.name || "N/A",
           rollNo: r.student?.rollNo || "N/A",
+          email: r.student?.email || "",
           university: r.student?.university?.name || "N/A",
           brand: offer.title || 'Brand',
           bill: r.billAmount || 0,
           saved: r.savedAmount || 0,
           paid: (r.billAmount || 0) - (r.savedAmount || 0),
           date: r.redeemedAt,
+          redemptionType: "qr", // In-store redemption
+          platform: "in-store",
+          promoCode: r.promoCode || null,
+          offerId: offer._id,
+          offerImage: offer.image,
+          discountPercentage: offer.discountPercentage
         });
       });
       return acc;
     }, []);
 
-    res.json(report);
+    // 2. Get promo code redemptions (online - Shopify/WooCommerce)
+    const usedPromoCodes = await PromoCode.find({
+      brand: req.userId,
+      status: 'used'
+    })
+      .populate({
+        path: 'student',
+        select: 'name rollNo university email',
+        populate: {
+          path: 'university',
+          select: 'name'
+        }
+      })
+      .populate('offer', 'title image discountPercentage')
+      .lean();
+
+    // Get the brand to determine platform
+    const brandUser = await User.findById(req.userId).lean();
+    const brandPlatform = brandUser?.platform || 'woocommerce';
+
+    const promoRedemptions = usedPromoCodes.map(pc => {
+      const bill = pc.externalAmount || 0;
+      const saved = Math.round((bill * (pc.discountPercentage || 0)) / 100);
+      const paid = bill - saved;
+
+      return {
+        name: pc.student?.name || "N/A",
+        rollNo: pc.student?.rollNo || "N/A",
+        email: pc.student?.email || "",
+        university: pc.student?.university?.name || "N/A",
+        brand: pc.offerTitle || pc.offer?.title || 'Brand',
+        bill: bill,
+        saved: saved,
+        paid: paid,
+        date: pc.usedAt || pc.updatedAt,
+        redemptionType: "promo", // Online redemption
+        platform: brandPlatform, // "shopify" | "woocommerce" | "custom"
+        promoCode: pc.code,
+        offerId: pc.offer?._id,
+        offerImage: pc.offer?.image,
+        discountPercentage: pc.discountPercentage,
+        externalOrderId: pc.externalOrderId || null
+      };
+    });
+
+    // 3. Merge and sort by date (newest first)
+    const combined = [...qrRedemptions, ...promoRedemptions].sort(
+      (a, b) => new Date(b.date) - new Date(a.date)
+    );
+
+    // 4. Remove duplicates (in case a promo redemption also wrote to offer.redemptions)
+    const seen = new Set();
+    const deduped = combined.filter(item => {
+      const key = `${item.name}-${item.date}-${item.saved}-${item.promoCode || 'qr'}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+    res.json(deduped);
   } catch (err) {
+    console.error("Error in savings-report:", err);
     res.status(500).json({ message: err.message });
   }
 });
@@ -1145,6 +1216,330 @@ router.get("/:offerId/promo-info", auth, async (req, res) => {
       success: false, 
       message: err.message 
     });
+  }
+});
+
+
+
+// routes/offer.routes.js - ADD THIS ROUTE
+
+// GET: Full redemption list for a specific brand (admin view)
+router.get("/brand/:brandId/redemptions", auth, async (req, res) => {
+  try {
+    const PromoCode = require("../models/PromoCode");
+    const { brandId } = req.params;
+
+    // Verify requester is admin OR the brand itself
+    const requester = await User.findById(req.userId).lean().select('role');
+    if (!requester) {
+      return res.status(403).json({ message: "Unauthorized" });
+    }
+    if (requester.role !== 'admin' && requester.role !== 'brand') {
+      return res.status(403).json({ message: "Only admins or the brand can view this" });
+    }
+    if (requester.role === 'brand' && req.userId !== brandId) {
+      return res.status(403).json({ message: "You can only view your own redemptions" });
+    }
+
+    // 1. QR / in-store redemptions
+    const offers = await Offer.find({ brand: brandId })
+      .populate({
+        path: "redemptions.student",
+        select: "name rollNo university email phone",
+        populate: { path: "university", select: "name" }
+      })
+      .lean();
+
+    const qrRedemptions = offers.reduce((acc, offer) => {
+      (offer.redemptions || []).forEach(r => {
+        acc.push({
+          studentName: r.student?.name || "N/A",
+          rollNo: r.student?.rollNo || "N/A",
+          email: r.student?.email || "",
+          phone: r.student?.phone || "",
+          university: r.student?.university?.name || "N/A",
+          offerTitle: offer.title || "Offer",
+          offerImage: offer.image,
+          discountPercentage: offer.discountPercentage || 0,
+          bill: r.billAmount || 0,
+          saved: r.savedAmount || 0,
+          paid: (r.billAmount || 0) - (r.savedAmount || 0),
+          date: r.redeemedAt,
+          redemptionType: "qr",
+          platform: "in-store",
+          promoCode: r.promoCode || null,
+          studentId: r.student?._id
+        });
+      });
+      return acc;
+    }, []);
+
+    // 2. Online promo code redemptions
+    const usedPromoCodes = await PromoCode.find({
+      brand: brandId,
+      status: 'used'
+    })
+      .populate({
+        path: 'student',
+        select: 'name rollNo university email phone',
+        populate: { path: 'university', select: 'name' }
+      })
+      .populate('offer', 'title image discountPercentage')
+      .lean();
+
+    const brandUser = await User.findById(brandId).lean();
+    const brandPlatform = brandUser?.platform || 'woocommerce';
+
+    const promoRedemptions = usedPromoCodes.map(pc => {
+      const bill = pc.externalAmount || 0;
+      const saved = Math.round((bill * (pc.discountPercentage || 0)) / 100);
+
+      return {
+        studentName: pc.student?.name || "N/A",
+        rollNo: pc.student?.rollNo || "N/A",
+        email: pc.student?.email || "",
+        phone: pc.student?.phone || "",
+        university: pc.student?.university?.name || "N/A",
+        offerTitle: pc.offerTitle || pc.offer?.title || "Offer",
+        offerImage: pc.offer?.image,
+        discountPercentage: pc.discountPercentage || 0,
+        bill: bill,
+        saved: saved,
+        paid: bill - saved,
+        date: pc.usedAt || pc.updatedAt,
+        redemptionType: "promo",
+        platform: brandPlatform,
+        promoCode: pc.code,
+        studentId: pc.student?._id,
+        externalOrderId: pc.externalOrderId || null
+      };
+    });
+
+    // 3. Combine + dedupe + sort
+    const combined = [...qrRedemptions, ...promoRedemptions].sort(
+      (a, b) => new Date(b.date) - new Date(a.date)
+    );
+
+    const seen = new Set();
+    const deduped = combined.filter(item => {
+      const key = `${item.rollNo}-${item.date}-${item.saved}-${item.promoCode || 'qr'}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+    // Stats
+    const totalRevenue = deduped.reduce((sum, r) => sum + (r.paid || 0), 0);
+    const totalBill = deduped.reduce((sum, r) => sum + (r.bill || 0), 0);
+    const totalSaved = deduped.reduce((sum, r) => sum + (r.saved || 0), 0);
+    const uniqueStudents = new Set(deduped.map(r => r.studentId?.toString()).filter(Boolean)).size;
+
+    res.json({
+      success: true,
+      redemptions: deduped,
+      stats: {
+        totalRedemptions: deduped.length,
+        totalRevenue,
+        totalBill,
+        totalSaved,
+        uniqueStudents,
+        onlineCount: promoRedemptions.length,
+        inStoreCount: qrRedemptions.length,
+        onlineSaved: promoRedemptions.reduce((s, r) => s + r.saved, 0),
+        inStoreSaved: qrRedemptions.reduce((s, r) => s + r.saved, 0)
+      }
+    });
+  } catch (err) {
+    console.error("Error fetching brand redemptions:", err);
+    res.status(500).json({ message: err.message });
+  }
+});
+
+
+
+
+// ============================================================
+// GET: All Brands Revenue Summary (Admin view)
+// GET /api/offers/admin/brands-revenue
+// ============================================================
+router.get("/admin/brands-revenue", auth, async (req, res) => {
+  try {
+    const PromoCode = require("../models/PromoCode");
+
+    // Check admin
+    const admin = await User.findById(req.userId).lean().select('role');
+    if (!admin || admin.role !== 'admin') {
+      return res.status(403).json({ message: "Only admins allowed" });
+    }
+
+    // 1. Get all brands
+    const brands = await User.find({ role: 'brand' })
+      .select('name brandName logo category brandApprovalStatus platform address phone email websiteUrl isOnline isInStore createdAt')
+      .lean();
+
+    // 2. Get all offers (for QR redemptions)
+    const allOffers = await Offer.find({})
+      .populate({
+        path: "redemptions.student",
+        select: "name rollNo university"
+      })
+      .lean();
+
+    // 3. Get all used promo codes (for online redemptions)
+    const allPromoCodes = await PromoCode.find({ status: 'used' })
+      .populate('offer', 'title image discountPercentage')
+      .lean();
+
+    // 4. Group offers by brand
+    const offersByBrand = {};
+    allOffers.forEach(offer => {
+      const brandId = offer.brand?.toString();
+      if (!brandId) return;
+      if (!offersByBrand[brandId]) offersByBrand[brandId] = [];
+      offersByBrand[brandId].push(offer);
+    });
+
+    // 5. Group promo codes by brand
+    const promosByBrand = {};
+    allPromoCodes.forEach(pc => {
+      const brandId = pc.brand?.toString();
+      if (!brandId) return;
+      if (!promosByBrand[brandId]) promosByBrand[brandId] = [];
+      promosByBrand[brandId].push(pc);
+    });
+
+    // 6. Compute stats per brand
+    const brandsWithRevenue = brands.map(brand => {
+      const brandId = brand._id.toString();
+      const brandOffers = offersByBrand[brandId] || [];
+      const brandPromos = promosByBrand[brandId] || [];
+
+      // QR / in-store redemptions
+      let qrRevenue = 0;
+      let qrBill = 0;
+      let qrSaved = 0;
+      let qrCount = 0;
+      const uniqueQrStudents = new Set();
+
+      brandOffers.forEach(offer => {
+        (offer.redemptions || []).forEach(r => {
+          const bill = r.billAmount || 0;
+          const saved = r.savedAmount || 0;
+          qrBill += bill;
+          qrSaved += saved;
+          qrRevenue += (bill - saved);
+          qrCount += 1;
+          if (r.student?._id) uniqueQrStudents.add(r.student._id.toString());
+        });
+      });
+
+      // Online / promo code redemptions
+      let promoRevenue = 0;
+      let promoBill = 0;
+      let promoCount = 0;
+      const uniquePromoStudents = new Set();
+
+      brandPromos.forEach(pc => {
+        const bill = pc.externalAmount || 0;
+        const saved = Math.round((bill * (pc.discountPercentage || 0)) / 100);
+        promoBill += bill;
+        promoRevenue += (bill - saved);
+        promoCount += 1;
+        if (pc.student) uniquePromoStudents.add(pc.student.toString());
+      });
+
+      const promoSaved = Math.round((promoBill * (brandPromos[0]?.discountPercentage || 0)) / 100);
+
+      // Total
+      const totalRevenue = qrRevenue + promoRevenue;
+      const totalBill = qrBill + promoBill;
+      const totalSaved = qrSaved + promoSaved;
+      const totalRedemptions = qrCount + promoCount;
+      const uniqueStudents = new Set([
+        ...uniqueQrStudents,
+        ...uniquePromoStudents
+      ]).size;
+
+      // Top offer (by redemption count)
+      let topOffer = "—";
+      let topCount = 0;
+      brandOffers.forEach(offer => {
+        const count = (offer.redemptions || []).length;
+        if (count > topCount) {
+          topCount = count;
+          topOffer = offer.title || "Offer";
+        }
+      });
+
+      return {
+        _id: brand._id,
+        name: brand.brandName || brand.name || 'Brand',
+        logo: brand.logo || null,
+        category: brand.category || 'General',
+        approvalStatus: brand.brandApprovalStatus || 'pending',
+        platform: brand.platform || 'woocommerce',
+        websiteUrl: brand.websiteUrl || '',
+        address: brand.address || '',
+        phone: brand.phone || '',
+        email: brand.email || '',
+        createdAt: brand.createdAt,
+        isOnline: brand.isOnline || false,
+        isInStore: brand.isInStore || false,
+
+        // Revenue metrics
+        totalRevenue,
+        totalBill,
+        totalSaved,
+        totalRedemptions,
+        uniqueStudents,
+
+        // Breakdown
+        qrRevenue,
+        qrBill,
+        qrSaved,
+        qrCount,
+
+        promoRevenue,
+        promoBill,
+        promoCount,
+
+        // Best offer
+        topOffer,
+        topOfferCount: topCount,
+        offersCount: brandOffers.length,
+      };
+    });
+
+    // 7. Sort by total revenue DESC
+    brandsWithRevenue.sort((a, b) => b.totalRevenue - a.totalRevenue);
+
+    // 8. Global totals
+    const grandTotalRevenue = brandsWithRevenue.reduce((s, b) => s + b.totalRevenue, 0);
+    const grandTotalBill = brandsWithRevenue.reduce((s, b) => s + b.totalBill, 0);
+    const grandTotalSaved = brandsWithRevenue.reduce((s, b) => s + b.totalSaved, 0);
+    const grandTotalRedemptions = brandsWithRevenue.reduce((s, b) => s + b.totalRedemptions, 0);
+    const grandUniqueStudents = brandsWithRevenue.reduce((s, b) => s + b.uniqueStudents, 0);
+    const brandsWithRevenueCount = brandsWithRevenue.filter(b => b.totalRevenue > 0).length;
+
+    res.json({
+      success: true,
+      summary: {
+        totalBrands: brands.length,
+        brandsWithRevenue: brandsWithRevenueCount,
+        totalRevenue: grandTotalRevenue,
+        totalBill: grandTotalBill,
+        totalSaved: grandTotalSaved,
+        totalRedemptions: grandTotalRedemptions,
+        uniqueStudents: grandUniqueStudents,
+        averageRevenue: brandsWithRevenueCount > 0
+          ? Math.round(grandTotalRevenue / brandsWithRevenueCount)
+          : 0,
+      },
+      brands: brandsWithRevenue,
+    });
+  } catch (err) {
+    console.error("Error in brands-revenue:", err);
+    res.status(500).json({ message: err.message });
   }
 });
 module.exports = router;

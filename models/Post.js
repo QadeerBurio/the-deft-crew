@@ -24,36 +24,49 @@ const PostSchema = new mongoose.Schema({
     type: String,
     default: "Karachi"
   },
-  // Poll feature
   poll: [{
     option: { type: String, required: true },
     votes: { type: Number, default: 0 },
     votedBy: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }]
   }],
-  // Discount feature (for Discounts category)
   discount: {
     code: { type: String },
     expiryDate: { type: Date },
     terms: { type: String }
   },
-  // Event feature (for Events category)
   eventDate: { type: Date },
-  // Engagement
   likes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   favorites: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   viewedBy: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+  
+  // ============================================
+  // ✅ COMMENTS with parentComment AND mentions
+  // ============================================
   comments: [{
-    user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-    text: { type: String, required: true },
+    user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    text: { type: String, required: true, trim: true },
+    
+    // Parent comment for threading
+    parentComment: { 
+      type: mongoose.Schema.Types.ObjectId, 
+      default: null 
+    },
+    
+    // ✅ NEW: Store mentioned user IDs for notification tracking
+    mentions: [{ 
+      type: mongoose.Schema.Types.ObjectId, 
+      ref: 'User' 
+    }],
+    
     createdAt: { type: Date, default: Date.now }
   }],
+  
   createdAt: { 
     type: Date, 
     default: Date.now 
   }
 });
 
-// Indexes for better performance
 PostSchema.index({ createdAt: -1 });
 PostSchema.index({ category: 1 });
 PostSchema.index({ author: 1 });

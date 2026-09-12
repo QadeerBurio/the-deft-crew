@@ -1030,9 +1030,54 @@ router.get('/posts/likes/:id', auth, async (req, res) => {
 });
 
 // --- Add Comment to Post ---
+// router.post('/posts/comment/:id', auth, async (req, res) => {
+//   try {
+//     const { text } = req.body;
+
+//     if (!text || text.trim().length === 0) {
+//       return res.status(400).json({ error: "Comment text cannot be empty." });
+//     }
+
+//     const post = await Post.findById(req.params.id);
+//     if (!post) return res.status(404).json({ error: "Post not found." });
+
+//     const newComment = {
+//       user: req.user._id,
+//       text: text.trim(),
+//       createdAt: new Date()
+//     };
+
+//     post.comments.unshift(newComment);
+//     await post.save();
+
+//     const updatedPost = await Post.findById(req.params.id)
+//       .populate('comments.user', 'name profileImage');
+
+//     const previewText = text.length > 20 ? text.substring(0, 20) + "..." : text;
+//     if (post.author.toString() !== req.user._id.toString()) {
+//        await createNotification(
+//          post.author,
+//          req.user._id,
+//          'comment',
+//          `${req.user.name} commented: "${previewText}"`,
+//          post._id
+//        );
+//     }
+
+//     res.json({ success: true, comments: updatedPost.comments });
+//   } catch (err) { 
+//     console.error("Comment Logic Error:", err.message);
+//     res.status(500).json({ error: "Internal Server Error" }); 
+//   }
+// });
+// ============================================
+// ============ COMMENT ROUTES ================
+// ============================================
+
+// --- Add Comment to Post (WITH REPLY + MENTION SUPPORT) ---
 router.post('/posts/comment/:id', auth, async (req, res) => {
   try {
-    const { text } = req.body;
+    const { text, parentComment, mentions } = req.body;
 
     if (!text || text.trim().length === 0) {
       return res.status(400).json({ error: "Comment text cannot be empty." });
@@ -1041,33 +1086,177 @@ router.post('/posts/comment/:id', auth, async (req, res) => {
     const post = await Post.findById(req.params.id);
     if (!post) return res.status(404).json({ error: "Post not found." });
 
+    // Validate parentComment
+    let validParentId = null;
+    if (parentComment) {
+      const parentExists = post.comments.some(
+        c => c._id.toString() === parentComment.toString()
+      );
+      if (parentExists) validParentId = parentComment;
+    }
+
+    // Validate mentions (only keep users that actually exist)
+    let validMentions = [];
+    if (Array.isArray(mentions) && mentions.length > 0) {
+      const uniqueIds = [...new Set(mentions.map(m => m.toString()))];
+      const existingUsers = await User.find({ _id: { $in: uniqueIds } }).select('_id');
+      validMentions = existingUsers
+        .map(u => u._id)
+        .filter(id => id.toString() !== req.user._id.toString()); // don't self-notify
+    }
+
     const newComment = {
       user: req.user._id,
       text: text.trim(),
+      parentComment: validParentId,
+      mentions: validMentions,
       createdAt: new Date()
     };
 
-    post.comments.unshift(newComment);
+    post.comments.push(newComment);
     await post.save();
 
     const updatedPost = await Post.findById(req.params.id)
       .populate('comments.user', 'name profileImage');
 
-    const previewText = text.length > 20 ? text.substring(0, 20) + "..." : text;
+    // Get the newly added comment (last one)
+    const savedComment = updatedPost.comments[updatedPost.comments.length - 1];
+
+    const previewText = text.length > 30 ? text.substring(0, 30) + "..." : text;
+
+    // 1️⃣ Notify post author (skip if commenting on own post)
     if (post.author.toString() !== req.user._id.toString()) {
-       await createNotification(
-         post.author,
-         req.user._id,
-         'comment',
-         `${req.user.name} commented: "${previewText}"`,
-         post._id
-       );
+      await createNotification(
+        post.author,
+        req.user._id,
+        'comment',
+        `${req.user.name} commented: "${previewText}"`,
+        post._id
+      );
     }
 
-    res.json({ success: true, comments: updatedPost.comments });
-  } catch (err) { 
+    // 2️⃣ Notify parent comment author if it's a reply
+    if (validParentId) {
+      const parentCommentDoc = post.comments.find(
+        c => c._id.toString() === validParentId.toString()
+      );
+      if (
+        parentCommentDoc &&
+        parentCommentDoc.user.toString() !== req.user._id.toString() &&
+        parentCommentDoc.user.toString() !== post.author.toString()
+      ) {
+        await createNotification(
+          parentCommentDoc.user,
+          req.user._id,
+          'reply',
+          `${req.user.name} replied to your comment: "${previewText}"`,
+          post._id
+        );
+      }
+    }
+
+    // 3️⃣ ✅ Notify each mentioned user
+    if (validMentions.length > 0) {
+      for (const mentionedId of validMentions) {
+        // Skip if already notified as post author or parent comment author
+        const alreadyNotified = 
+          mentionedId.toString() === post.author.toString() ||
+          (validParentId && mentionedId.toString() === post.comments.find(
+            c => c._id.toString() === validParentId.toString()
+          )?.user.toString());
+
+        if (!alreadyNotified) {
+          await createNotification(
+            mentionedId,
+            req.user._id,
+            'mention',
+            `${req.user.name} mentioned you in a comment: "${previewText}"`,
+            post._id
+          );
+        }
+      }
+    }
+
+    res.json({ success: true, comments: updatedPost.comments, newCommentId: savedComment._id });
+  } catch (err) {
     console.error("Comment Logic Error:", err.message);
-    res.status(500).json({ error: "Internal Server Error" }); 
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+
+// --- Delete Comment from Post (with cascade delete of replies) ---
+router.delete('/posts/comment/:postId/:commentId', auth, async (req, res) => {
+  try {
+    const { postId, commentId } = req.params;
+
+    const post = await Post.findById(postId);
+    if (!post) return res.status(404).json({ error: "Post not found" });
+
+    const comment = post.comments.find(c => c._id.toString() === commentId);
+    if (!comment) return res.status(404).json({ error: "Comment not found" });
+
+    if (comment.user.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ error: "You can only delete your own comments" });
+    }
+
+    // ✅ Cascade: also delete all replies to this comment
+    post.comments = post.comments.filter(c => {
+      const isTarget = c._id.toString() === commentId;
+      const isReplyToTarget = c.parentComment && 
+        c.parentComment.toString() === commentId;
+      return !isTarget && !isReplyToTarget;
+    });
+
+    await post.save();
+
+    const updatedPost = await Post.findById(postId)
+      .populate('comments.user', 'name profileImage');
+
+    res.json({ 
+      success: true, 
+      message: "Comment and its replies deleted",
+      comments: updatedPost.comments 
+    });
+  } catch (err) {
+    console.error("Delete Comment Error:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+
+// --- ✅ Search connected users for @mention autocomplete ---
+router.get('/users/mention-search', auth, async (req, res) => {
+  try {
+    const { q } = req.query;
+    const userId = req.user._id;
+
+    if (!q || q.trim().length < 1) {
+      return res.json({ users: [] });
+    }
+
+    // Get current user's connections only
+    const currentUser = await User.findById(userId).select('connections');
+    const connectionIds = (currentUser?.connections || []).map(id => id);
+
+    if (connectionIds.length === 0) {
+      return res.json({ users: [] });
+    }
+
+    const searchRegex = new RegExp('^' + q.trim(), 'i');
+
+    const users = await User.find({
+      _id: { $in: connectionIds },
+      name: searchRegex
+    })
+      .select('name profileImage username headline')
+      .limit(8)
+      .lean();
+
+    res.json({ users });
+  } catch (err) {
+    console.error("Mention search error:", err);
+    res.status(500).json({ error: "Search failed" });
   }
 });
 
@@ -1344,7 +1533,8 @@ router.put('/confessions/like/:id', auth, async (req, res) => {
 // FIXED: Add Comment to Confession
 router.post('/confessions/comment/:id', auth, async (req, res) => {
   try {
-    const { text } = req.body;
+    const { text, parentComment, mentions } = req.body;
+
     if (!text || !text.trim()) {
       return res.status(400).json({ error: "Comment cannot be empty" });
     }
@@ -1354,9 +1544,30 @@ router.post('/confessions/comment/:id', auth, async (req, res) => {
       return res.status(404).json({ error: "Confession not found" });
     }
 
+    // Validate parentComment
+    let validParentId = null;
+    if (parentComment) {
+      const parentExists = confession.comments.some(
+        c => c._id.toString() === parentComment.toString()
+      );
+      if (parentExists) validParentId = parentComment;
+    }
+
+    // Validate mentions (only keep real users, exclude self)
+    let validMentions = [];
+    if (Array.isArray(mentions) && mentions.length > 0) {
+      const uniqueIds = [...new Set(mentions.map(m => m.toString()))];
+      const existingUsers = await User.find({ _id: { $in: uniqueIds } }).select('_id');
+      validMentions = existingUsers
+        .map(u => u._id)
+        .filter(id => id.toString() !== req.user._id.toString());
+    }
+
     const newComment = {
       user: req.user._id,
       text: text.trim(),
+      parentComment: validParentId,
+      mentions: validMentions,
       createdAt: new Date()
     };
 
@@ -1367,7 +1578,50 @@ router.post('/confessions/comment/:id', auth, async (req, res) => {
       .populate('comments.user', 'name profileImage')
       .lean();
 
-    res.status(200).json(updatedConfession);
+    // ✅ Sanitize comments for response
+    const sanitizedComments = (updatedConfession.comments || []).map(comment => {
+      const commentUserId = comment.user?._id?.toString();
+      const currentUserId = req.user._id.toString();
+      const isMyComment = commentUserId === currentUserId;
+
+      return {
+        _id: comment._id,
+        text: comment.text,
+        parentComment: comment.parentComment || null,
+        createdAt: comment.createdAt,
+        user: isMyComment && comment.user ? {
+          _id: comment.user._id,
+          name: comment.user.name,
+          profileImage: comment.user.profileImage,
+        } : null,
+        isMyComment,
+      };
+    });
+
+    // ✅ Send MENTION notifications (only for mentions — no auto-reply notify, since anonymous)
+    const previewText = text.length > 30 ? text.substring(0, 30) + "..." : text;
+    if (validMentions.length > 0) {
+      for (const mentionedId of validMentions) {
+        try {
+          await createNotification(
+            mentionedId,
+            req.user._id,
+            'mention',
+            `${req.user.name} mentioned you in a confession: "${previewText}"`,
+            null // No postId since it's a confession
+          );
+        } catch (notifErr) {
+          console.error("Mention notification error:", notifErr);
+        }
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      _id: updatedConfession._id,
+      comments: sanitizedComments,
+      newCommentId: updatedConfession.comments[updatedConfession.comments.length - 1]._id,
+    });
   } catch (err) {
     console.error("Comment Confession Error:", err);
     res.status(500).json({ error: "Server error" });
@@ -1375,6 +1629,7 @@ router.post('/confessions/comment/:id', auth, async (req, res) => {
 });
 
 // FIXED: Delete Confession Comment
+// FIXED: Delete Confession Comment (with cascade delete of replies)
 router.delete('/confessions/comment/:postId/:commentId', auth, async (req, res) => {
   try {
     const confession = await Confession.findById(req.params.postId);
@@ -1382,33 +1637,65 @@ router.delete('/confessions/comment/:postId/:commentId', auth, async (req, res) 
       return res.status(404).json({ error: "Confession not found" });
     }
 
-    const commentIndex = confession.comments.findIndex(
-      comment => comment._id.toString() === req.params.commentId
+    const comment = confession.comments.find(
+      c => c._id.toString() === req.params.commentId
     );
 
-    if (commentIndex === -1) {
+    if (!comment) {
       return res.status(404).json({ error: "Comment not found" });
-    }
-
-    const comment = confession.comments[commentIndex];
-    if (!comment.user) {
-      return res.status(404).json({ error: "Comment user not found" });
     }
 
     if (comment.user.toString() !== req.user._id.toString()) {
       return res.status(403).json({ error: "You can only delete your own comments" });
     }
 
-    confession.comments.splice(commentIndex, 1);
+    // ✅ Cascade: also delete all replies to this comment
+    confession.comments = confession.comments.filter(c => {
+      const isTarget = c._id.toString() === req.params.commentId;
+      const isReplyToTarget = c.parentComment && 
+        c.parentComment.toString() === req.params.commentId;
+      return !isTarget && !isReplyToTarget;
+    });
+
     await confession.save();
 
-    res.status(200).json({ message: "Comment deleted successfully" });
+    const updatedConfession = await Confession.findById(req.params.postId)
+      .populate('comments.user', 'name profileImage')
+      .lean();
+
+    // Sanitize
+    const sanitizedComments = (updatedConfession.comments || []).map(c => {
+      const commentUserId = c.user?._id?.toString();
+      const currentUserId = req.user._id.toString();
+      const isMyComment = commentUserId === currentUserId;
+
+      return {
+        _id: c._id,
+        text: c.text,
+        parentComment: c.parentComment || null,
+        createdAt: c.createdAt,
+        user: isMyComment && c.user ? {
+          _id: c.user._id,
+          name: c.user.name,
+          profileImage: c.user.profileImage,
+        } : null,
+        isMyComment,
+      };
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Comment and its replies deleted",
+      comments: sanitizedComments,
+    });
   } catch (err) {
     console.error("Delete Confession Comment Error:", err);
     res.status(500).json({ error: "Server error" });
   }
 });
 
+
+// FIXED: Get Confessions Feed
 // FIXED: Get Confessions Feed
 router.get('/confessions/feed', auth, async (req, res) => {
   try {
@@ -1417,14 +1704,41 @@ router.get('/confessions/feed', auth, async (req, res) => {
       .populate('comments.user', 'name profileImage')
       .lean();
 
-    const formattedConfessions = confessions.map(confession => ({
-      ...confession,
-      authorName: "Anonymous",
-      authorAvatar: null,
-      likedByCurrentUser: confession.likedBy?.some(id => 
-        id && id.toString() === req.user._id.toString()
-      ) || false
-    }));
+    const formattedConfessions = confessions.map(confession => {
+      // ✅ Sanitize comments - hide user identity of OTHER users' comments
+      const sanitizedComments = (confession.comments || []).map(comment => {
+        const commentUserId = comment.user?._id?.toString();
+        const currentUserId = req.user._id.toString();
+        const isMyComment = commentUserId === currentUserId;
+
+        return {
+          _id: comment._id,
+          text: comment.text,
+          parentComment: comment.parentComment || null,
+          createdAt: comment.createdAt,
+          // Only expose user info for own comments
+          user: isMyComment && comment.user ? {
+            _id: comment.user._id,
+            name: comment.user.name,
+            profileImage: comment.user.profileImage,
+          } : null,
+          // Flag so frontend knows if we can show "Delete"
+          isMyComment,
+        };
+      });
+
+      return {
+        ...confession,
+        // Remove authorId from response (extra safety)
+        authorId: undefined,
+        comments: sanitizedComments,
+        authorName: "Anonymous",
+        authorAvatar: null,
+        likedByCurrentUser: confession.likedBy?.some(id => 
+          id && id.toString() === req.user._id.toString()
+        ) || false
+      };
+    });
 
     res.status(200).json(formattedConfessions);
   } catch (err) {
@@ -1432,6 +1746,7 @@ router.get('/confessions/feed', auth, async (req, res) => {
     res.status(500).json({ error: "Could not fetch confessions." });
   }
 });
+
 
 // FIXED: Create Confession
 router.post('/confessions/create', auth, async (req, res) => {

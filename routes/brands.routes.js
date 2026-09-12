@@ -206,4 +206,28 @@ router.get("/:brandId/stats", auth, async (req, res) => {
   }
 });
 
+// ==========================================
+// READ: Get all active branches for a specific brand (PUBLIC)
+// GET /api/branches/brand/:brandId
+// ==========================================
+router.get("/brand/:brandId", async (req, res) => {
+  try {
+    const branches = await Branch.find({
+      brand: req.params.brandId,
+      isActive: true,
+    })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    res.json({
+      success: true,
+      count: branches.length,
+      branches,
+    });
+  } catch (err) {
+    console.error("Error fetching brand branches:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 module.exports = router;

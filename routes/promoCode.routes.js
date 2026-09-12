@@ -1096,6 +1096,7 @@ router.post("/confirm-redemption", auth, async (req, res) => {
       status: 'used',
       usedAt: new Date(),
       usedBy: studentId,
+      externalAmount: Number(billAmount), // ✅ Add this
       $inc: { usedCount: 1 }
     });
 
