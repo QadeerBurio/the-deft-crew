@@ -16,7 +16,8 @@ const mongoose = require("mongoose");
 const Package = require("../models/Package");
 const fs = require("fs");
 const router = express.Router();
-
+const { Resend } =require('resend');
+const resend = new Resend(process.env.RESEND_API_KEY);
 // ==========================================
 // OTP STORE & EMAIL TRANSPORTER
 // ==========================================
@@ -394,6 +395,9 @@ router.get("/check-vip-status", authMiddleware, async (req, res) => {
 // ==========================================
 // FORGOT PASSWORD (SEND OTP)
 // ==========================================
+// ==========================================
+// FORGOT PASSWORD (SEND OTP) - RESEND VERSION
+// ==========================================
 router.post("/forgot-password", async (req, res) => {
   const { emailOrPhone } = req.body;
 
@@ -422,71 +426,49 @@ router.post("/forgot-password", async (req, res) => {
 
     console.log(`🔑 OTP for ${user.email}: ${otp}`);
 
-   try {
-  const info = await transporter.sendMail({
-    from: `"The Deft Crew" <${process.env.EMAIL_FROM}>`,
-    to: user.email,
-    subject: "Password Reset OTP - The Deft Crew",
-    html: `
-      <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 20px;">
-        <h2 style="color: #1a1a1a;">Password Reset Request</h2>
+    try {
+      const { data, error } = await resend.emails.send({
+        from: "The Deft Crew <support@gettdc.pk>", // testing ke liye
+        to: user.email,
+        subject: "Password Reset OTP - The Deft Crew",
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 20px;">
+            <h2 style="color: #1a1a1a;">Password Reset Request</h2>
+            <p>Hello ${user.name || "User"},</p>
+            <p>Use the following OTP code to reset your password:</p>
+            <div style="background: #f9c349; padding: 20px; text-align: center; border-radius: 10px; margin: 20px 0;">
+              <h1 style="color: #1a1a1a; font-size: 36px; letter-spacing: 5px; margin: 0;">${otp}</h1>
+            </div>
+            <p>This OTP expires in <strong>5 minutes</strong>.</p>
+            <p>If you did not request this password reset, you can safely ignore this email.</p>
+            <p>Regards,<br><strong>The Deft Crew Team</strong></p>
+          </div>
+        `,
+      });
 
-        <p>Hello ${user.name || "User"},</p>
+      if (error) {
+        console.error("❌ Resend error:", error);
+        delete otpStore[user._id];
+        return res.status(500).json({
+          message: "Unable to send OTP email. Please try again later.",
+        });
+      }
 
-        <p>Use the following OTP code to reset your password:</p>
+      console.log(`✅ OTP email sent via Resend to ${user.email}`);
+      console.log(`📨 Message ID: ${data?.id}`);
 
-        <div style="
-          background: #f9c349;
-          padding: 20px;
-          text-align: center;
-          border-radius: 10px;
-          margin: 20px 0;
-        ">
-          <h1 style="
-            color: #1a1a1a;
-            font-size: 36px;
-            letter-spacing: 5px;
-            margin: 0;
-          ">
-            ${otp}
-          </h1>
-        </div>
+      return res.json({
+        message: "OTP sent successfully to your email",
+        userId: user._id,
+      });
 
-        <p>This OTP expires in <strong>5 minutes</strong>.</p>
-
-        <p>If you did not request this password reset, you can safely ignore this email.</p>
-
-        <p>
-          Regards,<br>
-          <strong>The Deft Crew Team</strong>
-        </p>
-      </div>
-    `,
-  });
-
-  console.log(`✅ OTP email sent to ${user.email}`);
-  console.log(`📨 Message ID: ${info.messageId}`);
-
-  return res.json({
-    message: "OTP sent successfully to your email",
-    userId: user._id,
-  });
-
-} catch (mailError) {
-
-  console.error("❌ OTP email failed:", mailError);
-
-  delete otpStore[user._id];
-
-  return res.status(500).json({
-    message: "Unable to send OTP email. Please try again later.",
-  });
-}
-
-    return res.json({
-      message: "OTP sent successfully to your email",
-      userId: user._id,
-    });
+    } catch (mailError) {
+      console.error("❌ OTP email failed:", mailError);
+      delete otpStore[user._id];
+      return res.status(500).json({
+        message: "Unable to send OTP email. Please try again later.",
+      });
+    }
 
   } catch (err) {
     console.error("❌ Forgot password error:", err);
