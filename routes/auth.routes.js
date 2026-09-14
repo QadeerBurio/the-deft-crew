@@ -22,18 +22,20 @@ const router = express.Router();
 // ==========================================
 const otpStore = {};
 const transporter = nodemailer.createTransport({
-  service: "gmail",
+  host: process.env.EMAIL_HOST || "smtp.hostinger.com",
+  port: Number(process.env.EMAIL_PORT || 465),
+  secure: process.env.EMAIL_SECURE !== "false",
   auth: {
-    user: process.env.EMAIL_USER || "abdulqadeerburiro110@gmail.com",
-    pass: process.env.EMAIL_PASS || "lhefzozqsdmubawi",
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
   },
 });
 
-transporter.verify(function (error, success) {
+transporter.verify((error, success) => {
   if (error) {
-    console.log("❌ Email transporter error:", error.message);
+    console.error("❌ SMTP Connection Error:", error);
   } else {
-    console.log("✅ Email server is ready");
+    console.log("✅ SMTP Server is ready");
   }
 });
 
@@ -206,7 +208,7 @@ router.post("/signup", async (req, res) => {
 
         transporter
           .sendMail({
-            from: `"The Deft Crew" <${process.env.EMAIL_USER}>`,
+            from: `"The Deft Crew" <${process.env.EMAIL_FROM}>`,
             to: email,
             subject: "Welcome to the Crew! 🚀",
             html: `<p>Welcome <b>${name}</b>! Your account is now active.</p>`,
@@ -420,27 +422,66 @@ router.post("/forgot-password", async (req, res) => {
 
     console.log(`🔑 OTP for ${user.email}: ${otp}`);
 
-    try {
-      await transporter.sendMail({
-        from: `"The Deft Crew" <abdulqadeerburiro110@gmail.com>`,
-        to: user.email,
-        subject: "Password Reset OTP - The Deft Crew",
-        html: `
-          <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 20px;">
-            <h2 style="color: #1a1a1a;">Password Reset Request</h2>
-            <p>Hello ${user.name || 'User'},</p>
-            <p>Use the following OTP code:</p>
-            <div style="background: #f9c349; padding: 20px; text-align: center; border-radius: 10px; margin: 20px 0;">
-              <h1 style="color: #1a1a1a; font-size: 36px; letter-spacing: 5px; margin: 0;">${otp}</h1>
-            </div>
-            <p style="color: #666;">This OTP expires in <strong>5 minutes</strong>.</p>
-          </div>
-        `,
-      });
-      console.log(`✅ OTP email sent to ${user.email}`);
-    } catch (mailError) {
-      console.log("⚠️ Email failed but OTP generated:", otp);
-    }
+   try {
+  const info = await transporter.sendMail({
+    from: `"The Deft Crew" <${process.env.EMAIL_FROM}>`,
+    to: user.email,
+    subject: "Password Reset OTP - The Deft Crew",
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 20px;">
+        <h2 style="color: #1a1a1a;">Password Reset Request</h2>
+
+        <p>Hello ${user.name || "User"},</p>
+
+        <p>Use the following OTP code to reset your password:</p>
+
+        <div style="
+          background: #f9c349;
+          padding: 20px;
+          text-align: center;
+          border-radius: 10px;
+          margin: 20px 0;
+        ">
+          <h1 style="
+            color: #1a1a1a;
+            font-size: 36px;
+            letter-spacing: 5px;
+            margin: 0;
+          ">
+            ${otp}
+          </h1>
+        </div>
+
+        <p>This OTP expires in <strong>5 minutes</strong>.</p>
+
+        <p>If you did not request this password reset, you can safely ignore this email.</p>
+
+        <p>
+          Regards,<br>
+          <strong>The Deft Crew Team</strong>
+        </p>
+      </div>
+    `,
+  });
+
+  console.log(`✅ OTP email sent to ${user.email}`);
+  console.log(`📨 Message ID: ${info.messageId}`);
+
+  return res.json({
+    message: "OTP sent successfully to your email",
+    userId: user._id,
+  });
+
+} catch (mailError) {
+
+  console.error("❌ OTP email failed:", mailError);
+
+  delete otpStore[user._id];
+
+  return res.status(500).json({
+    message: "Unable to send OTP email. Please try again later.",
+  });
+}
 
     return res.json({
       message: "OTP sent successfully to your email",
@@ -854,7 +895,7 @@ router.post("/change-password", authMiddleware, async (req, res) => {
     // Send email notification
     try {
       await transporter.sendMail({
-        from: `"The Deft Crew" <${process.env.EMAIL_USER}>`,
+        from: `"The Deft Crew" <${process.env.EMAIL_FROM}>`,
         to: user.email,
         subject: "Password Changed Successfully - The Deft Crew",
         html: `
