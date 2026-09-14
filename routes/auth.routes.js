@@ -3,7 +3,7 @@ require("dotenv").config();
 const express = require("express");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
-const nodemailer = require("nodemailer");
+// const nodemailer = require("nodemailer");
 const { body, validationResult } = require("express-validator");
 const multer = require("multer");
 const { storage, uploadLogo, hasCloudinary, deleteFromCloudinary } = require("../config/cloudinary");
@@ -22,23 +22,23 @@ const resend = new Resend(process.env.RESEND_API_KEY);
 // OTP STORE & EMAIL TRANSPORTER
 // ==========================================
 const otpStore = {};
-const transporter = nodemailer.createTransport({
-  host: process.env.EMAIL_HOST || "smtp.hostinger.com",
-  port: Number(process.env.EMAIL_PORT || 465),
-  secure: process.env.EMAIL_SECURE !== "false",
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-});
+// const transporter = nodemailer.createTransport({f
+//   host: process.env.EMAIL_HOST || "smtp.hostinger.com",
+//   port: Number(process.env.EMAIL_PORT || 465),
+//   secure: process.env.EMAIL_SECURE !== "false",
+//   auth: {
+//     user: process.env.EMAIL_USER,
+//     pass: process.env.EMAIL_PASS,
+//   },
+// });
 
-transporter.verify((error, success) => {
-  if (error) {
-    console.error("❌ SMTP Connection Error:", error);
-  } else {
-    console.log("✅ SMTP Server is ready");
-  }
-});
+// transporter.verify((error, success) => {
+//   if (error) {
+//     console.error("❌ SMTP Connection Error:", error);
+//   } else {
+//     console.log("✅ SMTP Server is ready");
+//   }
+// });
 
 // Helper function to cleanup uploaded files
 const cleanupFile = async (file) => {
@@ -876,8 +876,8 @@ router.post("/change-password", authMiddleware, async (req, res) => {
     
     // Send email notification
     try {
-      await transporter.sendMail({
-        from: `"The Deft Crew" <${process.env.EMAIL_FROM}>`,
+      resend.emails.send({
+  from: "The Deft Crew <support@gettdc.pk>",
         to: user.email,
         subject: "Password Changed Successfully - The Deft Crew",
         html: `
