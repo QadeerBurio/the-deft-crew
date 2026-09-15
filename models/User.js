@@ -147,6 +147,12 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+    // ✅ ADD THIS BLOCK
+city: {
+  type: String,
+  default: "Karachi",
+  trim: true,
+},
     // --- STUDENT SPECIFICS ---
     rollNo: { type: String },
     phone: { type: String },

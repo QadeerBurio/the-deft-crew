@@ -96,6 +96,7 @@ router.post("/signup", async (req, res) => {
       address,
       instagram,
       referralCodeInput,
+      city,  
     } = req.body;
 
     // 1. Validate required fields
@@ -164,6 +165,7 @@ router.post("/signup", async (req, res) => {
       address,
       instagram,
       status: role === "admin" ? "Verified" : "Not Verified",
+       city: city?.trim() || "Karachi",   // ✅ ADD THIS — auto-default
       referredBy: referrer ? referrer._id : null,
     };
 
