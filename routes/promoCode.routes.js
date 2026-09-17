@@ -138,12 +138,11 @@ router.post("/generate", auth, async (req, res) => {
 
     await Offer.findByIdAndUpdate(offerId, { $push: { promoCodesGenerated: newPromoCode._id } });
 
-    // Sync to Shopify (via the Remix app) or WooCommerce, whichever the
-    // brand is configured for.
+    // Sync to WooCommerce if the brand has one configured.
+    // Shopify brands are handled separately, via the Remix app's own OAuth
+    // flow, not here (see routes/shopifyApp.routes.js).
     const brandUser = await User.findById(offer.brand._id);
-    if (brandUser?.platform === "shopify" && brandUser?.shopifyStoreUrl) {
-      await createShopifyDiscountViaRemix(brandUser, newPromoCode.code, newPromoCode.discountPercentage, newPromoCode.expiresAt);
-    } else if (brandUser?.websiteUrl) {
+    if (brandUser?.websiteUrl) {
       await createWooCommerceCoupon(brandUser, newPromoCode.code, newPromoCode.discountPercentage, newPromoCode.expiresAt);
     }
 
