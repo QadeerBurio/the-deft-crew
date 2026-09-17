@@ -164,26 +164,59 @@ router.get("/:brandId/offers/details", auth, async (req, res) => {
 // ==========================================
 // GET BRAND STATS (for admin dashboard)
 // ==========================================
-router.get("/:brandId/stats", auth, async (req, res) => {
+// router.get("/:brandId/stats", auth, async (req, res) => {
+//   try {
+//     const brand = await User.findOne({ 
+//       _id: req.params.brandId,
+//       role: "brand"
+//     });
+    
+//     if (!brand) {
+//       return res.status(404).json({ 
+//         success: false,
+//         message: "Brand not found" 
+//       });
+//     }
+    
+//     const offers = await Offer.find({ brand: req.params.brandId });
+    
+//     // Get all redemptions
+//     const allRedemptions = offers.flatMap(o => o.redemptions || []);
+    
+//     const stats = {
+//       totalOffers: offers.length,
+//       activeOffers: offers.filter(o => o.isActive !== false).length,
+//       totalClaims: offers.reduce((sum, o) => sum + (o.claimedBy?.length || 0), 0),
+//       totalRedemptions: allRedemptions.length,
+//       totalSavings: offers.reduce((sum, o) => sum + (o.totalSavings || 0), 0),
+//       totalRevenue: allRedemptions.reduce((sum, r) => sum + (r.billAmount || 0), 0),
+//       uniqueStudents: new Set(allRedemptions.map(r => r.student?.toString())).size
+//     };
+    
+//     res.json({
+//       success: true,
+//       stats
+//     });
+//   } catch (err) {
+//     console.error("Error fetching brand stats:", err);
+//     res.status(500).json({ 
+//       success: false,
+//       message: "Server error" 
+//     });
+//   }
+// });
+// ==========================================
+// GET OVERALL BRAND STATS (for admin dashboard)
+// ==========================================
+router.get("/stats", auth, async (req, res) => {
   try {
-    const brand = await User.findOne({ 
-      _id: req.params.brandId,
-      role: "brand"
-    });
-    
-    if (!brand) {
-      return res.status(404).json({ 
-        success: false,
-        message: "Brand not found" 
-      });
-    }
-    
-    const offers = await Offer.find({ brand: req.params.brandId });
-    
-    // Get all redemptions
+    const brands = await User.find({ role: "brand" }).select("_id").lean();
+    const offers = await Offer.find({ brand: { $in: brands.map(b => b._id) } });
+
     const allRedemptions = offers.flatMap(o => o.redemptions || []);
-    
+
     const stats = {
+      totalBrands: brands.length,
       totalOffers: offers.length,
       activeOffers: offers.filter(o => o.isActive !== false).length,
       totalClaims: offers.reduce((sum, o) => sum + (o.claimedBy?.length || 0), 0),
@@ -192,19 +225,36 @@ router.get("/:brandId/stats", auth, async (req, res) => {
       totalRevenue: allRedemptions.reduce((sum, r) => sum + (r.billAmount || 0), 0),
       uniqueStudents: new Set(allRedemptions.map(r => r.student?.toString())).size
     };
-    
-    res.json({
-      success: true,
-      stats
-    });
+
+    res.json({ success: true, stats });
   } catch (err) {
-    console.error("Error fetching brand stats:", err);
-    res.status(500).json({ 
-      success: false,
-      message: "Server error" 
-    });
+    console.error("Error fetching overall brand stats:", err);
+    res.status(500).json({ success: false, message: "Server error" });
   }
 });
+// ==========================================
+// READ: Get all active branches for a specific brand (PUBLIC)
+// GET /api/branches/brand/:brandId
+// ==========================================
+// router.get("/brand/:brandId", async (req, res) => {
+//   try {
+//     const branches = await Branch.find({
+//       brand: req.params.brandId,
+//       isActive: true,
+//     })
+//       .sort({ createdAt: -1 })
+//       .lean();
+
+//     res.json({
+//       success: true,
+//       count: branches.length,
+//       branches,
+//     });
+//   } catch (err) {
+//     console.error("Error fetching brand branches:", err);
+//     res.status(500).json({ success: false, message: err.message });
+//   }
+// });
 
 // ==========================================
 // READ: Get all active branches for a specific brand (PUBLIC)
