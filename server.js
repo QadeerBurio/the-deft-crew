@@ -1,7 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 require("dotenv").config();
-
+const crypto = require("crypto");
 const http = require("http");
 const { Server } = require("socket.io");
 const dns = require("dns");
@@ -95,6 +95,96 @@ connectDB().then(() => {
   });
 });
 
+
+// ==================== SHOPIFY WEBHOOKS ====================
+
+// Compliance webhook — MUST return 401 for invalid HMAC, 200 for valid [citation:3][citation:24]
+app.post("/webhooks/compliance", async (req, res) => {
+  const hmacHeader = req.get("X-Shopify-Hmac-Sha256");
+  const rawBody = req.body; // Buffer
+
+  const calculatedHmac = crypto
+    .createHmac("sha256", process.env.SHOPIFY_API_SECRET)
+    .update(rawBody)
+    .digest("base64");
+
+  // Constant-time comparison [citation:2]
+  const valid = crypto.timingSafeEqual(
+    Buffer.from(calculatedHmac, "base64"),
+    Buffer.from(hmacHeader || "", "base64")
+  );
+
+  if (!valid) {
+    console.warn("❌ Compliance webhook HMAC failed");
+    return res.status(401).send("Unauthorized");
+  }
+
+  const topic = req.get("X-Shopify-Topic");
+  const shopDomain = req.get("X-Shopify-Shop-Domain");
+  const payload = JSON.parse(rawBody.toString());
+
+  console.log(`📥 Compliance webhook: ${topic} from ${shopDomain}`);
+
+  switch (topic) {
+    case "customers/data_request":
+      console.log("Customer data request — no data held by TDC");
+      break;
+    case "customers/redact":
+      console.log("Customer redact request — no data to delete");
+      break;
+    case "shop/redact":
+      const ShopifyStore = require("./models/ShopifyStore");
+      await ShopifyStore.deleteMany({ shop: shopDomain });
+      console.log(`✅ Shop data redacted: ${shopDomain}`);
+      break;
+  }
+
+  res.status(200).send("OK");
+});
+
+// App uninstalled webhook
+app.post("/webhooks/app/uninstalled", async (req, res) => {
+  const hmacHeader = req.get("X-Shopify-Hmac-Sha256");
+  const calculatedHmac = crypto
+    .createHmac("sha256", process.env.SHOPIFY_API_SECRET)
+    .update(req.body)
+    .digest("base64");
+
+  if (calculatedHmac !== hmacHeader) {
+    return res.status(401).send("Unauthorized");
+  }
+
+  const shopDomain = req.get("X-Shopify-Shop-Domain");
+  const ShopifyStore = require("./models/ShopifyStore");
+  await ShopifyStore.findOneAndUpdate(
+    { shop: shopDomain },
+    { status: "uninstalled", uninstalledAt: new Date() }
+  );
+
+  console.log(`📥 App uninstalled: ${shopDomain}`);
+  res.status(200).send("OK");
+});
+
+// Scopes update webhook
+app.post("/webhooks/app/scopes_update", async (req, res) => {
+  const hmacHeader = req.get("X-Shopify-Hmac-Sha256");
+  const calculatedHmac = crypto
+    .createHmac("sha256", process.env.SHOPIFY_API_SECRET)
+    .update(req.body)
+    .digest("base64");
+
+  if (calculatedHmac !== hmacHeader) {
+    return res.status(401).send("Unauthorized");
+  }
+
+  const shopDomain = req.get("X-Shopify-Shop-Domain");
+  const payload = JSON.parse(req.body.toString());
+  const ShopifyStore = require("./models/ShopifyStore");
+  await ShopifyStore.findOneAndUpdate({ shop: shopDomain }, { scopes: payload.current });
+
+  console.log(`📥 Scopes updated: ${shopDomain}`);
+  res.status(200).send("OK");
+});
 // ---------------- ROUTES ----------------
 // IMPORTANT: Register webhook routes FIRST
 app.use("/api/webhooks", require("./routes/webhook.routes"));
@@ -116,6 +206,7 @@ app.use("/api/traveler", require("./routes/traveler.routes"));
 app.use("/api/resume", require("./routes/resume.routes"));
 app.use("/api/brand-approval", require("./routes/brandApproval.routes"));
 app.use("/api/promo-codes", require("./routes/promoCode.routes"));
+app.use("/api/shopify-app", require("./routes/shopifyApp.routes"));
 app.use("/api/branches", require("./routes/branch.routes"));
 app.use("/api/v1", require("./chat-service/dist/routes/index").default);
 

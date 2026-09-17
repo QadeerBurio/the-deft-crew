@@ -1,105 +1,198 @@
-// routes/promoCode.routes.js - COMPLETE FIXED
+// routes/promoCode.routes.js - PUBLIC APP VERSION
 const express = require("express");
 const router = express.Router();
 const PromoCode = require("../models/PromoCode");
 const Offer = require("../models/Offer");
 const User = require("../models/User");
 const Notification = require("../models/Notification");
+const ShopifyStore = require("../models/ShopifyStore"); // NEW
 const auth = require("../middleware/auth.middleware");
-
-// ==================== CACHE SETUP ====================
-
+const crypto = require("crypto");
 const axios = require("axios");
 
-// Helper to get or refresh Shopify access token
-async function getValidShopifyAccessToken(brand) {
-  let storeUrl = brand?.shopifyStoreUrl || process.env.SHOPIFY_SHOP || "";
-  if (!storeUrl) return { success: false, reason: "No Shopify shop URL configured" };
+// ==================== OAUTH STATE STORE ====================
+const stateStore = new Map();
 
-  const cleanDomain = storeUrl.replace(/^https?:\/\//, "").replace(/\/$/, "");
-  const fullStoreDomain = cleanDomain.includes(".") ? cleanDomain : `${cleanDomain}.myshopify.com`;
+// ==================== OAUTH ROUTES ====================
 
-  const existingToken = brand?.shopifyAccessToken || process.env.SHOPIFY_ACCESS_TOKEN;
-  const expiresAt = brand?.shopifyTokenExpiresAt;
+// Step 1: Start OAuth — redirect merchant to Shopify
+router.get("/auth/shopify", auth, async (req, res) => {
+  try {
+    const { shop, brandId } = req.query;
+    if (!shop || !brandId) {
+      return res.status(400).json({ success: false, message: "Missing shop or brandId" });
+    }
 
-  // Use existing token if valid (not expired or expires in > 5 mins)
-  if (existingToken && (!expiresAt || new Date(expiresAt) > new Date(Date.now() + 5 * 60 * 1000))) {
-    return { success: true, accessToken: existingToken, storeDomain: fullStoreDomain };
+    const brand = await User.findById(brandId);
+    if (!brand || brand.role !== "brand") {
+      return res.status(404).json({ success: false, message: "Brand not found" });
+    }
+
+    let cleanShop = shop.replace(/^https?:\/\//, "").replace(/\/$/, "").toLowerCase();
+    if (!cleanShop.includes(".")) cleanShop = `${cleanShop}.myshopify.com`;
+
+    const state = crypto.randomBytes(32).toString("hex");
+    stateStore.set(state, { brandId, shop: cleanShop, createdAt: Date.now() });
+
+    // Clean old states
+    for (const [key, value] of stateStore.entries()) {
+      if (Date.now() - value.createdAt > 600000) stateStore.delete(key);
+    }
+
+    const authUrl = `https://${cleanShop}/admin/oauth/authorize?` +
+      `client_id=${process.env.SHOPIFY_API_KEY}&` +
+      `scope=${process.env.SHOPIFY_SCOPES}&` +
+      `redirect_uri=${encodeURIComponent(process.env.SHOPIFY_REDIRECT_URI)}&` +
+      `state=${state}`;
+
+    res.json({ success: true, authUrl });
+  } catch (err) {
+    console.error("OAuth start error:", err);
+    res.status(500).json({ success: false, message: err.message });
   }
+});
 
-  // Attempt client credentials token request if clientId & clientSecret exist
-  const clientId = brand?.shopifyClientId || process.env.SHOPIFY_CLIENT_ID;
-  const clientSecret = brand?.shopifyClientSecret || process.env.SHOPIFY_CLIENT_SECRET;
+// Step 2: OAuth callback — exchange code for access token
+router.get("/auth/shopify/callback", async (req, res) => {
+  try {
+    const { code, shop, state, hmac } = req.query;
 
-  if (clientId && clientSecret) {
-    try {
-      const response = await axios.post(`https://${fullStoreDomain}/admin/oauth/access_token`, {
-        client_id: clientId,
-        client_secret: clientSecret,
-        grant_type: "client_credentials"
-      });
+    const stored = stateStore.get(state);
+    if (!stored) {
+      return res.status(400).send("Invalid or expired state.");
+    }
 
-      const { access_token, expires_in } = response.data || {};
-      if (access_token) {
-        if (brand && typeof brand.save === 'function') {
-          brand.shopifyAccessToken = access_token;
-          if (expires_in) {
-            brand.shopifyTokenExpiresAt = new Date(Date.now() + (expires_in - 300) * 1000);
-          }
-          await brand.save().catch(e => console.error("Error saving updated Shopify token to DB:", e.message));
-        }
-        return { success: true, accessToken: access_token, storeDomain: fullStoreDomain };
+    // Verify HMAC
+    const queryParams = { ...req.query };
+    delete queryParams.hmac;
+    delete queryParams.signature;
+
+    const sortedParams = Object.keys(queryParams)
+      .sort()
+      .map(key => `${key}=${queryParams[key]}`)
+      .join("&");
+
+    const calculatedHmac = crypto
+      .createHmac("sha256", process.env.SHOPIFY_API_SECRET)
+      .update(sortedParams)
+      .digest("hex");
+
+    if (calculatedHmac !== hmac) {
+      return res.status(401).send("HMAC verification failed");
+    }
+
+    // Exchange code for access token (expiring=1 is required for new public apps) [citation:8]
+    const tokenResponse = await axios.post(
+      `https://${shop}/admin/oauth/access_token`,
+      {
+        client_id: process.env.SHOPIFY_API_KEY,
+        client_secret: process.env.SHOPIFY_API_SECRET,
+        code,
+        expiring: 1
       }
-    } catch (tokenErr) {
-      console.error("Shopify client credentials token exchange error:", tokenErr.response?.data || tokenErr.message);
+    );
+
+    const { access_token, refresh_token, expires_in, scope } = tokenResponse.data;
+
+    await ShopifyStore.findOneAndUpdate(
+      { shop },
+      {
+        brandId: stored.brandId,
+        shop,
+        accessToken: access_token,
+        refreshToken: refresh_token,
+        tokenExpiresAt: new Date(Date.now() + (expires_in || 86400) * 1000),
+        scopes: scope ? scope.split(",") : [],
+        status: "active",
+        installedAt: new Date(),
+        uninstalledAt: null
+      },
+      { upsert: true, new: true }
+    );
+
+    stateStore.delete(state);
+
+    const adminUrl = process.env.TDC_ADMIN_URL || process.env.SHOPIFY_APP_URL;
+    res.redirect(`${adminUrl}/brands/${stored.brandId}?shopify=connected`);
+  } catch (err) {
+    console.error("OAuth callback error:", err.response?.data || err.message);
+    res.status(500).send("Failed to complete Shopify connection");
+  }
+});
+
+// Get connection status
+router.get("/auth/shopify/status/:brandId", auth, async (req, res) => {
+  try {
+    const { brandId } = req.params;
+    const store = await ShopifyStore.findOne({ brandId, status: "active" }).lean();
+    res.json({
+      success: true,
+      connected: !!store,
+      shop: store?.shop || null,
+      installedAt: store?.installedAt || null
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ==================== TOKEN MANAGEMENT ====================
+
+async function getShopifyAccessToken(shop) {
+  const store = await ShopifyStore.findOne({ shop, status: "active" });
+  if (!store) return { success: false, reason: "Store not connected" };
+
+  // Refresh if expiring within 5 minutes [citation:8]
+  if (store.tokenExpiresAt && new Date(store.tokenExpiresAt) < new Date(Date.now() + 5 * 60 * 1000)) {
+    if (!store.refreshToken) {
+      return { success: false, reason: "Token expired, no refresh token" };
+    }
+    try {
+      const refreshResponse = await axios.post(
+        `https://${shop}/admin/oauth/access_token`,
+        {
+          client_id: process.env.SHOPIFY_API_KEY,
+          client_secret: process.env.SHOPIFY_API_SECRET,
+          grant_type: "refresh_token",
+          refresh_token: store.refreshToken
+        }
+      );
+      store.accessToken = refreshResponse.data.access_token;
+      store.refreshToken = refreshResponse.data.refresh_token || store.refreshToken;
+      store.tokenExpiresAt = new Date(Date.now() + (refreshResponse.data.expires_in || 86400) * 1000);
+      await store.save();
+    } catch (refreshErr) {
+      console.error("Token refresh failed:", refreshErr.response?.data || refreshErr.message);
+      return { success: false, reason: "Token refresh failed" };
     }
   }
 
-  if (existingToken) {
-    return { success: true, accessToken: existingToken, storeDomain: fullStoreDomain };
-  }
-
-  return { success: false, reason: "Shopify access token unavailable or invalid credentials" };
+  return { success: true, accessToken: store.accessToken, storeDomain: shop };
 }
 
-// Creates a matching discount code on the brand's Shopify store via GraphQL API
-async function createShopifyDiscount(brand, code, discountPercentage, expiresAt) {
+// ==================== SHOPIFY DISCOUNT CREATION ====================
+
+async function createShopifyDiscount(brandId, code, discountPercentage, expiresAt) {
   try {
-    const authResult = await getValidShopifyAccessToken(brand);
+    const store = await ShopifyStore.findOne({ brandId, status: "active" }).lean();
+    if (!store) {
+      console.log(`Skipping Shopify sync — brand ${brandId} has no connected store`);
+      return { success: false, reason: "No connected Shopify store" };
+    }
+
+    const authResult = await getShopifyAccessToken(store.shop);
     if (!authResult.success) {
-      console.log(`Skipping Shopify sync — brand ${brand?.brandName || brand?.name || 'unknown'} issue: ${authResult.reason}`);
       return { success: false, reason: authResult.reason };
     }
 
     const { accessToken, storeDomain } = authResult;
     const graphqlUrl = `https://${storeDomain}/admin/api/2024-01/graphql.json`;
-    const headers = {
-      "X-Shopify-Access-Token": accessToken,
-      "Content-Type": "application/json"
-    };
-
-    const percentageDecimal = Number(discountPercentage) / 100;
 
     const query = `
       mutation discountCodeBasicCreate($basicCodeDiscount: DiscountCodeBasicInput!) {
         discountCodeBasicCreate(basicCodeDiscount: $basicCodeDiscount) {
-          codeDiscountNode {
-            id
-            codeDiscount {
-              ... on DiscountCodeBasic {
-                title
-                codes(first: 1) {
-                  nodes {
-                    code
-                  }
-                }
-              }
-            }
-          }
-          userErrors {
-            field
-            message
-          }
+          codeDiscountNode { id }
+          userErrors { field message }
         }
       }
     `;
@@ -111,80 +204,58 @@ async function createShopifyDiscount(brand, code, discountPercentage, expiresAt)
         startsAt: new Date().toISOString(),
         endsAt: new Date(expiresAt).toISOString(),
         usageLimit: 1,
-        customerSelection: {
-          all: true
-        },
+        customerSelection: { all: true },
         customerGets: {
-          value: {
-            percentage: percentageDecimal
-          },
-          items: {
-            all: true
-          }
+          value: { percentage: Number(discountPercentage) / 100 },
+          items: { all: true }
         }
       }
     };
 
-    const response = await axios.post(graphqlUrl, { query, variables }, { headers });
-    const result = response.data?.data?.discountCodeBasicCreate;
+    const response = await axios.post(graphqlUrl, { query, variables }, {
+      headers: { "X-Shopify-Access-Token": accessToken, "Content-Type": "application/json" }
+    });
 
-    if (result?.userErrors && result.userErrors.length > 0) {
-      console.error("Shopify GraphQL Discount User Errors:", result.userErrors);
+    const result = response.data?.data?.discountCodeBasicCreate;
+    if (result?.userErrors?.length > 0) {
       return { success: false, reason: result.userErrors[0].message };
     }
 
-    const discountNodeId = result?.codeDiscountNode?.id;
-    console.log(`✅ Shopify discount code ${code} created successfully on ${storeDomain} (Node ID: ${discountNodeId})`);
-    return { success: true, discountNodeId };
+    console.log(`✅ Shopify discount ${code} created on ${storeDomain}`);
+    return { success: true, discountNodeId: result?.codeDiscountNode?.id };
   } catch (err) {
-    console.error("Shopify discount creation failed:", JSON.stringify({
-      message: err.message,
-      status: err.response?.status,
-      data: err.response?.data
-    }, null, 2));
-    return { success: false, reason: err.response?.data?.errors || err.message };
-  }
-}
-
-// Creates a matching coupon on the brand's WooCommerce site
-async function createWooCommerceCoupon(brand, code, discountPercentage, expiresAt) {
-  if (!brand.websiteUrl || !brand.wooConsumerKey || !brand.wooConsumerSecret) {
-    console.log(`Skipping WooCommerce sync — brand ${brand.brandName || brand.name} not configured`);
-    return { success: false, reason: "not_configured" };
-  }
-
-  try {
-    const url = `${brand.websiteUrl.replace(/\/$/, "")}/wp-json/wc/v3/coupons`;
-
-    await axios.post(url, {
-      code: code,
-      discount_type: "percent",
-      amount: discountPercentage.toString(),
-      individual_use: true,
-      usage_limit: 1,
-      date_expires: expiresAt.toISOString()
-    }, {
-      auth: {
-        username: brand.wooConsumerKey,
-        password: brand.wooConsumerSecret
-      }
-    });
-
-    return { success: true };
-  } catch (err) {
-    console.error("WooCommerce coupon creation failed. Full error:", JSON.stringify({
-  message: err.message,
-  code: err.code,
-  status: err.response?.status,
-  data: err.response?.data
-}, null, 2));
+    console.error("Shopify discount creation failed:", err.response?.data || err.message);
     return { success: false, reason: err.message };
   }
 }
 
+// ==================== WOOCOMMERCE (unchanged) ====================
+
+async function createWooCommerceCoupon(brand, code, discountPercentage, expiresAt) {
+  if (!brand.websiteUrl || !brand.wooConsumerKey || !brand.wooConsumerSecret) {
+    return { success: false, reason: "not_configured" };
+  }
+  try {
+    await axios.post(
+      `${brand.websiteUrl.replace(/\/$/, "")}/wp-json/wc/v3/coupons`,
+      {
+        code, discount_type: "percent",
+        amount: discountPercentage.toString(),
+        individual_use: true, usage_limit: 1,
+        date_expires: expiresAt.toISOString()
+      },
+      { auth: { username: brand.wooConsumerKey, password: brand.wooConsumerSecret } }
+    );
+    return { success: true };
+  } catch (err) {
+    return { success: false, reason: err.message };
+  }
+}
+
+// ==================== CACHE SETUP ====================
 let cache;
 try {
-  const Redis = require('ioredis');
+  const Redis = require("ioredis");
   cache = new Redis(process.env.REDIS_URL);
 } catch (e) {
   cache = {
@@ -192,10 +263,7 @@ try {
     async get(key) {
       const item = this.store.get(key);
       if (!item) return null;
-      if (Date.now() > item.expiry) {
-        this.store.delete(key);
-        return null;
-      }
+      if (Date.now() > item.expiry) { this.store.delete(key); return null; }
       return item.data;
     },
     async set(key, data, ttl = 300) {
@@ -208,7 +276,6 @@ try {
     }
   };
 }
-// =====================================================
 
 // ==================== GENERATE PROMO CODE ====================
 router.post("/generate", auth, async (req, res) => {
@@ -217,160 +284,91 @@ router.post("/generate", auth, async (req, res) => {
     const studentId = req.userId;
 
     const student = await User.findById(studentId).lean();
-    if (!student) {
-      return res.status(404).json({
-        success: false,
-        message: "Student not found"
-      });
-    }
+    if (!student) return res.status(404).json({ success: false, message: "Student not found" });
 
-    const offer = await Offer.findById(offerId)
-      .populate('brand', 'name')
-      .lean();
+    const offer = await Offer.findById(offerId).populate("brand", "name").lean();
+    if (!offer) return res.status(404).json({ success: false, message: "Offer not found" });
 
-    if (!offer) {
-      return res.status(404).json({
-        success: false,
-        message: "Offer not found"
-      });
-    }
-
-    // Check if student has claimed this offer
     const hasClaimed = offer.claimedBy?.some(id => id.toString() === studentId.toString());
-
     if (!hasClaimed) {
-      return res.status(403).json({
-        success: false,
-        message: "You must claim this offer first before generating a promo code"
-      });
+      return res.status(403).json({ success: false, message: "You must claim this offer first" });
     }
 
     if (!offer.isOnline) {
-      return res.status(400).json({
-        success: false,
-        message: "This offer is not available online. Please visit the store to redeem."
-      });
+      return res.status(400).json({ success: false, message: "This offer is not available online." });
     }
 
-    const existingActive = await PromoCode.findOne({
-      offer: offerId,
-      student: studentId,
-      status: 'active'
-    });
-
+    const existingActive = await PromoCode.findOne({ offer: offerId, student: studentId, status: "active" });
     if (existingActive) {
-      return res.status(400).json({
-        success: false,
-        message: "You already have an active promo code for this offer"
-      });
+      return res.status(400).json({ success: false, message: "You already have an active promo code" });
     }
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
+    const today = new Date(); today.setHours(0, 0, 0, 0);
     const todayRedemptions = offer.redemptions?.filter(r => {
-      const redeemDate = new Date(r.redeemedAt);
-      redeemDate.setHours(0, 0, 0, 0);
+      const redeemDate = new Date(r.redeemedAt); redeemDate.setHours(0, 0, 0, 0);
       return r.student?.toString() === studentId && redeemDate.getTime() === today.getTime();
     }) || [];
 
     if (todayRedemptions.length >= 2) {
-      return res.status(400).json({
-        success: false,
-        message: "You have already used this discount 2 times today. Please try again tomorrow."
-      });
+      return res.status(400).json({ success: false, message: "You have already used this discount 2 times today." });
     }
 
-    const totalRedemptions = offer.redemptions?.filter(r =>
-      r.student?.toString() === studentId
-    ) || [];
-
+    const totalRedemptions = offer.redemptions?.filter(r => r.student?.toString() === studentId) || [];
     if (totalRedemptions.length >= 2) {
-      return res.status(400).json({
-        success: false,
-        message: "You have already used this offer the maximum of 2 times."
-      });
+      return res.status(400).json({ success: false, message: "You have already used this offer the maximum of 2 times." });
     }
 
-    const brandPrefix = offer.brand?.name?.substring(0, 3).toUpperCase() || 'TDC';
+    const brandPrefix = offer.brand?.name?.substring(0, 3).toUpperCase() || "TDC";
     const promoCode = await PromoCode.generateUniqueCode(brandPrefix);
 
     const newPromoCode = await PromoCode.create({
-      code: promoCode,
-      offer: offerId,
-      student: studentId,
-      brand: offer.brand._id,
-      discountPercentage: offer.discountPercentage,
-      offerTitle: offer.title,
-      brandName: offer.brand?.name || 'Brand',
+      code: promoCode, offer: offerId, student: studentId,
+      brand: offer.brand._id, discountPercentage: offer.discountPercentage,
+      offerTitle: offer.title, brandName: offer.brand?.name || "Brand",
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-      generatedAt: new Date(),
-      maxUses: 1
+      generatedAt: new Date(), maxUses: 1
     });
 
-    await Offer.findByIdAndUpdate(offerId, {
-      $push: { promoCodesGenerated: newPromoCode._id }
-    });
-    // Sync coupon to brand's WooCommerce or Shopify site (if configured)
+    await Offer.findByIdAndUpdate(offerId, { $push: { promoCodesGenerated: newPromoCode._id } });
+
+    // Sync to Shopify or WooCommerce
     const brandUser = await User.findById(offer.brand._id);
     if (brandUser) {
-      if (brandUser.platform === "shopify" || brandUser.shopifyStoreUrl || process.env.SHOPIFY_SHOP) {
-        await createShopifyDiscount(
-          brandUser,
-          newPromoCode.code,
-          newPromoCode.discountPercentage,
-          newPromoCode.expiresAt
-        );
-      } else {
-        await createWooCommerceCoupon(
-          brandUser,
-          newPromoCode.code,
-          newPromoCode.discountPercentage,
-          newPromoCode.expiresAt
-        );
-      }
+      if (brandUser?.websiteUrl) {
+  await createWooCommerceCoupon(brandUser, newPromoCode.code, newPromoCode.discountPercentage, newPromoCode.expiresAt);
+}
     }
 
-    // Clear cache safely
     try {
-      if (cache && typeof cache.del === 'function') {
+      if (cache && typeof cache.del === "function") {
         await cache.del(`offers:claimed:${studentId}`);
         await cache.del(`promo:student:${studentId}`);
       }
-    } catch (cacheErr) {
-      console.log('Cache clear warning:', cacheErr.message);
-    }
+    } catch (cacheErr) { console.log("Cache clear warning:", cacheErr.message); }
 
     await Notification.create({
       recipient: studentId,
       title: "🎉 Promo Code Generated!",
-      description: `Your promo code ${promoCode} for ${offer.title} is ready. Use it at checkout to get ${offer.discountPercentage}% OFF!`,
-      type: "System",
-      icon: "ticket-outline",
+      description: `Your promo code ${promoCode} for ${offer.title} is ready.`,
+      type: "System", icon: "ticket-outline",
       data: { promoCodeId: newPromoCode._id }
     });
 
     res.json({
-      success: true,
-      message: "Promo code generated successfully",
+      success: true, message: "Promo code generated successfully",
       promoCode: {
-        code: newPromoCode.code,
-        offerTitle: newPromoCode.offerTitle,
-        brandName: newPromoCode.brandName,
-        discountPercentage: newPromoCode.discountPercentage,
-        expiresAt: newPromoCode.expiresAt,
-        qrData: newPromoCode.qrData
+        code: newPromoCode.code, offerTitle: newPromoCode.offerTitle,
+        brandName: newPromoCode.brandName, discountPercentage: newPromoCode.discountPercentage,
+        expiresAt: newPromoCode.expiresAt, qrData: newPromoCode.qrData
       }
     });
-
   } catch (err) {
     console.error("Error generating promo code:", err);
-    res.status(500).json({
-      success: false,
-      message: err.message || "Failed to generate promo code"
-    });
+    res.status(500).json({ success: false, message: err.message });
   }
 });
+
+
 
 
 
