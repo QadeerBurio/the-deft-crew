@@ -7,6 +7,35 @@ const Notification = require("../models/Notification");
 const auth = require("../middleware/auth.middleware");
 const axios = require("axios");
 
+
+//  SHopify
+async function createShopifyDiscountViaRemix(brand, code, discountPercentage, expiresAt) {
+  if (!brand.shopifyStoreUrl) {
+    return { success: false, reason: "not_configured" };
+  }
+  try {
+    const response = await axios.post(
+      `${process.env.SHOPIFY_APP_REMIX_URL}/api/internal/create-discount`,
+      {
+        shop: brand.shopifyStoreUrl,
+        code,
+        discountType: "percentage",
+        discountValue: discountPercentage,
+        expiresAt: expiresAt.toISOString(),
+      },
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "X-API-KEY": process.env.SHOPIFY_APP_API_KEY,
+        },
+      }
+    );
+    return { success: true, shopifyDiscountId: response.data.shopifyDiscountId };
+  } catch (err) {
+    console.error("Shopify discount creation via Remix failed:", err.response?.data || err.message);
+    return { success: false, reason: err.response?.data?.error || err.message };
+  }
+}
 // ==================== WOOCOMMERCE ====================
 
 async function createWooCommerceCoupon(brand, code, discountPercentage, expiresAt) {
@@ -109,11 +138,12 @@ router.post("/generate", auth, async (req, res) => {
 
     await Offer.findByIdAndUpdate(offerId, { $push: { promoCodesGenerated: newPromoCode._id } });
 
-    // Sync to WooCommerce if the brand has one configured.
-    // Shopify brands are handled separately, via the Remix app's own OAuth
-    // flow, not here (see routes/shopifyApp.routes.js).
+    // Sync to Shopify (via the Remix app) or WooCommerce, whichever the
+    // brand is configured for.
     const brandUser = await User.findById(offer.brand._id);
-    if (brandUser?.websiteUrl) {
+    if (brandUser?.platform === "shopify" && brandUser?.shopifyStoreUrl) {
+      await createShopifyDiscountViaRemix(brandUser, newPromoCode.code, newPromoCode.discountPercentage, newPromoCode.expiresAt);
+    } else if (brandUser?.websiteUrl) {
       await createWooCommerceCoupon(brandUser, newPromoCode.code, newPromoCode.discountPercentage, newPromoCode.expiresAt);
     }
 
