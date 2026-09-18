@@ -60,9 +60,12 @@ const offerSchema = new mongoose.Schema({
       savedAmount: Number,
       redeemedAt: { type: Date, default: Date.now },
       promoCode: { type: String }, // Track which promo code was used
-      promoCodeId: { type: mongoose.Schema.Types.ObjectId, ref: 'PromoCode' }
+      promoCodeId: { type: mongoose.Schema.Types.ObjectId, ref: 'PromoCode' },
+      // ✅ ADD THIS — Shopify / Woo order ID, for idempotency
+    externalOrderId: { type: String, default: "" },
     }
   ],
+  
   // Track promo codes generated for this offer
   promoCodesGenerated: [{
     type: mongoose.Schema.Types.ObjectId,
@@ -75,5 +78,7 @@ offerSchema.index({ brand: 1, isOnline: 1, isInStore: 1 });
 offerSchema.index({ category: 1 });
 offerSchema.index({ 'claimedBy': 1 });
 offerSchema.index({ 'redemptions.student': 1 });
+offerSchema.index({ "redemptions.promoCodeId": 1 });
+offerSchema.index({ "redemptions.externalOrderId": 1 });
 
 module.exports = mongoose.model("Offer", offerSchema);
