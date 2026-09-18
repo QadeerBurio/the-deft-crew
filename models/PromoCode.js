@@ -41,7 +41,7 @@ promoSchema.index({ offer: 1, student: 1 });
 promoSchema.index({ expiresAt: 1 });
 
 // ✅ FIX: call next() — this was the hanging bug
-promoSchema.pre('save', function (next) {
+promoSchema.pre('save', function () {
   if (!this.qrData) {
     this.qrData = JSON.stringify({
       code: this.code,
@@ -52,7 +52,6 @@ promoSchema.pre('save', function (next) {
       generatedAt: this.generatedAt,
     });
   }
-  next();
 });
 
 promoSchema.statics.generateUniqueCode = async function (prefix = '') {
