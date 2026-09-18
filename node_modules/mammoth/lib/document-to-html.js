@@ -42,7 +42,7 @@ function DocumentConversion(options, comments) {
     function convertToHtml(document) {
         var messages = [];
 
-        var html = elementToHtml(document, messages, {});
+        var html = elementToHtml(document, messages, Object.create(null));
 
         var deferredNodes = [];
         walkHtml(html, function(node) {
@@ -50,7 +50,7 @@ function DocumentConversion(options, comments) {
                 deferredNodes.push(node);
             }
         });
-        var deferredValues = {};
+        var deferredValues = Object.create(null);
         return promises.mapSeries(deferredNodes, function(deferred) {
             return deferred.value().then(function(value) {
                 deferredValues[deferred.id] = value;

@@ -14,9 +14,9 @@ exports.defaultContentTypes = contentTypes({}, {});
 
 
 function readContentTypesFromXml(element) {
-    var extensionDefaults = {};
-    var overrides = {};
-    
+    var extensionDefaults = Object.create(null);
+    var overrides = Object.create(null);
+
     element.children.forEach(function(child) {
         if (child.name === "content-types:Default") {
             extensionDefaults[child.attributes.Extension] = child.attributes.ContentType;
@@ -41,7 +41,7 @@ function contentTypes(overrides, extensionDefaults) {
             } else {
                 var pathParts = path.split(".");
                 var extension = pathParts[pathParts.length - 1];
-                if (extensionDefaults.hasOwnProperty(extension)) {
+                if (Object.prototype.hasOwnProperty.call(extensionDefaults, extension)) {
                     return extensionDefaults[extension];
                 } else {
                     var fallback = fallbackContentTypes[extension.toLowerCase()];
@@ -54,5 +54,5 @@ function contentTypes(overrides, extensionDefaults) {
             }
         }
     };
-    
+
 }

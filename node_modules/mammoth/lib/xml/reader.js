@@ -42,7 +42,7 @@ function readString(xmlString, namespaceMap) {
             }
         });
 
-        var convertedAttributes = {};
+        var convertedAttributes = Object.create(null);
         _.forEach(element.attributes, function(attribute) {
             convertedAttributes[convertName(attribute)] = attribute.value;
         });

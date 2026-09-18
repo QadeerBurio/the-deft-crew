@@ -38,7 +38,7 @@ function element(tagName, attributes, options) {
 }
 
 function Element(tagName, attributes, options) {
-    var tagNames = {};
+    var tagNames = Object.create(null);
     if (_.isArray(tagName)) {
         tagName.forEach(function(tagName) {
             tagNames[tagName] = true;
@@ -47,7 +47,7 @@ function Element(tagName, attributes, options) {
     } else {
         tagNames[tagName] = true;
     }
-    
+
     this.tagName = tagName;
     this.tagNames = tagNames;
     this.attributes = attributes || {};

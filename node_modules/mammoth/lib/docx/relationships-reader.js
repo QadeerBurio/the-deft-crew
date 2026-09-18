@@ -19,12 +19,12 @@ function readRelationships(element) {
 }
 
 function Relationships(relationships) {
-    var targetsByRelationshipId = {};
+    var targetsByRelationshipId = Object.create(null);
     relationships.forEach(function(relationship) {
         targetsByRelationshipId[relationship.relationshipId] = relationship.target;
     });
 
-    var targetsByType = {};
+    var targetsByType = Object.create(null);
     relationships.forEach(function(relationship) {
         if (!targetsByType[relationship.type]) {
             targetsByType[relationship.type] = [];

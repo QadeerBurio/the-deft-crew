@@ -22,21 +22,32 @@ function Styles(paragraphStyles, characterStyles, tableStyles, numberingStyles) 
 Styles.EMPTY = new Styles({}, {}, {}, {});
 
 function readStylesXml(root) {
-    var paragraphStyles = {};
-    var characterStyles = {};
-    var tableStyles = {};
-    var numberingStyles = {};
-
-    var styles = {
-        "paragraph": paragraphStyles,
-        "character": characterStyles,
-        "table": tableStyles,
-        "numbering": numberingStyles
-    };
+    var paragraphStyles = Object.create(null);
+    var characterStyles = Object.create(null);
+    var tableStyles = Object.create(null);
+    var numberingStyles = Object.create(null);
 
     root.getElementsByTagName("w:style").forEach(function(styleElement) {
         var style = readStyleElement(styleElement);
-        var styleSet = styles[style.type];
+        var styleSet;
+
+        switch (style.type) {
+        case "paragraph":
+            styleSet = paragraphStyles;
+            break;
+
+        case "character":
+            styleSet = characterStyles;
+            break;
+
+        case "table":
+            styleSet = tableStyles;
+            break;
+
+        case "numbering":
+            styleSet = numberingStyles;
+            break;
+        }
 
         // Per 17.7.4.17 style (Style Definition) of ECMA-376 4th edition Part 1:
         //

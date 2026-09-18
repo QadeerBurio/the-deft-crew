@@ -1,5 +1,15 @@
 # `diagnostics`
 
+## Distribution and maintenance
+
+**DABH** — Distributed and maintained by [DABH LLC](https://dabh.llc/).
+For maintenance and software consulting inquiries: [hello@dabh.llc](mailto:hello@dabh.llc).
+
+This distribution builds on diagnostics by Arnout Kazemier, Martijn Swaagman,
+and its contributors. Original copyright notices and the MIT license are
+preserved in [LICENSE](LICENSE).
+
+
 Diagnostics in the evolution of debug pattern that is used in the Node.js core,  
 this extremely small but powerful technique can best be compared as feature
 flags for loggers. The created debug logger is disabled by default but can be

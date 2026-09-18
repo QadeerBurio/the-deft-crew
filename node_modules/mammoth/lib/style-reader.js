@@ -257,7 +257,7 @@ function htmlPathRule() {
         capture(freshRule),
         capture(separatorRule)
     ).map(function(tagName, attributesList, fresh, separator) {
-        var attributes = {};
+        var attributes = Object.create(null);
         var options = {};
         attributesList.forEach(function(attribute) {
             if (attribute.append && attributes[attribute.name]) {
