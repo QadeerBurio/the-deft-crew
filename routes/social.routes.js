@@ -3021,4 +3021,58 @@ router.post('/messages/mark-read/:conversationId', auth, async (req, res) => {
   }
 });
 
+// ✅ NEW: Create a chat message notification
+// POST /api/social/notifications/create-message-notif
+router.post('/notifications/create-message-notif', auth, async (req, res) => {
+  try {
+    const { recipientId, conversationId, text, messageType } = req.body;
+    const senderId = req.user._id;
+
+    if (!recipientId) {
+      return res.status(400).json({ error: 'recipientId is required' });
+    }
+
+    if (recipientId.toString() === senderId.toString()) {
+      return res.status(400).json({ error: 'Cannot notify yourself' });
+    }
+
+    const sender = await User.findById(senderId).select('name profileImage');
+
+    // Build preview based on message type
+    let preview = '';
+    if (messageType === 'image') preview = '📷 Photo';
+    else if (messageType === 'audio') preview = '🎤 Voice message';
+    else preview = text || 'New message';
+
+    if (preview && preview.length > 60) {
+      preview = preview.slice(0, 60) + '...';
+    }
+
+    const notif = await Notification.create({
+      recipient: recipientId,
+      sender: senderId,
+      type: 'message',
+      text: preview,
+      title: `New message from ${sender?.name || 'Someone'}`,
+      readBy: [],
+      conversationId: conversationId || null,
+    });
+
+    // Populate sender for immediate UI use
+    const populated = await Notification.findById(notif._id)
+      .populate('sender', 'name profileImage username');
+
+    // Optionally emit via socket for real-time delivery
+    const io = req.app.get('io');
+    if (io) {
+      io.to(recipientId.toString()).emit('new_notification', populated);
+    }
+
+    res.json({ success: true, notification: populated });
+  } catch (err) {
+    console.error('Create message notif error:', err);
+    res.status(500).json({ error: 'Failed to create notification' });
+  }
+});
+
 module.exports = router;
