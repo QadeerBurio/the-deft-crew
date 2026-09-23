@@ -2677,10 +2677,13 @@ router.get('/notifications/unread-count', auth, async (req, res) => {
 });
 
 // -------------------- MESSAGING --------------------
+// -------------------- MESSAGING --------------------
 router.get('/inbox', auth, async (req, res) => {
   try {
+    const userId = req.user._id; // ✅ use _id consistently
+
     const conversations = await Conversation.find({
-      participants: req.user.id,
+      participants: userId,
       isArchived: { $ne: true }
     })
     .populate({
@@ -2691,26 +2694,41 @@ router.get('/inbox', auth, async (req, res) => {
 
     const enrichedConversations = await Promise.all(conversations.map(async (conv) => {
       const convObj = conv.toObject();
-      
+
       const unreadCount = await Message.countDocuments({
         conversationId: conv._id,
-        sender: { $ne: req.user.id },
+        sender: { $ne: userId },
         isRead: false
       });
-      
+
       convObj.unreadCount = unreadCount;
-      
+
       const lastMsg = await Message.findOne({ conversationId: conv._id })
         .sort({ createdAt: -1 })
         .populate('sender', 'name');
-      
+
       if (lastMsg) {
-        convObj.lastMessage = lastMsg.text || 'Media message';
+        // ✅ Better preview text for media types
+        let preview = '';
+        if (lastMsg.messageType === 'audio') preview = '🎤 Voice message';
+        else if (lastMsg.messageType === 'image') preview = '📷 Photo';
+        else if (lastMsg.messageType === 'video') preview = '🎥 Video';
+        else if (lastMsg.messageType === 'document') preview = '📎 File';
+        else preview = lastMsg.text || 'Message';
+
+        convObj.lastMessage = preview;
         convObj.lastMessageType = lastMsg.messageType;
         convObj.lastMessageSender = lastMsg.sender;
         convObj.lastMessageTime = lastMsg.createdAt;
+        convObj.lastMessageDuration = lastMsg.duration || 0; // ✅ expose duration
+      } else {
+        // ✅ No messages yet — leave blank so hook doesn't treat it as new
+        convObj.lastMessage = '';
+        convObj.lastMessageType = 'text';
+        convObj.lastMessageSender = null;
+        convObj.lastMessageTime = null;
       }
-      
+
       return convObj;
     }));
 
@@ -2769,16 +2787,18 @@ router.get('/messages/:conversationId', auth, async (req, res) => {
 });
 
 // ==================== GET OR CREATE CONVERSATION ====================
+// ==================== GET OR CREATE CONVERSATION ====================
 router.post('/conversations/get-or-create', auth, async (req, res) => {
   try {
     const { recipientId } = req.body;
-    const senderId = req.user.id;
+    const senderId = req.user._id; // ✅ use _id
 
     if (!recipientId) {
       return res.status(400).json({ error: "Recipient ID is required" });
     }
 
-    if (recipientId === senderId) {
+    // ✅ String comparison — both may be ObjectId vs string
+    if (String(recipientId) === String(senderId)) {
       return res.status(400).json({ error: "Cannot create conversation with yourself" });
     }
 
@@ -2789,7 +2809,9 @@ router.post('/conversations/get-or-create', auth, async (req, res) => {
     if (!conversation) {
       conversation = new Conversation({
         participants: [senderId, recipientId],
-        lastMessage: "Start a conversation..."
+        // ✅ Empty placeholder — prevents fake "new message" notification
+        lastMessage: "",
+        lastMessageTime: null,
       });
       await conversation.save();
     }
@@ -2797,7 +2819,7 @@ router.post('/conversations/get-or-create', auth, async (req, res) => {
     const populated = await Conversation.findById(conversation._id)
       .populate('participants', 'name profileImage online');
 
-    res.json({ 
+    res.json({
       conversationId: populated._id,
       conversation: populated
     });

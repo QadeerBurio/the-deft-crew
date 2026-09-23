@@ -24,6 +24,7 @@ const messageSchema = new mongoose.Schema({
     fileType: String,
     duration: Number
   },
+  duration: { type: Number, default: 0 }, 
   location: {
     latitude: Number,
     longitude: Number
