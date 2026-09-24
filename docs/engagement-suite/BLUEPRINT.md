@@ -13,6 +13,7 @@ The launch screen and the Founder Circle card are specified in `LAUNCH_AND_FOUND
 (packets P19 and P20).
 **Loyalty points, levels, the campus crew and Founder Circle entry are specified in `CREW_SYSTEM.md`,
 which overrides §3.4, §4.6, the rewards endpoints in §5, and packets P15/P20 here.**
+Reward delivery, credentials, agreements and the admin portal "crew" section: `REWARDS_AND_CREDENTIALS.md` (P22–P24).
 
 Each section says **what exists today**, **what to build**, and **exactly which
 files change**. Section 11 splits the work into self-contained task packets for

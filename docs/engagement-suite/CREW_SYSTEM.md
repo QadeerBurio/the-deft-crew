@@ -9,6 +9,9 @@ Where this conflicts with `BLUEPRINT.md` §3.4, §4.6 and §5 (rewards), `UI_PLA
 or `LAUNCH_AND_FOUNDER_CIRCLE.md` Part B, **this file wins**. The Founder Circle *card design*
 (Part B §B.5) is unchanged and still applies.
 
+How rewards are delivered (badges, certificates, Majid's letters, verification), what students agree to,
+and the admin portal screens are in `REWARDS_AND_CREDENTIALS.md` (packets P22–P24).
+
 Mirrored in both repos. Keep them identical.
 
 ---
