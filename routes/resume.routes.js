@@ -30,28 +30,24 @@ const rejectGuest = (req, res, next) => {
   next();
 };
 
-// Check lifetime resume creation limit (Maximum 2 lifetime resume creations per user)
+// ============================================================
+// LIFETIME RESUME CREATION LIMIT
+// Uses LIVE count from Resume collection — no counter drift possible.
+// ============================================================
 const MAX_LIFETIME_RESUME_CREATIONS = 2;
 
 const checkResumeLimit = async (req, res, next) => {
   try {
-    const userDoc = await User.findById(req.user._id);
-    let creationCount = userDoc ? userDoc.resumeCreationCount : 0;
+    // ✅ Count actual resumes in DB (source of truth)
+    const liveCount = await Resume.countDocuments({ user: req.user._id });
 
-    // Auto-migrate existing users who haven't had resumeCreationCount initialized
-    if (userDoc && (userDoc.resumeCreationCount === undefined || userDoc.resumeCreationCount === null)) {
-      const existingCount = await Resume.countDocuments({ user: req.user._id });
-      creationCount = existingCount;
-      await User.findByIdAndUpdate(req.user._id, { resumeCreationCount: existingCount });
-    }
-
-    if (creationCount >= MAX_LIFETIME_RESUME_CREATIONS) {
+    if (liveCount >= MAX_LIFETIME_RESUME_CREATIONS) {
       return res.status(403).json({
         success: false,
         code: 'RESUME_CREATION_LIMIT_REACHED',
-        error: 'You have used all 2 resume creations available for your account. Deleting a resume will not restore your creation limit.',
-        message: 'You have used all 2 resume creations available for your account. Deleting a resume will not restore your creation limit.',
-        creationsUsed: creationCount,
+        error: `You can have at most ${MAX_LIFETIME_RESUME_CREATIONS} resumes. Please delete one to create a new one.`,
+        message: `You can have at most ${MAX_LIFETIME_RESUME_CREATIONS} resumes. Please delete one to create a new one.`,
+        creationsUsed: liveCount,
         maxCreations: MAX_LIFETIME_RESUME_CREATIONS
       });
     }
@@ -189,29 +185,26 @@ router.post('/', auth, rejectGuest, checkResumeLimit, async (req, res) => {
 });
 
 // ========== GET ALL RESUMES ==========
+// ========== GET ALL RESUMES ==========
 router.get('/', auth, async (req, res) => {
   try {
     const resumes = await Resume.find({ user: req.user._id })
       .sort({ updatedAt: -1 });
 
-    const userDoc = await User.findById(req.user._id).select('resumeCreationCount');
-    let creationCount = userDoc ? userDoc.resumeCreationCount : 0;
-    if (userDoc && (userDoc.resumeCreationCount === undefined || userDoc.resumeCreationCount === null)) {
-      creationCount = resumes.length;
-      await User.findByIdAndUpdate(req.user._id, { resumeCreationCount: creationCount });
-    }
+    // ✅ Live count — always accurate, no user field needed
+    const creationsUsed = resumes.length;
 
     res.json({
       success: true,
       data: resumes,
-      creationsUsed: creationCount,
-      maxCreations: 2
+      creationsUsed,
+      maxCreations: MAX_LIFETIME_RESUME_CREATIONS
     });
   } catch (error) {
     console.error('Get resumes error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message || 'Failed to fetch resumes' 
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to fetch resumes'
     });
   }
 });
@@ -722,11 +715,12 @@ router.put('/:id', auth, rejectGuest, async (req, res) => {
 });
 
 // ========== DELETE RESUME ==========
+// ========== DELETE RESUME ==========
 router.delete('/:id', auth, rejectGuest, async (req, res) => {
   try {
-    const resume = await Resume.findOne({ 
-      _id: req.params.id, 
-      user: req.user._id 
+    const resume = await Resume.findOne({
+      _id: req.params.id,
+      user: req.user._id
     });
 
     if (!resume) {
@@ -738,20 +732,34 @@ router.delete('/:id', auth, rejectGuest, async (req, res) => {
 
     // Delete from Cloudinary if exists
     if (resume.uploadedResume && resume.uploadedResume.publicId) {
-      await deleteFromCloudinary(resume.uploadedResume.publicId, 'raw');
+      try {
+        await deleteFromCloudinary(resume.uploadedResume.publicId, 'raw');
+      } catch (cloudErr) {
+        console.warn('⚠️ Cloudinary delete failed (non-fatal):', cloudErr.message);
+      }
     }
 
     await Resume.findByIdAndDelete(req.params.id);
 
+    // ✅ No counter to decrement — GET / uses live count now.
+    // But we still keep resumeCreationCount in sync for legacy field consistency.
+    const remaining = await Resume.countDocuments({ user: req.user._id });
+    await User.findByIdAndUpdate(req.user._id, {
+      $set: { resumeCreationCount: remaining }
+    });
+
+    // Return the fresh count so the frontend updates instantly
     res.json({
       success: true,
-      message: 'Resume deleted successfully'
+      message: 'Resume deleted successfully',
+      creationsUsed: remaining,
+      maxCreations: MAX_LIFETIME_RESUME_CREATIONS
     });
   } catch (error) {
     console.error('Delete resume error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message || 'Failed to delete resume' 
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to delete resume'
     });
   }
 });

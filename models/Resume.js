@@ -831,7 +831,7 @@ resumeSchema.methods.trackDownload = function () {
 };
 
 // Pre-save hook to strictly enforce maximum 2 lifetime resume creations per user (race-condition protection)
-resumeSchema.pre('save', async function (next) {
+resumeSchema.pre('save', async function () {
   if (this.isNew && this.user) {
     const User = mongoose.model('User');
     const userDoc = await User.findById(this.user);
@@ -848,7 +848,6 @@ resumeSchema.pre('save', async function (next) {
       const err = new Error('You have used all 2 resume creations available for your account. Deleting a resume will not restore your creation limit.');
       err.code = 'RESUME_CREATION_LIMIT_REACHED';
       err.status = 403;
-      return next(err);
     }
   }
   // next();
