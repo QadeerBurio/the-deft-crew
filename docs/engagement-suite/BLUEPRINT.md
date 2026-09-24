@@ -9,6 +9,8 @@ repos at `docs/engagement-suite/BLUEPRINT.md`. Keep the two copies identical.
 
 Screen-by-screen UI placement (what goes where in the existing interface) is in
 `UI_PLACEMENT.md` next to this file. It overrides section 7 wherever they differ.
+The launch screen and the Founder Circle card are specified in `LAUNCH_AND_FOUNDER_CIRCLE.md`
+(packets P19 and P20).
 
 Each section says **what exists today**, **what to build**, and **exactly which
 files change**. Section 11 splits the work into self-contained task packets for
@@ -825,6 +827,7 @@ activity timestamps in existing collections. Label it a proxy in the dashboard.
 | D7 | ~~Tour steps 2 and 3 targets~~ **Resolved:** Explore tab = Student Hub, Campus tab = Career Dashboard (UI_PLACEMENT §0) | – | – |
 | D8 | `og` cutoff date | 31 Dec 2026 | P7 |
 | D9 | What can points buy at launch? (needs 5 brand perks from partnerships) | promo codes only | P15 |
+| D10–D13 | Founder Circle: card edition, not a rename; 50 seats until 31 Mar 2027; invite only; no cash | **Decided**, see LAUNCH_AND_FOUNDER_CIRCLE.md §B.2 | – |
 
 ---
 
@@ -865,17 +868,19 @@ the packet **plus** the sections it references.
 | **P15 Rewards / points spend** | both | `routes` rewards endpoints, app `RewardsScreen` | `components/Points.js` (balance + entry) | concurrent redeems can't overdraw; ledger sums to balance |
 | **P16 Metrics** | backend | admin metrics endpoint | – | returns section 9 for the last 8 weeks |
 | **P17 iOS rich push** | app | NSE config plugin (`plugins/withNotificationServiceExtension.js`) | `app.json` | dot image shows on iOS (needs a native build; do it last) |
+| **P19 Launch screen** | app | see LAUNCH_AND_FOUNDER_CIRCLE.md §A.5 | `App.js`, `AuthNavigator.js`, `Splash.js`, `app.json` | matches the reference animation; no yellow/Splash flash |
+| **P20a/b Founder Circle** | both | see LAUNCH_AND_FOUNDER_CIRCLE.md §B.8 | `Card.js`, `Points.js`, `FounderCircleScreen.js`, `ProfileScreen.js` | ≤ 50 seats; three card editions |
 | **P18 Duo streaks, leaderboard, win-back** | both | `models/DuoStreak.js`, invite-by-referral flow, leaderboard, win-back cron | `Points.js` (share link carries referral) | stage 3 flags only |
 
 **Build order, mapped to the plan's phases:**
 
 - **Phase 0 (by 3 Oct):** P0, P1, P2, P3, plus `app_open` tracking from P6/P8.
-- **Phase 1 (5–17 Oct):** P4, P5, P6, P7, P8, P9, P10, P11.
+- **Phase 1 (5–17 Oct):** P4, P5, P6, P7, P8, P9, P10, P11, P19.
 - **Phase 2 (19–31 Oct):** P12, P13.
-- **Phase 3 (2–14 Nov):** P14, P15, P16, P17.
+- **Phase 3 (2–14 Nov):** P14, P15, P16, P17, P20a, P20b (first founder invites 1 Dec).
 - **Phase 4 (after 100+ WAU):** P18.
 
-P0 and P8 each need a **new native build** (B8, `expo-notifications` plugin). Batch them into
+P0, P8 and P19 each need a **new native build** (B8, `expo-notifications` plugin). Batch them into
 one EAS build early in phase 1 so later packets can ship as JS-only updates.
 
 ---
