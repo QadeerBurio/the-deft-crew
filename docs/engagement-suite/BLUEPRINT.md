@@ -7,6 +7,9 @@ repos at `docs/engagement-suite/BLUEPRINT.md`. Keep the two copies identical.
 - Backend: `the-deft-crew` (Express 5, Mongoose 9, CommonJS, `expo-server-sdk`, `node-cron`, deployed on Railway)
 - Mobile: `The-Deft-Crew-App` (Expo SDK 54, RN 0.81, React Navigation 7, React Query 5, plain JS)
 
+Screen-by-screen UI placement (what goes where in the existing interface) is in
+`UI_PLACEMENT.md` next to this file. It overrides section 7 wherever they differ.
+
 Each section says **what exists today**, **what to build**, and **exactly which
 files change**. Section 11 splits the work into self-contained task packets for
 code generation.
@@ -352,7 +355,7 @@ async function track(userId, name, opts = {})
 | `skill_posted` | yes | skillshare | `routes/listing.routes.js:40` `POST /` | |
 | `skill_swapped` | yes | skillshare | `routes/skillOffer.routes.js:188` when `status === 'accepted'` (L232) | track both parties |
 | `trip_saved` | yes | traveling | **new** `POST /engagement/saved/trip/:id` | |
-| `trip_booked` | yes | traveling | `routes/traveler.routes.js:62` `POST /bookings`, `routes/booking.routes.js:8` | confirm which one the student Travelling screen calls |
+| `trip_booked` | yes | traveling | `routes/booking.routes.js:8` (the app's `BookingScreen.js` calls `/api/bookings`) | `traveler.routes.js` is the traveler-role side; don't hook it |
 | `drop_reacted` | yes | – | **new** `POST /engagement/drops/:dayKey/react` | |
 | `app_open` | **no** | – | **new** `POST /engagement/events` (client) | only updates `stats.lastActiveAt`; for retention metrics |
 | `tour_completed`, `card_snoozed`, `popup_seen`, `push_opened` | no | – | client endpoints below | analytics only |
@@ -582,7 +585,7 @@ excited · broke · panic · sus · shook · sleepy · cheeky · sorted
 | Pop-ups | from `popup.mood` | 120 (lottie) |
 | Push image | `richContent.image` → `/dots/{mood}-1024x512.png` | n/a |
 | Notification settings rows | one mood per type | 20 |
-| Feed/Confession author row | one badge dot next to the name (phase 3) | 12 |
+| Feed author row (**never on confessions**: they're anonymous, UI_PLACEMENT §6) | one badge dot next to the name (phase 3) | 12 |
 | Friends list (phase 4) | duo streak health | 12 |
 
 **Designer delivers:** 8 × Lottie JSON (`assets/dots/lottie/{mood}.json`), 8 × PNG
@@ -661,7 +664,8 @@ Inside `AppContent`, next to `<GlobalNotificationLayer />`, add `<CelebrationHos
 
 1. **Fast path:** add a response interceptor to `api.js`. If `response.data?.engagement?.popups?.length`,
    call `engagementBus.emit('popups', popups)` (a tiny event emitter so `api.js` doesn't import React).
-   Also invalidate `['engagement']` queries.
+   Also invalidate `['engagement']` queries. **Most action screens use raw `axios`/`fetch`, not `api`,
+   so each call site also calls `celebrate(res.data?.engagement)`. The full list is in UI_PLACEMENT §11.**
 2. **Slow path:** `EngagementProvider` refetches `/engagement/me` on `AppState` → `active`, on Home focus,
    and every 60s while the app is in the foreground. Anything in `me.popups` gets queued. This path
    covers brand-side redemptions.
@@ -741,15 +745,12 @@ Unknown keys go to Home.
 
 The targets are measured with `measureInWindow`:
 
-| Step | Target | How it's registered | Mood / line |
+| Step | Target (all in `CustomTabBar`, `navigation/TabNavigator.js`) | ref id | Mood / line |
 |---|---|---|---|
-| 1 | Home tab icon | `CustomTabBar` in `navigation/TabNavigator.js` wraps each `TouchableOpacity` with `ref={registerTarget('tab_home')}` | excited · "this is tdc. 70+ brands, student prices." |
-| 2 | Campus tab (= Student Hub, `StudentDashboard`) | `tab_campus` | broke · "deals, events, scholarships. all here." |
-| 3 | Resume/Jobs feature card on Home (there's no Career tab) | `home_feature_resume` in `Home.js` `FeatureCard` | panic · "build your cv, see your job match %." |
+| 1 | Home tab icon | `tab_home` | excited · "this is tdc. 70+ brands, student prices." |
+| 2 | Explore tab (= Student Hub, `Explore.js`) | `tab_explore` | broke · "deals, events, scholarships. all here." |
+| 3 | Campus tab (= Career Dashboard, `StudentDashboard.js`) | `tab_campus` | panic · "build your cv, see your job match %." |
 | 4 | Centre Social button | `tab_social` | sus · "say it anonymously. we won't tell." |
-
-The step 2 and 3 targets need **decision D7**. The plan's "Student Hub" and "Career Dashboard"
-aren't named tabs in the app.
 
 - The tour starts on the first Home focus after sign-up **or** for a guest, once
   (`AsyncStorage 'tdc.tourDone'` + server `tourCompletedAt` for signed-in users).
@@ -821,7 +822,7 @@ activity timestamps in existing collections. Label it a proxy in the dashboard.
 | D4 | Do transactional pushes (chat, receipts) count toward the weekly cap? | no, but they respect quiet hours | P9 |
 | D5 | "CV complete" = `isComplete` (≥ 85%) or 100%? | `isComplete` | P5 |
 | D6 | Semester boundaries for exam mode | Jan–Jun / Jul–Dec | P12 |
-| D7 | Tour steps 2 and 3 targets (section 7.7) | Campus tab / Resume card | P11 |
+| D7 | ~~Tour steps 2 and 3 targets~~ **Resolved:** Explore tab = Student Hub, Campus tab = Career Dashboard (UI_PLACEMENT §0) | – | – |
 | D8 | `og` cutoff date | 31 Dec 2026 | P7 |
 | D9 | What can points buy at launch? (needs 5 brand perks from partnerships) | promo codes only | P15 |
 
@@ -857,7 +858,7 @@ the packet **plus** the sections it references.
 | **P8 Mobile foundation** | app | `engagement/api`, `EngagementProvider`, `hooks/*`, `utils/{moods,haptics,deepLinks}.js`, `components/Dot.js` | `App.js` (providers, navigationRef, response listener), `api/api.js` (interceptor + bus) | tapping a push with `route: 'Events'` opens Events from a cold start |
 | **P9 Push gateway** | backend | `services/engagement/pushGateway.js`, `tests/pushGateway.test.js` | `utils/pushNotification.js` (multi-token, receipts) | tests: quiet hours, daily cap, weekly cap by stage, pref off |
 | **P10 Missions UI** | app | `MissionCard`, `MissionProgressRow`, `MissionStack`, `CelebrationPopup`, `FullySortedCelebration`, `useCelebrationQueue`, `utils/pushPermission.js` | `Home.js`, `App.js` (`CelebrationHost`), `ProfileScreen.js` (x/8 row) | redeeming a deal flips the card with pop + haptic; only 1 popup per session; permission asked after the first flip, never on install |
-| **P11 Tour** | app | `tour/*` | `TabNavigator.js` (target refs), `Home.js` (feature card ref), `SettingScreen.js` (replay row) | 4 steps, skip works, shown once, replay works |
+| **P11 Tour** | app | `tour/*` | `TabNavigator.js` (4 target refs), `Home.js` (MissionStack scroll ref), `Social/SettingItem.js` (replay row) | 4 steps, skip works, shown once, replay works |
 | **P12 Daily drop + solo streak** | both | `services/engagement/{drops,scheduler}.js`, `models/JobLock.js`, `routes/adminEngagement.routes.js` (drops); app: `DailyDropCard`, `StreakChip`, `StreakSheet` | `server.js` (start scheduler) | drop goes live at 19:00 PKT; warning at 20:00 only for at-risk users; rollover applies freeze/exam/break correctly; two server instances → one push |
 | **P13 Notification settings** | app | `screens/NotificationSettingsScreen.js` | `DrawerNavigator.js`, `ProfileStack.js` (register), `screens/Social/SettingItem.js` (link) | toggling off `dailyDrop` stops the 19:00 push for that user |
 | **P14 Badges + savings** | both | app: `BadgeShelf`, `BadgePip`, `BadgesScreen`, `SavingsCounter` | `ProfileScreen.js`, `components/Card.js`, `screens/Social/PostCard.js` (badge pip), `routes/social.routes.js` (include top badge in author projection) | one badge popup per session; share card exports an image |
