@@ -62,8 +62,7 @@ const NotificationSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId, 
     ref: 'User' 
   }],
-  link:    { type: String, default: "" },
-webLink: { type: String, default: "" },
+  
   metadata: {
     type: mongoose.Schema.Types.Mixed,
     default: {}

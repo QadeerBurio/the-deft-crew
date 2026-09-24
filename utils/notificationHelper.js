@@ -1,21 +1,11 @@
 // backend/utils/notificationHelper.js
-// ✅ COMPLETE — supports OLD positional signature + NEW object signature
+// ✅ COMPLETE — supports BOTH positional and object signatures
 // ✅ Saves to SocialNotification model
-// ✅ Auto-builds deep link from relatedId / metadata
 // ✅ Sends Expo push notification
 
 const Notification = require('../models/SocialNotification');
 const User = require('../models/User');
 const axios = require('axios');
-
-// ---------- Safe import of deep-link builder ----------
-let buildLink;
-try {
-  ({ buildLink } = require('./deepLink'));
-} catch (err) {
-  console.warn('[Notification] deepLink.js not found — links will be empty');
-  buildLink = () => ({ link: '', webLink: '' });
-}
 
 // ---------- Default titles per type ----------
 const DEFAULT_TITLES = {
@@ -85,8 +75,6 @@ const _createInternal = async ({
   relatedId = null,
   metadata = {},
   title,
-  link = '',
-  webLink = '',
 }) => {
   try {
     // Don't notify yourself
@@ -98,7 +86,7 @@ const _createInternal = async ({
       return null;
     }
 
-    // ----- Dedup logic for connection requests / results -----
+    // ----- Dedup logic for connection requests -----
     if (type === 'request') {
       const existingPending = await Notification.findOne({
         recipient: recipientId,
@@ -132,27 +120,6 @@ const _createInternal = async ({
       }
     }
 
-    // ----- Auto-build deep link -----
-    if (!link) {
-      try {
-        const built = buildLink(type, {
-          postId: metadata.postId || relatedId,
-          conversationId: metadata.conversationId,
-          senderId,
-          eventId: metadata.eventId,
-          offerId: metadata.offerId,
-          listingId: metadata.listingId,
-          matchId: metadata.matchId,
-          threadId: metadata.threadId,
-        });
-        link = built?.link || '';
-        webLink = built?.webLink || '';
-        console.log('[Notification] Auto-built link:', link);
-      } catch (err) {
-        console.warn('[Notification] buildLink error:', err.message);
-      }
-    }
-
     // ----- Save -----
     const notification = new Notification({
       recipient: recipientId,
@@ -163,10 +130,6 @@ const _createInternal = async ({
       status: type === 'request' ? 'pending' : 'accepted',
       isProcessed: false,
       readBy: [],
-      // Optional fields (only saved if your schema has them):
-      link,
-      webLink,
-      metadata,
     });
 
     await notification.save();
@@ -191,11 +154,8 @@ const _createInternal = async ({
         {
           notificationId: notification._id.toString(),
           type,
-          link,
-          webLink,
           senderId: senderId ? String(senderId) : null,
-          postId: metadata.postId || relatedId || null,
-          conversationId: metadata.conversationId || null,
+          postId: relatedId ? String(relatedId) : null,
           ...metadata,
         }
       );
@@ -231,7 +191,7 @@ const createNotification = async (arg1, arg2, arg3, arg4, arg5, arg6) => {
   // arg3 = type
   // arg4 = text
   // arg5 = relatedId (postId / commentId / conversationId)
-  // arg6 = metadata (optional, rarely used)
+  // arg6 = metadata (optional)
   const [recipientId, senderId, type, text, relatedId, metadata] = [
     arg1,
     arg2,
@@ -301,12 +261,6 @@ const NotificationTemplates = {
 
 // ============================================================
 // ✅ EXPORT — works with BOTH import styles
-//
-//  const createNotification = require('../utils/notificationHelper');
-//  → createNotification is the function ✅
-//
-//  const { createNotification } = require('../utils/notificationHelper');
-//  → createNotification is the function ✅
 // ============================================================
 module.exports = createNotification;
 module.exports.createNotification = createNotification;
