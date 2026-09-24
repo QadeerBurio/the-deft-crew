@@ -11,6 +11,8 @@ Screen-by-screen UI placement (what goes where in the existing interface) is in
 `UI_PLACEMENT.md` next to this file. It overrides section 7 wherever they differ.
 The launch screen and the Founder Circle card are specified in `LAUNCH_AND_FOUNDER_CIRCLE.md`
 (packets P19 and P20).
+**Loyalty points, levels, the campus crew and Founder Circle entry are specified in `CREW_SYSTEM.md`,
+which overrides §3.4, §4.6, the rewards endpoints in §5, and packets P15/P20 here.**
 
 Each section says **what exists today**, **what to build**, and **exactly which
 files change**. Section 11 splits the work into self-contained task packets for
@@ -400,6 +402,9 @@ client. Every qualifying event is emitted on the server, inside the route that d
 Each definition: `{ id, group, mood, title, line, points, perkRewardId? }`.
 
 ### 4.6 Loyalty points
+
+> **Superseded by `CREW_SYSTEM.md` §1–3** (points, levels, referral verification, values).
+> The table below is kept for history only.
 
 **What exists today:** the "Points" screen (`components/Points.js`) is actually a referral
 tracker. It reads `referralCount` from `/auth/profile/me` and unlocks the VIP/TDC card at 10
@@ -865,11 +870,11 @@ the packet **plus** the sections it references.
 | **P12 Daily drop + solo streak** | both | `services/engagement/{drops,scheduler}.js`, `models/JobLock.js`, `routes/adminEngagement.routes.js` (drops); app: `DailyDropCard`, `StreakChip`, `StreakSheet` | `server.js` (start scheduler) | drop goes live at 19:00 PKT; warning at 20:00 only for at-risk users; rollover applies freeze/exam/break correctly; two server instances → one push |
 | **P13 Notification settings** | app | `screens/NotificationSettingsScreen.js` | `DrawerNavigator.js`, `ProfileStack.js` (register), `screens/Social/SettingItem.js` (link) | toggling off `dailyDrop` stops the 19:00 push for that user |
 | **P14 Badges + savings** | both | app: `BadgeShelf`, `BadgePip`, `BadgesScreen`, `SavingsCounter` | `ProfileScreen.js`, `components/Card.js`, `screens/Social/PostCard.js` (badge pip), `routes/social.routes.js` (include top badge in author projection) | one badge popup per session; share card exports an image |
-| **P15 Rewards / points spend** | both | `routes` rewards endpoints, app `RewardsScreen` | `components/Points.js` (balance + entry) | concurrent redeems can't overdraw; ledger sums to balance |
+| ~~P15 Rewards / points spend~~ → see CREW_SYSTEM §10 (P15, P15b, P21) | both | `routes` rewards endpoints, app `RewardsScreen` | `components/Points.js` (balance + entry) | concurrent redeems can't overdraw; ledger sums to balance |
 | **P16 Metrics** | backend | admin metrics endpoint | – | returns section 9 for the last 8 weeks |
 | **P17 iOS rich push** | app | NSE config plugin (`plugins/withNotificationServiceExtension.js`) | `app.json` | dot image shows on iOS (needs a native build; do it last) |
 | **P19 Launch screen** | app | see LAUNCH_AND_FOUNDER_CIRCLE.md §A.5 | `App.js`, `AuthNavigator.js`, `Splash.js`, `app.json` | matches the reference animation; no yellow/Splash flash |
-| **P20a/b Founder Circle** | both | see LAUNCH_AND_FOUNDER_CIRCLE.md §B.8 | `Card.js`, `Points.js`, `FounderCircleScreen.js`, `ProfileScreen.js` | ≤ 50 seats; three card editions |
+| **P20a/b Founder Circle** (entry rules per CREW_SYSTEM §5) | both | see LAUNCH_AND_FOUNDER_CIRCLE.md §B.8 | `Card.js`, `Points.js`, `FounderCircleScreen.js`, `ProfileScreen.js` | ≤ 50 seats; three card editions |
 | **P18 Duo streaks, leaderboard, win-back** | both | `models/DuoStreak.js`, invite-by-referral flow, leaderboard, win-back cron | `Points.js` (share link carries referral) | stage 3 flags only |
 
 **Build order, mapped to the plan's phases:**
