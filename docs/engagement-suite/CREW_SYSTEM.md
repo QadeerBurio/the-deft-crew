@@ -66,6 +66,9 @@ The 100 points are awarded in `engine.js` step 4 the first time the *referred* u
 
 ## 4. Campus crew (ambassadors, inside the app)
 
+> **Superseded by `AMBASSADOR_PROGRAM.md`.** It adds direct appointment, applying open to everyone (no Main Character gate),
+> 3 seats per campus, the in-app crew hub, tracked links, social post review and the admin ambassador table.
+
 - **Apply from Main Character.** The crew screen shows "become a campus crew lead." with a short form
   (university, why, Instagram). This is `POST /api/crew/apply` → `CrewApplication` (pending), and an admin approves it.
 - **Approved crew leads** get `crew.role = 'lead'` and their university. The crew screen then shows a
