@@ -99,7 +99,7 @@ within 1.85s when data is warm. The pop sound plays on first install only and is
 
 # Part B: Founder Circle card (P20)
 
-> **Updated by `CREW_SYSTEM.md` §5.** Entry is now 10,000 crew points + 8/8 sorted + good standing,
+> **Updated by `TDC_CREW.md` §3.** Entry is now 10,000 crew points + 8/8 sorted + good standing,
 > then apply and get approved. §B.3 (score), the `Contribution` model and the candidates list are **dropped**,
 > and the lower tiers lose their cash too. §B.2 (D10, D11, D13), §B.4, §B.5 (card design), §B.6 and FounderSeat in §B.7 still apply.
 

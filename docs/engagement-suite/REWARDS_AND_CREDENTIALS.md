@@ -2,7 +2,16 @@
 
 How students see **what they're signing up for and what they'll get**, how rewards like badges,
 certificates and recommendation letters are **issued inside tdc**, and how anyone can
-**verify** them. It extends `CREW_SYSTEM.md` (levels, crew lead, Founder Circle).
+**verify** them. It extends `TDC_CREW.md` (levels, partners, Founder Circle).
+
+> **Simplified by `TDC_CREW.md`, which wins wherever this file differs:**
+> - "crew lead" means a **partner** (ambassador or influencer)
+> - there are **no crew tasks** (recognition = an admin points award with a reason)
+> - there are **two agreements**, `crew_terms` and `partner` (the founder terms are a short section inside the founder apply sheet)
+> - the admin portal has **four** crew screens (Inbox, Partners, Campaigns, Credentials), and the §5 screens fold into them: applications and posts → Inbox, points/badges/agreements/settings/templates → Credentials
+> - the per-level rewards are the ones in TDC_CREW §3 (appointment letter and crew-lead certificates are dropped)
+>
+> Everything about **delivering** rewards (my rewards, PDFs, QR verification, add to CV, Majid's signature, deadlines) stands as written.
 
 **Signer on every document: Majid, Founder, tdc.**
 
@@ -56,7 +65,7 @@ what we ask                                  ← only for crew lead and founder 
 
 - **Delivery chip** on every reward: `format · who · when`. Formats are `badge` (instant), `pdf` (issued by Majid),
   `card` (instant), `link` (Instagram / LinkedIn) and `perk` (brand perk code). The "when" is a promise we track (§4.4).
-- There's no cash text anywhere (per CREW_SYSTEM §3).
+- There's no cash text anywhere (per TDC_CREW §3).
 
 ### 2.2 Agreements ("i agree")
 
@@ -66,7 +75,7 @@ There are three agreements. Each is versioned, with the text served from the ser
 |---|---|---|
 | `crew_terms` | the first time the crew screen opens | points have **no cash value**, can't be transferred or sold, tdc can remove points gained by fraud, levels and rewards can change with 14 days' notice, rewards already earned are kept |
 | `crew_lead` | before applying to be a campus crew lead | what a lead does, about 3 hrs/week, code of conduct, **no pay** (points, perks and credentials only), tdc can end the role, they can step down anytime, how their name/photo may be used on @tdc.app |
-| `founder_circle` | before applying to Founder Circle | seat rules (50, closes 31 Mar 2027), what founders get (CREW_SYSTEM §3), what's expected (feedback sessions, beta testing), removal only for misconduct, the seat and card are personal |
+| `founder_circle` | before applying to Founder Circle | seat rules (50, closes 31 Mar 2027), what founders get (TDC_CREW §3), what's expected (feedback sessions, beta testing), removal only for misconduct, the seat and card are personal |
 
 **The agreement sheet in the app** is a bottom sheet in the same modal style as the sign-out modal. It has the
 title, a scrollable body (rendered from markdown), and a checkbox "i've read this." that only becomes enabled
@@ -131,12 +140,12 @@ If they have more than one resume, a picker lists them. If they have none, it go
 | Reward | Issued | How |
 |---|---|---|
 | Level badge (every level) | **automatically** on level-up | a `Credential { kind: 'badge' }` with a code, delivered instantly |
-| Gold card (Main Character) / founder card | automatically | existing card logic (CREW_SYSTEM §6) plus a wallet row |
+| Gold card (Main Character) / founder card | automatically | existing card logic (TDC_CREW §9) plus a wallet row |
 | Experience certificate (Main Character) | **automatically**, with a template and Majid's stored signature | PDF generated on level-up. No admin step, since the template content is factual (level, dates, points). |
 | Recommendation letter (Pro), crew lead appointment letter, founder letter | **by Majid** | an `AdminTask` → drafted from a template in the admin portal → Majid edits → issue |
 | Instagram feature, LinkedIn recommendation | by hand, outside the app | `AdminTask` → admin pastes the link → marked delivered |
 | Internship consideration / referral | by hand | `AdminTask` → admin notes the company → delivered |
-| Brand perk | automatically (reward catalog) | as in CREW_SYSTEM §7 |
+| Brand perk | automatically (reward catalog) | as in TDC_CREW §9 |
 | Manual badge (e.g. "confession of the day", special recognition) | by an admin, anytime | admin portal "award badge" |
 
 ### 4.2 Letter templates (drafts Majid edits)
@@ -224,7 +233,7 @@ For the new screens, add one `src/api/crewApi.js` with that base, and don't copy
 // models/CrewSettings.js  (a single document)
 { signer: { name, title, signatureUrl }, slaDays: { recommendation_letter: 7, ... } }
 
-// AdminTask (CREW_SYSTEM §6) gains: dueAt: Date, credential: ObjectId|null, deliveredLink: String|null
+// AdminTask (TDC_CREW §9) gains: dueAt: Date, credential: ObjectId|null, deliveredLink: String|null
 ```
 
 **Student endpoints** (add to `routes/crew.routes.js`)
@@ -240,7 +249,7 @@ GET  /api/crew/rewards/mine               → [{ id, kind, title, status: 'deliv
 POST /api/crew/credentials/:code/add-to-resume { resumeId } → { ok: true }
 ```
 
-The apply endpoints (CREW_SYSTEM §7) return `428 { agreement, version }` until the current version is accepted.
+The apply endpoints (TDC_CREW §9) return `428 { agreement, version }` until the current version is accepted.
 
 **Public**
 

@@ -239,7 +239,7 @@ Implementation notes:
   (both installed; `Card.js` already does this for the card).
 - **Loyalty Points row** (L503–508): replace `rightText: "250"` with
   `` `${me.points.balance.toLocaleString()} pts` `` and set `onPress` to
-  `navigation.navigate('Points')` (the crew screen, CREW_SYSTEM §8). The first time it's tapped, show the one-time `Tooltip`
+  `navigation.navigate('Points')` (the crew screen, TDC_CREW §6). The first time it's tapped, show the one-time `Tooltip`
   ("points come from getting sorted. spend them on brand perks.").
 - `statsRow` has 2 `statItem`s with a `statDivider`. Add a third ("Sorted" / `3/8`) with
   the same markup and the gold icon box.
@@ -264,7 +264,7 @@ or "WAITING FOR VERIFICATION"), the activate button, and download/share.
 
 ## 9. Points screen = "Refer & Earn" (`components/Points.js`)
 
-> **Superseded by `CREW_SYSTEM.md` §8.** This screen becomes "the crew." and holds points, levels,
+> **Superseded by `TDC_CREW.md` §6.** This screen becomes "the crew." and holds points, levels,
 > referrals, campus crew, Founder Circle and spending. There's no separate `RewardsScreen`.
 
 This is the drawer's `Points` route. It's a **referral** screen ("Refer & Earn" header L972, hero
