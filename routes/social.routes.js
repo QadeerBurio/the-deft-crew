@@ -12,6 +12,9 @@ const BlockedUser = require('../models/BlockedUser');
 const Notification = require('../models/SocialNotification');
 const createNotification = require('../utils/notificationHelper');
 const { Conversation, Message } = require('../models/Chat');
+// routes/social.routes.js
+const { awardDaily } = require('../services/engagement/dailyPoints');
+const { track } = require('../services/engagement');
 
 // ============================================
 // ============ REPORT ROUTES ================
@@ -943,7 +946,25 @@ router.post('/create-post', auth, async (req, res) => {
         select: 'name profileImage university connections sentRequests receivedRequests',
         populate: { path: 'university', select: 'name' }
       });
-
+try {
+  await track(req.user._id, 'social_posted', {
+    meta: { postId: newPost._id.toString() },
+    dedupeKey: `post:${req.user._id}:${newPost._id}`,
+  });
+} catch (e) {
+  console.error('[engagement] social_posted hook failed:', e.message);
+}
+// 🆕 Daily engagement points
+    setImmediate(async () => {
+      try {
+        const r = await awardDaily(req.userId, 'daily_post');
+        if (r.awarded) {
+          console.log(`[daily] post +${r.points} → user ${req.userId}`);
+        }
+      } catch (e) {
+        console.error('[daily] post award failed:', e.message);
+      }
+    });
     res.status(201).json(populatedPost);
   } catch (err) {
     console.error("[Backend Error] Create Post:", err.message);
@@ -1001,7 +1022,17 @@ router.put('/posts/like/:id', auth, async (req, res) => {
     
     const populatedPost = await Post.findById(post._id)
       .populate('likes', 'name profileImage');
-    
+    // 🆕 Daily engagement points (only on the "add" path)
+    setImmediate(async () => {
+      try {
+        const r = await awardDaily(userId, 'daily_like');
+        if (r.awarded) {
+          console.log(`[daily] like +${r.points} → user ${userId}`);
+        }
+      } catch (e) {
+        console.error('[daily] like award failed:', e.message);
+      }
+    });
     res.json({ 
       success: true, 
       likes: post.likes.length,
@@ -1029,47 +1060,6 @@ router.get('/posts/likes/:id', auth, async (req, res) => {
   }
 });
 
-// --- Add Comment to Post ---
-// router.post('/posts/comment/:id', auth, async (req, res) => {
-//   try {
-//     const { text } = req.body;
-
-//     if (!text || text.trim().length === 0) {
-//       return res.status(400).json({ error: "Comment text cannot be empty." });
-//     }
-
-//     const post = await Post.findById(req.params.id);
-//     if (!post) return res.status(404).json({ error: "Post not found." });
-
-//     const newComment = {
-//       user: req.user._id,
-//       text: text.trim(),
-//       createdAt: new Date()
-//     };
-
-//     post.comments.unshift(newComment);
-//     await post.save();
-
-//     const updatedPost = await Post.findById(req.params.id)
-//       .populate('comments.user', 'name profileImage');
-
-//     const previewText = text.length > 20 ? text.substring(0, 20) + "..." : text;
-//     if (post.author.toString() !== req.user._id.toString()) {
-//        await createNotification(
-//          post.author,
-//          req.user._id,
-//          'comment',
-//          `${req.user.name} commented: "${previewText}"`,
-//          post._id
-//        );
-//     }
-
-//     res.json({ success: true, comments: updatedPost.comments });
-//   } catch (err) { 
-//     console.error("Comment Logic Error:", err.message);
-//     res.status(500).json({ error: "Internal Server Error" }); 
-//   }
-// });
 // ============================================
 // ============ COMMENT ROUTES ================
 // ============================================
@@ -1176,7 +1166,25 @@ router.post('/posts/comment/:id', auth, async (req, res) => {
         }
       }
     }
-
+try {
+  await track(req.user._id, 'social_commented', {
+    meta: { postId: post._id.toString() },
+    dedupeKey: `comment:${req.user._id}:${post._id}:${savedComment._id}`,
+  });
+} catch (e) {
+  console.error('[engagement] social_commented hook failed:', e.message);
+}
+ // 🆕 Daily engagement points — once per day, fire-and-forget
+    setImmediate(async () => {
+      try {
+        const r = await awardDaily(req.userId, 'daily_comment');
+        if (r.awarded) {
+          console.log(`[daily] comment +${r.points} → user ${req.userId}`);
+        }
+      } catch (e) {
+        console.error('[daily] comment award failed:', e.message);
+      }
+    });
     res.json({ success: true, comments: updatedPost.comments, newCommentId: savedComment._id });
   } catch (err) {
     console.error("Comment Logic Error:", err.message);
@@ -1615,7 +1623,16 @@ router.post('/confessions/comment/:id', auth, async (req, res) => {
         }
       }
     }
-
+setImmediate(async () => {
+      try {
+        const r = await awardDaily(req.userId, 'daily_comment');
+        if (r.awarded) {
+          console.log(`[daily] confession-comment +${r.points} → user ${req.userId}`);
+        }
+      } catch (e) {
+        console.error('[daily] confession-comment award failed:', e.message);
+      }
+    });
     res.status(200).json({
       success: true,
       _id: updatedConfession._id,
@@ -1775,7 +1792,25 @@ router.post('/confessions/create', auth, async (req, res) => {
     });
 
     await confession.save();
-    
+    try {
+  await track(req.user._id, 'social_posted', {
+    meta: { confessionId: confession._id.toString() },
+    dedupeKey: `confession:${req.user._id}:${confession._id}`,
+  });
+} catch (e) {
+  console.error('[engagement] confession hook failed:', e.message);
+}
+// 🆕 Daily engagement points
+    setImmediate(async () => {
+      try {
+        const r = await awardDaily(req.userId, 'daily_confession');
+        if (r.awarded) {
+          console.log(`[daily] confession +${r.points} → user ${req.userId}`);
+        }
+      } catch (e) {
+        console.error('[daily] confession award failed:', e.message);
+      }
+    });
     res.status(201).json({ 
       message: "Confession posted anonymously",
       confession: {
@@ -2315,10 +2350,11 @@ router.post('/user/connect/:targetId', auth, async (req, res) => {
 });
 
 // 2. Respond to Connection Request
+// 2. Respond to Connection Request
 router.post('/notifications/respond', auth, async (req, res) => {
   try {
     const { notificationId, action } = req.body;
-    
+
     if (!notificationId || !action) {
       return res.status(400).json({ error: "Notification ID and action are required" });
     }
@@ -2340,7 +2376,7 @@ router.post('/notifications/respond', auth, async (req, res) => {
     }
 
     if (notification.isProcessed) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         error: "This request has already been processed",
         status: notification.status
       });
@@ -2359,8 +2395,8 @@ router.post('/notifications/respond', auth, async (req, res) => {
         notification.isProcessed = true;
         notification.status = 'accepted';
         await notification.save();
-        return res.json({ 
-          success: true, 
+        return res.json({
+          success: true,
           message: "Already connected",
           status: 'accepted'
         });
@@ -2397,8 +2433,22 @@ router.post('/notifications/respond', auth, async (req, res) => {
         .select('-password -email')
         .populate('university', 'name');
 
-      res.json({ 
-        success: true, 
+      // ✅ Real-time socket emit
+      const io = req.app.get('io');
+      if (io) {
+        io.to(senderId.toString()).emit('connection_accepted', {
+          userId: recipientId.toString(),
+          user: updatedRecipient,
+          notification: notification.toObject(),
+        });
+        io.to(recipientId.toString()).emit('connection_updated', {
+          userId: senderId.toString(),
+          user: updatedSender,
+        });
+      }
+
+      return res.json({
+        success: true,
         message: "Connection accepted successfully!",
         status: 'accepted',
         notification: notification,
@@ -2429,8 +2479,16 @@ router.post('/notifications/respond', auth, async (req, res) => {
         null
       );
 
-      res.json({ 
-        success: true, 
+      const io = req.app.get('io');
+      if (io) {
+        io.to(senderId.toString()).emit('connection_declined', {
+          userId: recipientId.toString(),
+          notification: notification.toObject(),
+        });
+      }
+
+      return res.json({
+        success: true,
         message: "Request declined.",
         status: 'declined',
         notification: notification

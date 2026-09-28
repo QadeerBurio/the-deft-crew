@@ -40,7 +40,30 @@ router.get("/", async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
+router.get("/stats", auth, async (req, res) => {
+  try {
+    const brands = await User.find({ role: "brand" }).select("_id").lean();
+    const offers = await Offer.find({ brand: { $in: brands.map(b => b._id) } });
 
+    const allRedemptions = offers.flatMap(o => o.redemptions || []);
+
+    const stats = {
+      totalBrands: brands.length,
+      totalOffers: offers.length,
+      activeOffers: offers.filter(o => o.isActive !== false).length,
+      totalClaims: offers.reduce((sum, o) => sum + (o.claimedBy?.length || 0), 0),
+      totalRedemptions: allRedemptions.length,
+      totalSavings: offers.reduce((sum, o) => sum + (o.totalSavings || 0), 0),
+      totalRevenue: allRedemptions.reduce((sum, r) => sum + (r.billAmount || 0), 0),
+      uniqueStudents: new Set(allRedemptions.map(r => r.student?.toString())).size
+    };
+
+    res.json({ success: true, stats });
+  } catch (err) {
+    console.error("Error fetching overall brand stats:", err);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
 // Get offers by brand - with auth check
 router.get("/:brandId/offers", auth, async (req, res) => {
   try {
@@ -208,30 +231,7 @@ router.get("/:brandId/offers/details", auth, async (req, res) => {
 // ==========================================
 // GET OVERALL BRAND STATS (for admin dashboard)
 // ==========================================
-router.get("/stats", auth, async (req, res) => {
-  try {
-    const brands = await User.find({ role: "brand" }).select("_id").lean();
-    const offers = await Offer.find({ brand: { $in: brands.map(b => b._id) } });
 
-    const allRedemptions = offers.flatMap(o => o.redemptions || []);
-
-    const stats = {
-      totalBrands: brands.length,
-      totalOffers: offers.length,
-      activeOffers: offers.filter(o => o.isActive !== false).length,
-      totalClaims: offers.reduce((sum, o) => sum + (o.claimedBy?.length || 0), 0),
-      totalRedemptions: allRedemptions.length,
-      totalSavings: offers.reduce((sum, o) => sum + (o.totalSavings || 0), 0),
-      totalRevenue: allRedemptions.reduce((sum, r) => sum + (r.billAmount || 0), 0),
-      uniqueStudents: new Set(allRedemptions.map(r => r.student?.toString())).size
-    };
-
-    res.json({ success: true, stats });
-  } catch (err) {
-    console.error("Error fetching overall brand stats:", err);
-    res.status(500).json({ success: false, message: "Server error" });
-  }
-});
 // ==========================================
 // READ: Get all active branches for a specific brand (PUBLIC)
 // GET /api/branches/brand/:brandId

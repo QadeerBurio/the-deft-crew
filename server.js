@@ -87,6 +87,9 @@ connectDB().then(() => {
   const { connectDB: connectChatDB } = require("./chat-service/dist/config/db");
   const { schedulerService } = require("./chat-service/dist/services/scheduler.service");
   connectChatDB().then(() => {
+    // Initialize engagement scheduler (drops, streaks, rollover)
+const engagementScheduler = require('./services/engagement/schedular');
+engagementScheduler.start();
     schedulerService.initialize().catch((err) => {
       console.error("❌ Failed to initialize sync scheduler:", err);
     });
@@ -217,7 +220,13 @@ app.use('/api/skill-offers', require('./routes/skillOffer.routes'));
 app.use('/api/chat', require('./routes/chat.routes'));
 app.use('/api/inquiries', require('./routes/inquiry.routes'));
 app.use('/api/chat/upload', require('./routes/chatUpload.routes'));
+app.use('/api/engagement', require('./routes/engagement.routes'));
+// 🆕 admin engagement
+app.use('/api/admin/engagement', require('./routes/adminEngagement.routes'));
+app.use('/api/rewards', require('./routes/rewards.routes'));
 
+// 🆕 admin crew
+app.use('/api/admin/crew', require('./routes/adminCrew.routes'));
 // ---------------- SOCKET.IO CHAT & CALL HANDLER ----------------
 const { Message, Conversation } = require('./models/Chat');
 

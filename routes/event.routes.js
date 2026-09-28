@@ -8,19 +8,32 @@ const { Event, Registration, EventNotification } = require('../models/Event');
 const eventAggregator = require('../services/events/eventAggregator');
 const eventCleanup = require('../services/events/eventCleanup');
 const { importEventsToDatabase } = require('../services/events/csvImporter');
+const { track } = require('../services/engagement');
+
+// ============================================================
+// HELPERS
+// ============================================================
+
+// Auth middleware may set req.user.id, req.user._id, or req.userId
+const getUserId = (req) => {
+  return req.user?.id || req.user?._id || req.userId || null;
+};
 
 // Admin role check middleware
 const isAdmin = (req, res, next) => {
-  if (!req.user || req.isGuest || (req.user.role !== 'admin' && req.userRole !== 'admin')) {
+  const role = req.user?.role || req.userRole;
+  if (!req.user || req.isGuest || role !== 'admin') {
     return res.status(403).json({ success: false, message: 'Access denied. Admin role required.' });
   }
   next();
 };
 
-// Configure Multer for CSV & XLSX files
+// ============================================================
+// MULTER — CSV / XLSX uploads
+// ============================================================
 const uploadCsvMulter = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+  limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
     const allowedExts = ['.csv', '.xlsx', '.xls'];
@@ -29,53 +42,44 @@ const uploadCsvMulter = multer({
       'application/vnd.ms-excel',
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'application/octet-stream',
-      'application/csv'
+      'application/csv',
     ];
-
     if (allowedExts.includes(ext) || allowedMimetypes.includes(file.mimetype)) {
       cb(null, true);
     } else {
       cb(new Error('INVALID_FILE_TYPE'));
     }
-  }
+  },
 });
 
-
-// ==========================================
+// ============================================================
 // PUBLIC & USER FEED ENDPOINTS
-// ==========================================
+// ============================================================
 
-/**
- * GET /api/events/feed
- * Enhanced public feed supporting search, category, timeframe, price filters, and pagination.
- * Excludes rejected and expired events.
- */
 router.get('/feed', async (req, res) => {
   try {
-    const { 
-      category, 
-      search, 
-      timeframe, 
-      isFree, 
+    const {
+      category,
+      search,
+      timeframe,
+      isFree,
       sort = 'newest',
-      page = 1, 
-      limit = 100 
+      page = 1,
+      limit = 100,
     } = req.query;
 
     const query = {
       isExpired: false,
-      status: { $ne: 'rejected' }
+      status: { $ne: 'rejected' },
     };
 
-    // Category Filter
     if (category && category !== 'All') {
       query.$or = [
         { type: new RegExp(`^${category}$`, 'i') },
-        { categories: new RegExp(`^${category}$`, 'i') }
+        { categories: new RegExp(`^${category}$`, 'i') },
       ];
     }
 
-    // Search Filter
     if (search && search.trim() !== '') {
       const searchRegex = new RegExp(search.trim(), 'i');
       query.$and = [
@@ -86,30 +90,29 @@ router.get('/feed', async (req, res) => {
             { organizer: searchRegex },
             { location: searchRegex },
             { tags: searchRegex },
-            { searchKeywords: searchRegex }
-          ]
-        }
+            { searchKeywords: searchRegex },
+          ],
+        },
       ];
     }
 
-    // Timeframe Filter (Today, Tomorrow, This Week, This Month)
     if (timeframe) {
       const now = new Date();
       let startRange, endRange;
 
       if (timeframe === 'today') {
-        startRange = new Date(now.setHours(0,0,0,0));
-        endRange = new Date(now.setHours(23,59,59,999));
+        startRange = new Date(now.setHours(0, 0, 0, 0));
+        endRange = new Date(now.setHours(23, 59, 59, 999));
       } else if (timeframe === 'tomorrow') {
         const tomorrow = new Date(now);
         tomorrow.setDate(tomorrow.getDate() + 1);
-        startRange = new Date(tomorrow.setHours(0,0,0,0));
-        endRange = new Date(tomorrow.setHours(23,59,59,999));
+        startRange = new Date(tomorrow.setHours(0, 0, 0, 0));
+        endRange = new Date(tomorrow.setHours(23, 59, 59, 999));
       } else if (timeframe === 'this_week') {
-        startRange = new Date(now.setHours(0,0,0,0));
+        startRange = new Date(now.setHours(0, 0, 0, 0));
         endRange = new Date(now.getTime() + 7 * 86400000);
       } else if (timeframe === 'this_month') {
-        startRange = new Date(now.setHours(0,0,0,0));
+        startRange = new Date(now.setHours(0, 0, 0, 0));
         endRange = new Date(now.getTime() + 30 * 86400000);
       }
 
@@ -118,14 +121,10 @@ router.get('/feed', async (req, res) => {
       }
     }
 
-    // Price Filter
-    if (isFree !== undefined) {
-      if (isFree === 'true') {
-        query.tags = { $in: [/free/i] };
-      }
+    if (isFree !== undefined && isFree === 'true') {
+      query.tags = { $in: [/free/i] };
     }
 
-    // Sorting
     let sortOptions = { pinned: -1, createdAt: -1 };
     if (sort === 'popular') {
       sortOptions = { featured: -1, createdAt: -1 };
@@ -134,11 +133,8 @@ router.get('/feed', async (req, res) => {
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
     const [events, total] = await Promise.all([
-      Event.find(query)
-        .sort(sortOptions)
-        .skip(skip)
-        .limit(parseInt(limit)),
-      Event.countDocuments(query)
+      Event.find(query).sort(sortOptions).skip(skip).limit(parseInt(limit)),
+      Event.countDocuments(query),
     ]);
 
     res.json({
@@ -146,8 +142,8 @@ router.get('/feed', async (req, res) => {
       pagination: {
         total,
         page: parseInt(page),
-        pages: Math.ceil(total / parseInt(limit))
-      }
+        pages: Math.ceil(total / parseInt(limit)),
+      },
     });
   } catch (err) {
     console.error('Feed error:', err);
@@ -155,10 +151,6 @@ router.get('/feed', async (req, res) => {
   }
 });
 
-/**
- * GET /api/events/latest
- * Get top 10 newest imported & active events
- */
 router.get('/latest', async (req, res) => {
   try {
     const events = await Event.find({ isExpired: false, status: 'approved' })
@@ -171,16 +163,11 @@ router.get('/latest', async (req, res) => {
   }
 });
 
-/**
- * GET /api/events/search
- * Full text search endpoint
- */
 router.get('/search', async (req, res) => {
   try {
     const { q } = req.query;
-    if (!q || q.trim() === '') {
-      return res.json([]);
-    }
+    if (!q || q.trim() === '') return res.json([]);
+
     const regex = new RegExp(q.trim(), 'i');
     const events = await Event.find({
       isExpired: false,
@@ -191,9 +178,11 @@ router.get('/search', async (req, res) => {
         { organizer: regex },
         { location: regex },
         { tags: regex },
-        { searchKeywords: regex }
-      ]
-    }).sort({ createdAt: -1 }).limit(50);
+        { searchKeywords: regex },
+      ],
+    })
+      .sort({ createdAt: -1 })
+      .limit(50);
 
     res.json(events);
   } catch (err) {
@@ -202,9 +191,6 @@ router.get('/search', async (req, res) => {
   }
 });
 
-/**
- * GET /api/events/category/:category
- */
 router.get('/category/:category', async (req, res) => {
   try {
     const category = req.params.category;
@@ -213,10 +199,9 @@ router.get('/category/:category', async (req, res) => {
       status: { $ne: 'rejected' },
       $or: [
         { type: new RegExp(`^${category}$`, 'i') },
-        { categories: new RegExp(`^${category}$`, 'i') }
-      ]
+        { categories: new RegExp(`^${category}$`, 'i') },
+      ],
     }).sort({ createdAt: -1 });
-
     res.json(events);
   } catch (err) {
     console.error('Fetch category error:', err);
@@ -224,17 +209,13 @@ router.get('/category/:category', async (req, res) => {
   }
 });
 
-/**
- * GET /api/events/provider/:provider
- */
 router.get('/provider/:provider', async (req, res) => {
   try {
     const provider = req.params.provider.toLowerCase();
     const events = await Event.find({
       source: provider,
-      isExpired: false
+      isExpired: false,
     }).sort({ createdAt: -1 });
-
     res.json(events);
   } catch (err) {
     console.error('Fetch provider error:', err);
@@ -242,17 +223,27 @@ router.get('/provider/:provider', async (req, res) => {
   }
 });
 
-// ==========================================
+// ============================================================
 // USER CREATION & REGISTRATION
-// ==========================================
+// ============================================================
 
-// CREATE EVENT
 router.post('/create', auth, async (req, res) => {
   try {
-    const { 
-      title, organizer, city, type, description, prize, 
-      deadline, location, contact, image, date, teamSize,
-      registrationUrl, externalUrl 
+    const {
+      title,
+      organizer,
+      city,
+      type,
+      description,
+      prize,
+      deadline,
+      location,
+      contact,
+      image,
+      date,
+      teamSize,
+      registrationUrl,
+      externalUrl,
     } = req.body;
 
     if (!title || !organizer || !city || !type) {
@@ -261,6 +252,7 @@ router.post('/create', auth, async (req, res) => {
 
     const regUrl = registrationUrl || externalUrl || '';
     const extUrl = externalUrl || registrationUrl || '';
+    const userId = getUserId(req);
 
     const newEvent = new Event({
       title,
@@ -271,18 +263,20 @@ router.post('/create', auth, async (req, res) => {
       prize: prize || 'TBD',
       deadline: deadline || 'Limited spots',
       location: location || 'Online/Venue TBD',
-      contact: contact || req.user.email || 'Not provided',
-      image: image || 'https://images.unsplash.com/photo-1523240715632-d984bb4b970e?w=800',
+      contact: contact || req.user?.email || 'Not provided',
+      image:
+        image ||
+        'https://images.unsplash.com/photo-1523240715632-d984bb4b970e?w=800',
       date: date || 'TBA',
       teamSize: teamSize || '1-4 Members',
       registrationUrl: regUrl,
       externalUrl: extUrl,
-      creator: req.user.id,
-      creatorEmail: req.user.email,
-      creatorName: req.user.name,
+      creator: userId,
+      creatorEmail: req.user?.email,
+      creatorName: req.user?.name,
       source: 'manual',
       isImported: false,
-      status: 'approved'
+      status: 'approved',
     });
 
     const event = await newEvent.save();
@@ -293,222 +287,348 @@ router.post('/create', auth, async (req, res) => {
   }
 });
 
-// REGISTER FOR EVENT
+// ============================================================
+// REGISTER FOR EVENT — awwwards event_rsvp + attaches engagement
+// ============================================================
 router.post('/register', auth, async (req, res) => {
   try {
     const { eventId, studentName, whatsapp, studentId, email } = req.body;
-    
+    const userId = getUserId(req);
+
     if (!eventId || !studentName || !whatsapp) {
-      return res.status(400).json({ error: "Missing required fields" });
+      return res.status(400).json({ error: 'Missing required fields' });
     }
-    
+    if (!userId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
     const event = await Event.findById(eventId);
     if (!event) {
-      return res.status(404).json({ error: "Event not found" });
+      return res.status(404).json({ error: 'Event not found' });
     }
-    
-    const existingRegistration = await Registration.findOne({ 
-      eventId, 
-      userId: req.user.id 
+
+    const existingRegistration = await Registration.findOne({
+      eventId,
+      userId,
     });
-    
+
     if (existingRegistration) {
-      return res.status(400).json({ error: "You have already registered for this event" });
+      return res.status(400).json({
+        error: 'You have already registered for this event',
+        alreadyRegistered: true,
+      });
     }
-    
+
     const newReg = new Registration({
       eventId,
       studentName,
-      email: email || req.user.email,
+      email: email || req.user?.email,
       whatsapp,
       studentId: studentId || 'Not provided',
-      userId: req.user.id,
-      userName: req.user.name
+      userId,
+      userName: req.user?.name,
     });
     await newReg.save();
-    
-    // Create notification if creator exists
+
     if (event.creator) {
-      const notification = new EventNotification({
-        eventId: event._id,
-        eventTitle: event.title,
-        creatorId: event.creator,
-        creatorEmail: event.creatorEmail || 'system@tdc.app',
-        registrantId: req.user.id,
-        registrantName: studentName,
-        registrantEmail: email || req.user.email,
-        registrantWhatsapp: whatsapp,
-        registrantStudentId: studentId || 'Not provided',
-        message: `${studentName} registered for your event: ${event.title}`,
-        type: 'new_registration',
-        read: false
-      });
-      await notification.save();
+      try {
+        const notification = new EventNotification({
+          eventId: event._id,
+          eventTitle: event.title,
+          creatorId: event.creator,
+          creatorEmail: event.creatorEmail || 'system@tdc.app',
+          registrantId: userId,
+          registrantName: studentName,
+          registrantEmail: email || req.user?.email,
+          registrantWhatsapp: whatsapp,
+          registrantStudentId: studentId || 'Not provided',
+          message: `${studentName} registered for your event: ${event.title}`,
+          type: 'new_registration',
+          read: false,
+        });
+        await notification.save();
+      } catch (notifErr) {
+        console.warn('[events] notification create failed:', notifErr.message);
+      }
     }
-    
-    res.status(201).json({ 
-      message: "Registration successful! Organizer notified." 
+
+    // 🎯 Engagement: fire event_rsvp, attach result to response
+    let engagement = null;
+    try {
+      engagement = await track(String(userId), 'event_rsvp', {
+        meta: { eventId: event._id.toString() },
+        dedupeKey: `event_rsvp:${userId}:${event._id}`,
+      });
+    } catch (e) {
+      console.error('[engagement] event_rsvp hook failed:', e.message);
+    }
+
+    return res.status(201).json({
+      message: 'Registration successful! Organizer notified.',
+      registration: {
+        _id: newReg._id,
+        eventId: event._id,
+        studentName,
+        email: email || req.user?.email,
+        whatsapp,
+        studentId: studentId || 'Not provided',
+        createdAt: newReg.createdAt,
+      },
+      engagement: engagement || undefined,
     });
   } catch (err) {
     console.error('Registration error:', err);
-    res.status(400).json({ error: "Registration failed", details: err.message });
+    res.status(400).json({ error: 'Registration failed', details: err.message });
   }
 });
 
+// ============================================================
+// CANCEL REGISTRATION
+// ============================================================
+router.delete('/register/:eventId', auth, async (req, res) => {
+  try {
+    const { eventId } = req.params;
+    const userId = getUserId(req);
+
+    if (!userId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    const registration = await Registration.findOneAndDelete({
+      eventId,
+      userId,
+    });
+
+    if (!registration) {
+      return res.status(404).json({ error: 'Registration not found' });
+    }
+
+    try {
+      await EventNotification.deleteMany({
+        eventId,
+        registrantId: userId,
+        type: 'new_registration',
+      });
+    } catch (e) {
+      console.warn('[events] notification cleanup failed:', e.message);
+    }
+
+    res.json({ success: true, message: 'Registration cancelled' });
+  } catch (err) {
+    console.error('Cancel registration error:', err);
+    res.status(500).json({ error: 'Failed to cancel registration' });
+  }
+});
+
+// ============================================================
 // GET USER'S CREATED EVENTS
+// ============================================================
 router.get('/my-events', auth, async (req, res) => {
   try {
-    const events = await Event.find({ creator: req.user.id }).sort({ createdAt: -1 });
+    const userId = getUserId(req);
+    const events = await Event.find({ creator: userId }).sort({ createdAt: -1 });
     res.json(events);
   } catch (err) {
     console.error('Fetch user events error:', err);
-    res.status(500).json({ error: "Failed to fetch your events" });
+    res.status(500).json({ error: 'Failed to fetch your events' });
   }
 });
 
+// ============================================================
 // GET REGISTRATIONS FOR AN EVENT
+// ============================================================
 router.get('/registrations/:eventId', auth, async (req, res) => {
   try {
+    const userId = getUserId(req);
     const event = await Event.findById(req.params.eventId);
     if (!event) {
-      return res.status(404).json({ error: "Event not found" });
+      return res.status(404).json({ error: 'Event not found' });
     }
-    
-    if (event.creator && event.creator.toString() !== req.user.id && req.user.role !== 'admin') {
-      return res.status(403).json({ error: "You don't have permission to view these registrations" });
+
+    const role = req.user?.role || req.userRole;
+    if (
+      event.creator &&
+      event.creator.toString() !== userId &&
+      role !== 'admin'
+    ) {
+      return res
+        .status(403)
+        .json({ error: "You don't have permission to view these registrations" });
     }
-    
-    const registrations = await Registration.find({ eventId: req.params.eventId }).sort({ createdAt: -1 });
+
+    const registrations = await Registration.find({
+      eventId: req.params.eventId,
+    }).sort({ createdAt: -1 });
+
     res.json(registrations);
   } catch (err) {
     console.error('Fetch registrations error:', err);
-    res.status(500).json({ error: "Failed to fetch registrations" });
+    res.status(500).json({ error: 'Failed to fetch registrations' });
   }
 });
 
-// GET ALL NOTIFICATIONS FOR CREATOR
+// ============================================================
+// NOTIFICATIONS
+// ============================================================
 router.get('/notifications', auth, async (req, res) => {
   try {
-    const notifications = await EventNotification.find({ creatorId: req.user.id }).sort({ createdAt: -1 });
+    const userId = getUserId(req);
+    const notifications = await EventNotification.find({ creatorId: userId })
+      .sort({ createdAt: -1 });
     res.json(notifications);
   } catch (err) {
     console.error('Fetch notifications error:', err);
-    res.status(500).json({ error: "Failed to fetch notifications" });
+    res.status(500).json({ error: 'Failed to fetch notifications' });
   }
 });
 
-// GET UNREAD NOTIFICATIONS COUNT
 router.get('/notifications/unread/count', auth, async (req, res) => {
   try {
-    const count = await EventNotification.countDocuments({ 
-      creatorId: req.user.id,
-      read: false 
+    const userId = getUserId(req);
+    const count = await EventNotification.countDocuments({
+      creatorId: userId,
+      read: false,
     });
     res.json({ count });
   } catch (err) {
     console.error('Fetch unread count error:', err);
-    res.status(500).json({ error: "Failed to fetch unread count" });
+    res.status(500).json({ error: 'Failed to fetch unread count' });
   }
 });
 
-// MARK NOTIFICATION AS READ
 router.put('/notifications/:id/read', auth, async (req, res) => {
   try {
+    const userId = getUserId(req);
     const notification = await EventNotification.findById(req.params.id);
     if (!notification) {
-      return res.status(404).json({ error: "Notification not found" });
+      return res.status(404).json({ error: 'Notification not found' });
     }
-    if (notification.creatorId.toString() !== req.user.id) {
-      return res.status(403).json({ error: "Unauthorized" });
+    if (notification.creatorId.toString() !== userId) {
+      return res.status(403).json({ error: 'Unauthorized' });
     }
     notification.read = true;
     await notification.save();
-    res.json({ message: "Notification marked as read" });
+    res.json({ message: 'Notification marked as read' });
   } catch (err) {
     console.error('Mark notification error:', err);
-    res.status(500).json({ error: "Failed to update notification" });
+    res.status(500).json({ error: 'Failed to update notification' });
   }
 });
 
-// GET USER'S OWN REGISTRATIONS
+// ============================================================
+// MY REGISTRATIONS
+// ============================================================
 router.get('/my-registrations', auth, async (req, res) => {
   try {
-    const registrations = await Registration.find({ userId: req.user.id })
+    const userId = getUserId(req);
+    const registrations = await Registration.find({ userId })
       .populate('eventId')
       .sort({ createdAt: -1 });
     res.json(registrations);
   } catch (err) {
     console.error('Fetch user registrations error:', err);
-    res.status(500).json({ error: "Failed to fetch your registrations" });
+    res.status(500).json({ error: 'Failed to fetch your registrations' });
   }
 });
 
-// ==========================================
-// AUDIT FIXES: UPDATE & DELETE ENDPOINTS
-// ==========================================
+// Alias — returns the same data shaped as { event, registration }[]
+router.get('/my-registrations/details', auth, async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const registrations = await Registration.find({ userId })
+      .populate('eventId')
+      .sort({ createdAt: -1 });
 
+    const shaped = registrations
+      .filter((r) => r.eventId && typeof r.eventId === 'object')
+      .map((r) => ({
+        event: r.eventId,
+        registration: r,
+      }));
+
+    res.json(shaped);
+  } catch (err) {
+    console.error('Fetch user registrations details error:', err);
+    res.status(500).json({ error: 'Failed to fetch your registrations' });
+  }
+});
+
+// ============================================================
+// UPDATE & DELETE
+// ============================================================
 const updateEventController = async (req, res) => {
   try {
+    const userId = getUserId(req);
+    const role = req.user?.role || req.userRole;
     const event = await Event.findById(req.params.id);
-    if (!event) {
-      return res.status(404).json({ message: "Event not found" });
-    }
+    if (!event) return res.status(404).json({ message: 'Event not found' });
 
-    if (event.creator && event.creator.toString() !== req.user.id && req.user.role !== 'admin') {
-      return res.status(403).json({ message: "Unauthorized to update this event" });
+    if (
+      event.creator &&
+      event.creator.toString() !== userId &&
+      role !== 'admin'
+    ) {
+      return res
+        .status(403)
+        .json({ message: 'Unauthorized to update this event' });
     }
 
     const fieldsToUpdate = [
-      'title', 'organizer', 'city', 'type', 'description', 'prize', 
+      'title', 'organizer', 'city', 'type', 'description', 'prize',
       'deadline', 'location', 'contact', 'image', 'date', 'teamSize',
-      'externalUrl', 'registrationUrl', 'verified', 'featured', 'pinned'
+      'externalUrl', 'registrationUrl', 'verified', 'featured', 'pinned',
     ];
 
-    fieldsToUpdate.forEach(field => {
+    fieldsToUpdate.forEach((field) => {
       if (req.body[field] !== undefined) {
         event[field] = req.body[field];
       }
     });
 
     const updatedEvent = await event.save();
-    res.json({ message: "Event updated successfully", event: updatedEvent });
+    res.json({ message: 'Event updated successfully', event: updatedEvent });
   } catch (err) {
     console.error('Update event error:', err);
-    res.status(500).json({ message: "Failed to update event", error: err.message });
+    res.status(500).json({ message: 'Failed to update event', error: err.message });
   }
 };
 
 const deleteEventController = async (req, res) => {
   try {
+    const userId = getUserId(req);
+    const role = req.user?.role || req.userRole;
     const event = await Event.findById(req.params.id);
-    if (!event) {
-      return res.status(404).json({ message: "Event not found" });
-    }
+    if (!event) return res.status(404).json({ message: 'Event not found' });
 
-    if (event.creator && event.creator.toString() !== req.user.id && req.user.role !== 'admin') {
-      return res.status(403).json({ message: "Unauthorized to delete this event" });
+    if (
+      event.creator &&
+      event.creator.toString() !== userId &&
+      role !== 'admin'
+    ) {
+      return res
+        .status(403)
+        .json({ message: 'Unauthorized to delete this event' });
     }
 
     await Event.findByIdAndDelete(req.params.id);
     await Registration.deleteMany({ eventId: req.params.id });
     await EventNotification.deleteMany({ eventId: req.params.id });
 
-    res.json({ message: "Event and associated registrations deleted successfully" });
+    res.json({ message: 'Event and associated registrations deleted successfully' });
   } catch (err) {
     console.error('Delete event error:', err);
-    res.status(500).json({ message: "Failed to delete event", error: err.message });
+    res.status(500).json({ message: 'Failed to delete event', error: err.message });
   }
 };
 
-// PUT /api/events/:id AND /api/events/event/:id
 router.put('/:id', auth, updateEventController);
 router.put('/event/:id', auth, updateEventController);
-
-// DELETE /api/events/:id AND /api/events/event/:id
 router.delete('/:id', auth, deleteEventController);
 router.delete('/event/:id', auth, deleteEventController);
 
-// Single Event Details
+// ============================================================
+// SINGLE EVENT DETAILS
+// ============================================================
 router.get('/:id', async (req, res) => {
   try {
     const event = await Event.findById(req.params.id);
@@ -519,55 +639,47 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// ==========================================
-// ADMIN & AUTOMATION ENDPOINTS
-// ==========================================
-
-/**
- * POST /api/events/sync
- * Trigger manual sync pass for all or specified provider
- */
+// ============================================================
+// ADMIN & AUTOMATION
+// ============================================================
 router.post('/sync', auth, async (req, res) => {
   try {
     const { provider } = req.body;
     console.log(`⚡ [API] Manual sync triggered for provider: ${provider || 'All'}`);
-    
-    // Run in background or wait for completion
     const result = await eventAggregator.runAggregation(provider);
-    res.json({
-      message: "Sync triggered successfully",
-      result
-    });
+    res.json({ message: 'Sync triggered successfully', result });
   } catch (err) {
     console.error('Manual sync trigger error:', err);
-    res.status(500).json({ message: "Sync failed", error: err.message });
+    res.status(500).json({ message: 'Sync failed', error: err.message });
   }
 });
 
-/**
- * GET /api/events/admin/stats
- * Admin dashboard overview stats
- */
 router.get('/admin/stats', auth, async (req, res) => {
   try {
-    const [totalEvents, importedEvents, pending, expiredEvents, hiddenEvents, totalRegistrations, eventsPerProviderRaw] = await Promise.all([
+    const [
+      totalEvents,
+      importedEvents,
+      pending,
+      expiredEvents,
+      hiddenEvents,
+      totalRegistrations,
+      eventsPerProviderRaw,
+    ] = await Promise.all([
       Event.countDocuments({}),
       Event.countDocuments({ isImported: true }),
       Event.countDocuments({ status: 'pending' }),
       Event.countDocuments({ isExpired: true }),
-      Event.countDocuments({ $or: [{ status: 'rejected' }, { isExpired: true }] }),
+      Event.countDocuments({
+        $or: [{ status: 'rejected' }, { isExpired: true }],
+      }),
       Registration.countDocuments({}),
-      Event.aggregate([
-        { $group: { _id: '$source', count: { $sum: 1 } } }
-      ])
+      Event.aggregate([{ $group: { _id: '$source', count: { $sum: 1 } } }]),
     ]);
 
     const eventsPerProvider = {};
-    eventsPerProviderRaw.forEach(item => {
+    eventsPerProviderRaw.forEach((item) => {
       eventsPerProvider[item._id || 'manual'] = item.count;
     });
-
-    console.log(`📊 [MongoDB Event Stats]\n   Total Events: ${totalEvents}\n   Imported Events: ${importedEvents}\n   Expired Events: ${expiredEvents}\n   Hidden Events: ${hiddenEvents}\n   Events Per Provider:`, eventsPerProvider);
 
     const stats = eventAggregator.getAggregationStats();
 
@@ -582,23 +694,19 @@ router.get('/admin/stats', auth, async (req, res) => {
       hiddenEvents,
       totalRegistrations,
       eventsPerProvider,
-      aggregationEngine: stats
+      aggregationEngine: stats,
     });
   } catch (err) {
     console.error('Admin stats error:', err);
-    res.status(500).json({ message: "Failed to fetch admin stats" });
+    res.status(500).json({ message: 'Failed to fetch admin stats' });
   }
 });
 
-/**
- * PATCH /api/events/admin/moderate/:id
- * Moderate event (approve, reject, feature, pin, verify)
- */
 router.patch('/admin/moderate/:id', auth, async (req, res) => {
   try {
     const { status, verified, featured, pinned } = req.body;
     const event = await Event.findById(req.params.id);
-    if (!event) return res.status(404).json({ message: "Event not found" });
+    if (!event) return res.status(404).json({ message: 'Event not found' });
 
     if (status) event.status = status;
     if (verified !== undefined) event.verified = verified;
@@ -606,80 +714,133 @@ router.patch('/admin/moderate/:id', auth, async (req, res) => {
     if (pinned !== undefined) event.pinned = pinned;
 
     await event.save();
-    res.json({ message: "Event moderation status updated", event });
+    res.json({ message: 'Event moderation status updated', event });
   } catch (err) {
     console.error('Moderation error:', err);
-    res.status(500).json({ message: "Moderation update failed" });
+    res.status(500).json({ message: 'Moderation update failed' });
   }
 });
 
-/**
- * PATCH /api/events/expire
- * Trigger immediate expiration scan
- */
 router.patch('/expire', auth, async (req, res) => {
   try {
     const count = await eventCleanup.expirePastEvents();
-    res.json({ message: `Expiration scan completed. Flagged ${count} events.`, count });
+    res.json({
+      message: `Expiration scan completed. Flagged ${count} events.`,
+      count,
+    });
   } catch (err) {
-    res.status(500).json({ message: "Expiration pass failed" });
+    res.status(500).json({ message: 'Expiration pass failed' });
   }
 });
 
-/**
- * DELETE /api/events/expired
- * Trigger immediate purge of expired events
- */
 router.delete('/expired', auth, async (req, res) => {
   try {
     const count = await eventCleanup.purgeExpiredEvents();
     res.json({ message: `Purged ${count} expired events.`, count });
   } catch (err) {
-    res.status(500).json({ message: "Purge failed" });
+    res.status(500).json({ message: 'Purge failed' });
   }
 });
 
-/**
- * POST /api/events/admin/import-csv
- * Admin CSV/XLSX Event Importer Endpoint
- */
-router.post('/admin/import-csv', auth, isAdmin, (req, res, next) => {
-  uploadCsvMulter.single('file')(req, res, (err) => {
-    if (err) {
-      if (err.message === 'INVALID_FILE_TYPE' || err.code === 'LIMIT_UNEXPECTED_FILE') {
-        return res.status(400).json({ success: false, message: 'Invalid file type. Only .csv and .xlsx files are allowed.' });
+router.post(
+  '/admin/import-csv',
+  auth,
+  isAdmin,
+  (req, res, next) => {
+    uploadCsvMulter.single('file')(req, res, (err) => {
+      if (err) {
+        if (
+          err.message === 'INVALID_FILE_TYPE' ||
+          err.code === 'LIMIT_UNEXPECTED_FILE'
+        ) {
+          return res.status(400).json({
+            success: false,
+            message: 'Invalid file type. Only .csv and .xlsx files are allowed.',
+          });
+        }
+        return res
+          .status(400)
+          .json({ success: false, message: err.message || 'File upload failed.' });
       }
-      return res.status(400).json({ success: false, message: err.message || 'File upload failed.' });
+      next();
+    });
+  },
+  async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({
+          success: false,
+          message: 'No file uploaded. Please attach a .csv or .xlsx file.',
+        });
+      }
+
+      const fileSource = req.file.buffer || req.file.path;
+      const result = await importEventsToDatabase(
+        fileSource,
+        req.file.originalname
+      );
+
+      if (req.file.path && fs.existsSync(req.file.path)) {
+        try {
+          fs.unlinkSync(req.file.path);
+        } catch (cleanupErr) {
+          console.warn('⚠️ Temp file cleanup failed:', cleanupErr.message);
+        }
+      }
+
+      return res.status(200).json({
+        success: true,
+        added: result.added,
+        skipped: result.skipped,
+      });
+    } catch (err) {
+      console.error('❌ Error in /admin/import-csv endpoint:', err);
+      return res
+        .status(500)
+        .json({ success: false, message: err.message || 'Internal server error' });
     }
-    next();
-  });
-}, async (req, res) => {
+  }
+);
+// ============================================================
+// TRACK EXTERNAL EVENT OPEN — awards event_rsvp points
+// Used when user taps "Open Link" on an imported/CSV event.
+// No Registration row is created (there's nothing to track inside TDC).
+// The dedupeKey ensures the user can only earn points once per event.
+// ============================================================
+router.post('/track-external/:eventId', auth, async (req, res) => {
   try {
-    if (!req.file) {
-      return res.status(400).json({ success: false, message: 'No file uploaded. Please attach a .csv or .xlsx file.' });
+    const { eventId } = req.params;
+    const userId = getUserId(req);
+
+    if (!userId) {
+      return res.status(401).json({ error: 'Authentication required' });
     }
 
-    const fileSource = req.file.buffer || req.file.path;
-    const result = await importEventsToDatabase(fileSource, req.file.originalname);
-
-    // Clean up temporary disk file if diskStorage was used
-    if (req.file.path && fs.existsSync(req.file.path)) {
-      try {
-        fs.unlinkSync(req.file.path);
-      } catch (cleanupErr) {
-        console.warn('⚠️ Temp file cleanup failed:', cleanupErr.message);
-      }
+    const event = await Event.findById(eventId).select('_id title isImported source');
+    if (!event) {
+      return res.status(404).json({ error: 'Event not found' });
     }
 
-    return res.status(200).json({
+    // 🎯 Fire event_rsvp — the engagement engine dedupes by
+    //    `${userId}:${eventId}` so the user only earns points once per event.
+    let engagement = null;
+    try {
+      engagement = await track(String(userId), 'event_rsvp', {
+        meta: { eventId: event._id.toString(), viaExternal: true },
+        dedupeKey: `event_rsvp:${userId}:${event._id}`,
+      });
+    } catch (e) {
+      console.error('[engagement] external event_rsvp hook failed:', e.message);
+    }
+
+    return res.json({
       success: true,
-      added: result.added,
-      skipped: result.skipped
+      message: 'External event opened — points awarded',
+      engagement: engagement || undefined,
     });
   } catch (err) {
-    console.error('❌ Error in /admin/import-csv endpoint:', err);
-    return res.status(500).json({ success: false, message: err.message || 'Internal server error' });
+    console.error('Track external event error:', err);
+    res.status(500).json({ error: 'Failed to track external event', details: err.message });
   }
 });
-
 module.exports = router;

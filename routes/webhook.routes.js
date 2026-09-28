@@ -204,6 +204,15 @@ router.post("/confirm", async (req, res) => {
         } catch (notifError) {
             console.error('⚠️ Notification error:', notifError.message);
         }
+        try {
+  const { track } = require('../services/engagement');
+  await track(promoCodeDoc.student, 'deal_redeemed', {
+    meta: { offerId: promoCodeDoc.offer?.toString(), savedAmount },
+    dedupeKey: `deal:${promoCodeDoc.student}:${promoCodeDoc._id}:${order_id || orderIdStr}`,
+  });
+} catch (e) {
+  console.error('[engagement] webhook deal hook failed:', e.message);
+}
 
         // STEP 9: Send success response
         res.json({
@@ -387,6 +396,16 @@ router.post("/shopify/confirm", async (req, res) => {
 
   } catch (err) {
     console.error("❌ Shopify webhook error:", err);
+
+    try {
+  const { track } = require('../services/engagement');
+  await track(promoCodeDoc.student, 'deal_redeemed', {
+    meta: { offerId: promoCodeDoc.offer?.toString(), savedAmount },
+    dedupeKey: `deal:${promoCodeDoc.student}:${promoCodeDoc._id}:${order_id || orderIdStr}`,
+  });
+} catch (e) {
+  console.error('[engagement] webhook deal hook failed:', e.message);
+}
     res.status(500).json({
       success: false,
       message: err.message || "Shopify webhook processing failed"

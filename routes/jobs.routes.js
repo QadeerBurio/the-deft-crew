@@ -11,6 +11,7 @@ const { generateJobEmbedding } = require('../services/jobEmbeddingService');
 const { getHybridRecommendations, getSimilarJobs } = require('../services/recommendationService');
 const { analyseSkillGap, validateApplication } = require('../services/skillGapService');
 const { importJobsFromFile } = require("../services/jobs/csvJobImporter");
+const { track } = require('../services/engagement');
 
 // Configure Multer for Job CSV & XLSX files
 const uploadJobCsvMulter = multer({
@@ -539,7 +540,14 @@ router.post("/apply/:jobId", authMiddleware, uploadResume.single('resume'), asyn
                 status: "pending"
             }
         });
-
+try {
+  await track(req.userId, 'job_applied', {
+    meta: { jobId, applicationId: application._id.toString() },
+    dedupeKey: `job_apply:${req.userId}:${jobId}`,
+  });
+} catch (e) {
+  console.error('[engagement] job_applied hook failed:', e.message);
+}
         res.status(201).json({ 
             message: "Application submitted successfully", 
             application 
@@ -1500,7 +1508,14 @@ router.post('/bookmarks/:jobId', authMiddleware, async (req, res) => {
         } catch (interErr) {
             console.error('Error logging save interaction:', interErr.message);
         }
-
+try {
+  await track(req.userId, 'job_saved', {
+    meta: { jobId },
+    dedupeKey: `job_save:${req.userId}:${jobId}`,
+  });
+} catch (e) {
+  console.error('[engagement] job_saved hook failed:', e.message);
+}
         res.json({ success: true, message: `"${job.title}" saved to bookmarks`, jobId, tag });
     } catch (err) {
         console.error('Bookmark job error:', err);
@@ -1558,7 +1573,14 @@ router.post('/:jobId/interactions', authMiddleware, async (req, res) => {
             { userId: req.userId, jobId, interactionType, createdAt: new Date() },
             { upsert: true, new: true }
         );
-
+try {
+  await track(req.userId, 'job_applied', {
+    meta: { jobId, applicationId: application._id.toString() },
+    dedupeKey: `job_apply:${req.userId}:${jobId}`,
+  });
+} catch (e) {
+  console.error('[engagement] job_applied hook failed:', e.message);
+}
         res.json({ success: true, message: `Logged "${interactionType}" interaction for job ${jobId}` });
     } catch (err) {
         console.error('Log interaction error:', err);

@@ -161,7 +161,26 @@ city: {
       ref: "University",
     },
     instagram: { type: String },
-
+// Add these fields inside the userSchema, near the student-specific section:
+gender: {
+  type: String,
+  enum: ["Male", "Female", ""],
+  default: "",
+},
+academicLevel: {
+  type: String,
+  enum: [
+    "Metric / O-levels",
+    "Intermediate / A-levels",
+    "1st year",
+    "2nd year",
+    "3rd year",
+    "4th year",
+    "5th year",
+    "",
+  ],
+  default: "",
+},
     // --- REFERRAL SYSTEM ---
     referralCode: {
       type: String,
@@ -254,6 +273,14 @@ city: {
       targetRole: { type: String, default: "" },
       lastSyncedAt: { type: Date },
     },
+        // --- PUSH NOTIFICATIONS (multi-device) ---
+    pushTokens: [
+      {
+        token: { type: String, required: true },
+        platform: { type: String, enum: ['ios', 'android', 'web', 'unknown'], default: 'unknown' },
+        updatedAt: { type: Date, default: Date.now },
+      },
+    ],
 
     // --- LIFETIME RESUME CREATION TRACKER ---
     resumeCreationCount: {
@@ -273,6 +300,7 @@ userSchema.index({ university: 1, role: 1 });
 userSchema.index({ brandApprovalStatus: 1, role: 1 }); // For filtering brands
 userSchema.index({ accountStatus: 1 });
 userSchema.index({ blockedUsers: 1 });
+userSchema.index({ 'pushTokens.token': 1 });
 
 // --- PRE-SAVE HOOK: AUTOMATIC REFERRAL CODE GENERATION ---
 userSchema.pre("save", async function () {

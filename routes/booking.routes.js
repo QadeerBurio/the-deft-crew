@@ -3,7 +3,7 @@ const express = require('express');
 const router = express.Router();
 const Booking = require('../models/Booking');
 const authMiddleware = require('../middleware/auth.middleware');
-
+const { track } = require('../services/engagement');
 // Create new booking
 router.post('/', authMiddleware, async (req, res) => {
   try {
@@ -20,6 +20,14 @@ router.post('/', authMiddleware, async (req, res) => {
     await booking.save();
     
     console.log('Booking created successfully:', booking._id);
+    try {
+  await track(req.user._id, 'trip_booked', {
+    meta: { bookingId: booking._id.toString(), packageId: booking.packageId.toString() },
+    dedupeKey: `trip_book:${req.user._id}:${booking._id}`,
+  });
+} catch (e) {
+  console.error('[engagement] trip_booked hook failed:', e.message);
+}
     res.status(201).json(booking);
   } catch (error) {
     console.error('Booking creation error:', error);

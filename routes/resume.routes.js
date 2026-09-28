@@ -6,6 +6,7 @@ const auth = require('../middleware/auth.middleware');
 const path = require('path');
 const fs = require('fs');
 const { uploadResume, deleteFromCloudinary } = require('../config/cloudinary');
+const { track } = require('../services/engagement');
 const { parseResumePDF } = require('../services/resumeParser');
 const { triggerCareerProfileEnrichment } = require('../services/careerProfileService');
 const { invalidateCacheForResume }        = require('../services/skillGapService');
@@ -57,11 +58,57 @@ const checkResumeLimit = async (req, res, next) => {
   }
 };
 
+// ============================================================
+// Fire the cv_completed engagement event (idempotent by resume id)
+// Safe to call multiple times — the dedupeKey prevents double-award.
+// ============================================================
+async function fireCvCompleted(userId, resumeId) {
+  try {
+    const result = await track(String(userId), 'cv_completed', {
+      meta: { resumeId: String(resumeId) },
+      // Stable dedupe key — one award per (user, resume), regardless of retries
+      dedupeKey: `cv:${userId}:${resumeId}`,
+    });
+    if (result) {
+      console.log(`[engagement] cv_completed fired for resume ${resumeId}`);
+    }
+    return result;
+  } catch (e) {
+    console.error('[engagement] cv_completed failed:', e.message);
+    return null;
+  }
+}
+
+// ============================================================
+// Fire the resume_created engagement event — for the FIRST-ever resume
+// Awards +50 pts and flips the Resume card on Home.
+// Idempotent — same user + same resume = only one award ever.
+// ============================================================
+async function fireResumeCreated(userId, resumeId) {
+  try {
+    const result = await track(String(userId), 'resume_created', {
+      meta: { resumeId: String(resumeId) },
+      dedupeKey: `resume_created:${userId}:${resumeId}`,
+    });
+    if (result) {
+      console.log(`[engagement] resume_created fired for resume ${resumeId}`);
+    }
+    return result;
+  } catch (e) {
+    console.error('[engagement] resume_created failed:', e.message);
+    return null;
+  }
+}
+
 // ========== CREATE RESUME ==========
 router.post('/', auth, rejectGuest, checkResumeLimit, async (req, res) => {
   try {
     console.log('📝 Create resume request received');
     console.log('📊 User ID:', req.user._id);
+
+    // 🎯 Count BEFORE this create — needed to know if this is the first resume
+    const countBefore = await Resume.countDocuments({ user: req.user._id });
+    const isFirstResume = countBefore === 0;
 
     const cleanData = {
       user: req.user._id,
@@ -170,28 +217,46 @@ router.post('/', auth, rejectGuest, checkResumeLimit, async (req, res) => {
     // 🧠 Fire-and-forget: AI career profile enrichment (does not block response)
     setImmediate(() => triggerCareerProfileEnrichment(resume._id.toString(), req.user._id.toString()));
 
+    // 🎯 1. Fire resume_created on the FIRST-ever resume (0 → 1 transition)
+    let engagement = null;
+    if (isFirstResume) {
+      engagement = await fireResumeCreated(req.user._id, resume._id);
+    }
+
+    // 🎯 2. Also fire cv_completed if this resume happens to be complete already
+    //    (rare — mostly applies to auto-filled resumes)
+    if (resume.isComplete) {
+      const cvResult = await fireCvCompleted(req.user._id, resume._id);
+      if (!engagement && cvResult) engagement = cvResult;
+    }
+
+    // 🎯 3. Fresh count for the frontend counter
+    const creationsUsed = await Resume.countDocuments({ user: req.user._id });
+
     res.status(201).json({
       success: true,
       data: resume,
+      creationsUsed,
+      maxCreations: MAX_LIFETIME_RESUME_CREATIONS,
+      engagement: engagement || undefined,
       message: 'Resume created successfully'
     });
   } catch (error) {
     console.error('❌ Create resume error:', error);
-    res.status(500).json({ 
-      success: false, 
+    res.status(500).json({
+      success: false,
       error: error.message || 'Failed to create resume'
     });
   }
 });
 
 // ========== GET ALL RESUMES ==========
-// ========== GET ALL RESUMES ==========
 router.get('/', auth, async (req, res) => {
   try {
     const resumes = await Resume.find({ user: req.user._id })
       .sort({ updatedAt: -1 });
 
-    // ✅ Live count — always accurate, no user field needed
+    // ✅ Live count — always accurate
     const creationsUsed = resumes.length;
 
     res.json({
@@ -294,8 +359,8 @@ router.post('/suggest-skills', auth, rejectGuest, async (req, res) => {
 });
 
 // ========== UPLOAD RESUME TO CLOUDINARY ==========
-router.post('/upload', 
-  auth, 
+router.post('/upload',
+  auth,
   rejectGuest,
   checkResumeLimit,
   (req, res, next) => {
@@ -311,12 +376,12 @@ router.post('/upload',
       console.log(`[${new Date().toISOString()}] 💾 File validated and stored: ${req.file ? req.file.originalname : 'None'}`);
       next();
     });
-  }, 
+  },
   async (req, res) => {
   const startTime = Date.now();
   try {
     console.log(`[${new Date().toISOString()}] 📤 Resume upload processing started`);
-    
+
     if (!req.file) {
       console.warn(`[${new Date().toISOString()}] ⚠️ No file uploaded in request`);
       return res.status(400).json({
@@ -326,6 +391,10 @@ router.post('/upload',
     }
 
     console.log(`[${new Date().toISOString()}] 📄 File details: Name="${req.file.originalname}", Path="${req.file.path}"`);
+
+    // 🎯 Count BEFORE this upload — is this the user's first resume?
+    const countBefore = await Resume.countDocuments({ user: req.user._id });
+    const isFirstResume = countBefore === 0;
 
     // Parse the resume
     let parsedData = {};
@@ -378,8 +447,8 @@ router.post('/upload',
         portfolio: parsedData.personalInfo?.portfolio || ''
       },
       professionalSummary: {
-        title: optimizedData.targetRole || parsedData.professionalSummary?.title || 
-                (parsedData.personalInfo?.firstName ? 
+        title: optimizedData.targetRole || parsedData.professionalSummary?.title ||
+                (parsedData.personalInfo?.firstName ?
                   `${parsedData.personalInfo.firstName} ${parsedData.personalInfo.lastName || ''}`.trim() : 'Professional'),
         summary: optimizedData.optimizedSummary || parsedData.professionalSummary?.summary || '',
         experienceLevel: optimizedData.careerLevel || parsedData.professionalSummary?.experienceLevel || 'Mid Level'
@@ -506,6 +575,23 @@ router.post('/upload',
 
     console.log(`[${new Date().toISOString()}] 📊 Parsing confidence score: ${confidenceScore}%`);
 
+    // 🎯 Fire engagement events
+    let engagement = null;
+    if (isFirstResume) {
+      engagement = await fireResumeCreated(req.user._id, resume._id);
+    }
+    if (resume.isComplete) {
+      const cvResult = await fireCvCompleted(req.user._id, resume._id);
+      if (!engagement && cvResult) engagement = cvResult;
+    }
+
+    // 🎯 Fresh count for the frontend counter
+    const creationsUsed = await Resume.countDocuments({ user: req.user._id });
+
+    responseData.creationsUsed = creationsUsed;
+    responseData.maxCreations = MAX_LIFETIME_RESUME_CREATIONS;
+    responseData.engagement = engagement || undefined;
+
     const totalDuration = Date.now() - startTime;
     console.log(`[${new Date().toISOString()}] 🚀 Response sent. Total request duration: ${totalDuration}ms`);
     res.json(responseData);
@@ -525,15 +611,15 @@ router.post('/upload',
 // Helper function to determine version tag based on parsed content
 function determineVersionTag(parsedData) {
   if (!parsedData || !parsedData.skills) return 'General';
-  
+
   const skills = parsedData.skills.map(s => s.name?.toLowerCase() || '').join(' ');
-  const experience = parsedData.workExperience?.map(w => 
+  const experience = parsedData.workExperience?.map(w =>
     `${w.position || ''} ${w.description || ''}`.toLowerCase()).join(' ') || '';
-  const projects = parsedData.projects?.map(p => 
+  const projects = parsedData.projects?.map(p =>
     `${p.name || ''} ${p.description || ''}`.toLowerCase()).join(' ') || '';
-  
+
   const allContent = `${skills} ${experience} ${projects}`;
-  
+
   if (/backend|server|api|node|django|flask|spring|laravel/.test(allContent)) {
     return 'Backend';
   }
@@ -561,16 +647,16 @@ function determineVersionTag(parsedData) {
   if (/management|manager|lead|director|project/.test(allContent)) {
     return 'Management';
   }
-  
+
   return 'General';
 }
 
 // ========== GET SINGLE RESUME ==========
 router.get('/:id', auth, async (req, res) => {
   try {
-    const resume = await Resume.findOne({ 
-      _id: req.params.id, 
-      user: req.user._id 
+    const resume = await Resume.findOne({
+      _id: req.params.id,
+      user: req.user._id
     });
 
     if (!resume) {
@@ -586,9 +672,9 @@ router.get('/:id', auth, async (req, res) => {
     });
   } catch (error) {
     console.error('Get resume error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message || 'Failed to fetch resume' 
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to fetch resume'
     });
   }
 });
@@ -598,9 +684,10 @@ router.put('/:id', auth, rejectGuest, async (req, res) => {
   try {
     console.log('📝 Update resume request:', req.params.id);
 
-    const resume = await Resume.findOne({ 
-      _id: req.params.id, 
-      user: req.user._id 
+    // ✅ Fetch the resume, but FIRST capture whether it was complete before this update
+    const resume = await Resume.findOne({
+      _id: req.params.id,
+      user: req.user._id
     });
 
     if (!resume) {
@@ -610,10 +697,13 @@ router.put('/:id', auth, rejectGuest, async (req, res) => {
       });
     }
 
+    // 🎯 IMPORTANT: capture isComplete BEFORE mutating the document
+    const wasCompleteBefore = !!resume.isComplete;
+
     if (req.body.personalInfo) {
       const existingPI = resume.personalInfo ? (resume.personalInfo.toObject ? resume.personalInfo.toObject() : resume.personalInfo) : {};
       const pi = { ...existingPI, ...req.body.personalInfo };
-      
+
       // Auto-parse city and country if location string provided
       if (pi.location && typeof pi.location === 'string') {
         const parts = pi.location.split(',').map(s => s.trim());
@@ -693,6 +783,7 @@ router.put('/:id', auth, rejectGuest, async (req, res) => {
     await resume.save();
 
     console.log('✅ Resume updated successfully:', resume._id);
+    console.log(`   wasCompleteBefore=${wasCompleteBefore}, isCompleteNow=${resume.isComplete}`);
 
     // 🧠 Fire-and-forget: re-run AI enrichment + invalidate skill gap cache
     setImmediate(() => {
@@ -700,21 +791,32 @@ router.put('/:id', auth, rejectGuest, async (req, res) => {
       invalidateCacheForResume(resume._id.toString());
     });
 
+    // 🎯 FIRE cv_completed ONLY on the transition false → true
+    let engagement = null;
+    if (!wasCompleteBefore && resume.isComplete) {
+      engagement = await fireCvCompleted(req.user._id, resume._id);
+    }
+
+    // 🎯 Fresh count for the frontend counter
+    const creationsUsed = await Resume.countDocuments({ user: req.user._id });
+
     res.json({
       success: true,
       data: resume,
+      creationsUsed,
+      maxCreations: MAX_LIFETIME_RESUME_CREATIONS,
+      engagement: engagement || undefined,
       message: 'Resume updated successfully'
     });
   } catch (error) {
     console.error('❌ Update resume error:', error);
-    res.status(500).json({ 
-      success: false, 
+    res.status(500).json({
+      success: false,
       error: error.message || 'Failed to update resume'
     });
   }
 });
 
-// ========== DELETE RESUME ==========
 // ========== DELETE RESUME ==========
 router.delete('/:id', auth, rejectGuest, async (req, res) => {
   try {
@@ -767,9 +869,9 @@ router.delete('/:id', auth, rejectGuest, async (req, res) => {
 // ========== GET RECOMMENDATIONS ==========
 router.get('/:id/recommendations', auth, async (req, res) => {
   try {
-    const resume = await Resume.findOne({ 
-      _id: req.params.id, 
-      user: req.user._id 
+    const resume = await Resume.findOne({
+      _id: req.params.id,
+      user: req.user._id
     });
 
     if (!resume) {
@@ -780,16 +882,16 @@ router.get('/:id/recommendations', auth, async (req, res) => {
     }
 
     const recommendations = await Resume.getRecommendedJobs(req.params.id);
-    
+
     res.json({
       success: true,
       data: recommendations
     });
   } catch (error) {
     console.error('Get recommendations error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message || 'Failed to get recommendations' 
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to get recommendations'
     });
   }
 });
@@ -816,19 +918,29 @@ router.put('/:id/template', auth, rejectGuest, async (req, res) => {
       return res.status(404).json({ success: false, error: 'Resume not found' });
     }
 
+    // 🎯 Capture before mutation
+    const wasCompleteBefore = !!resume.isComplete;
+
     resume.template = template;
     await resume.save();
+
+    // 🎯 Only fire on transition
+    let engagement = null;
+    if (!wasCompleteBefore && resume.isComplete) {
+      engagement = await fireCvCompleted(req.user._id, resume._id);
+    }
 
     res.json({
       success: true,
       data: resume,
+      engagement: engagement || undefined,
       message: 'Template updated successfully'
     });
   } catch (error) {
     console.error('Update template error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message || 'Failed to update template' 
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to update template'
     });
   }
 });
@@ -836,9 +948,9 @@ router.put('/:id/template', auth, rejectGuest, async (req, res) => {
 // ========== GET ANALYTICS ==========
 router.get('/:id/analytics', auth, async (req, res) => {
   try {
-    const resume = await Resume.findOne({ 
-      _id: req.params.id, 
-      user: req.user._id 
+    const resume = await Resume.findOne({
+      _id: req.params.id,
+      user: req.user._id
     });
 
     if (!resume) {
@@ -854,13 +966,13 @@ router.get('/:id/analytics', auth, async (req, res) => {
       const date = new Date(now);
       date.setDate(date.getDate() - i);
       date.setHours(0, 0, 0, 0);
-      
+
       const entry = resume.viewsHistory?.find(v => {
         const entryDate = new Date(v.date);
         entryDate.setHours(0, 0, 0, 0);
         return entryDate.getTime() === date.getTime();
       });
-      
+
       viewHistory.push({
         date: date,
         views: entry?.count || 0
@@ -868,7 +980,7 @@ router.get('/:id/analytics', auth, async (req, res) => {
     }
 
     const improvements = [];
-    
+
     if (!resume.personalInfo?.firstName || !resume.personalInfo?.lastName) {
       improvements.push({
         id: 'name',
@@ -877,7 +989,7 @@ router.get('/:id/analytics', auth, async (req, res) => {
         priority: 'high'
       });
     }
-    
+
     if (!resume.personalInfo?.email) {
       improvements.push({
         id: 'email',
@@ -886,7 +998,7 @@ router.get('/:id/analytics', auth, async (req, res) => {
         priority: 'high'
       });
     }
-    
+
     if (!resume.professionalSummary?.summary) {
       improvements.push({
         id: 'summary',
@@ -895,7 +1007,7 @@ router.get('/:id/analytics', auth, async (req, res) => {
         priority: 'high'
       });
     }
-    
+
     if (!resume.workExperience || resume.workExperience.length < 1) {
       improvements.push({
         id: 'experience',
@@ -904,7 +1016,7 @@ router.get('/:id/analytics', auth, async (req, res) => {
         priority: 'medium'
       });
     }
-    
+
     if (!resume.education || resume.education.length < 1) {
       improvements.push({
         id: 'education',
@@ -913,7 +1025,7 @@ router.get('/:id/analytics', auth, async (req, res) => {
         priority: 'medium'
       });
     }
-    
+
     if (!resume.skills || resume.skills.length < 3) {
       improvements.push({
         id: 'skills',
@@ -954,9 +1066,9 @@ router.get('/:id/analytics', auth, async (req, res) => {
     });
   } catch (error) {
     console.error('Get analytics error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message || 'Failed to get analytics' 
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to get analytics'
     });
   }
 });
@@ -964,9 +1076,9 @@ router.get('/:id/analytics', auth, async (req, res) => {
 // ========== DEBUG UPLOADED RESUME DATA ==========
 router.get('/:id/debug', auth, async (req, res) => {
   try {
-    const resume = await Resume.findOne({ 
-      _id: req.params.id, 
-      user: req.user._id 
+    const resume = await Resume.findOne({
+      _id: req.params.id,
+      user: req.user._id
     });
 
     if (!resume) {
@@ -988,6 +1100,7 @@ router.get('/:id/debug', auth, async (req, res) => {
       educationCount: (resume.education || []).length,
       experienceCount: (resume.workExperience || []).length,
       completionPercentage: resume.completionPercentage,
+      isComplete: resume.isComplete,
       parsedDataExists: !!(resume.uploadedResume?.parsedData),
       parsedDataKeys: resume.uploadedResume?.parsedData ? Object.keys(resume.uploadedResume.parsedData) : [],
       rawTextLength: resume.uploadedResume?.parsedData?.rawText?.length || 0,
@@ -1001,9 +1114,9 @@ router.get('/:id/debug', auth, async (req, res) => {
     });
   } catch (error) {
     console.error('Debug resume error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message || 'Failed to get debug info' 
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to get debug info'
     });
   }
 });
@@ -1157,7 +1270,7 @@ router.post('/:id/duplicate', auth, rejectGuest, checkResumeLimit, async (req, r
     delete dupData._id;
     delete dupData.createdAt;
     delete dupData.updatedAt;
-    
+
     if (dupData.personalInfo) {
       dupData.personalInfo.firstName = `Copy of ${dupData.personalInfo.firstName || 'Resume'}`;
     }
@@ -1175,10 +1288,19 @@ router.post('/:id/duplicate', auth, rejectGuest, checkResumeLimit, async (req, r
       req.user._id.toString()
     ));
 
+    // ✅ If the original was complete, the copy is too → fire engagement
+    if (duplicate.isComplete) {
+      await fireCvCompleted(req.user._id, duplicate._id);
+    }
+
+    const creationsUsed = await Resume.countDocuments({ user: req.user._id });
+
     res.status(201).json({
       success: true,
       message: 'Resume duplicated successfully',
-      data: duplicate
+      data: duplicate,
+      creationsUsed,
+      maxCreations: MAX_LIFETIME_RESUME_CREATIONS
     });
   } catch (error) {
     console.error('Duplicate resume error:', error);
@@ -1211,6 +1333,10 @@ router.post('/:id/tailor', auth, rejectGuest, checkResumeLimit, async (req, res)
       tailoredResume._id.toString(),
       req.user._id.toString()
     ));
+
+    if (tailoredResume.isComplete) {
+      await fireCvCompleted(req.user._id, tailoredResume._id);
+    }
 
     res.status(201).json({
       success: true,
@@ -1270,9 +1396,9 @@ router.post('/:id/check-fit', auth, async (req, res) => {
       });
     }
 
-    const resume = await Resume.findOne({ 
-      _id: req.params.id, 
-      user: req.user._id 
+    const resume = await Resume.findOne({
+      _id: req.params.id,
+      user: req.user._id
     });
 
     if (!resume) {
@@ -1331,7 +1457,7 @@ router.post('/:id/optimize', auth, rejectGuest, checkResumeLimit, async (req, re
     if (template) {
       tailoredResume.template = template;
     }
-    
+
     tailoredResume.targetJob = {
       jobTitle: jobTitle,
       industry: industry || '',
@@ -1345,6 +1471,10 @@ router.post('/:id/optimize', auth, rejectGuest, checkResumeLimit, async (req, re
       tailoredResume._id.toString(),
       req.user._id.toString()
     ));
+
+    if (tailoredResume.isComplete) {
+      await fireCvCompleted(req.user._id, tailoredResume._id);
+    }
 
     res.status(201).json({
       success: true,
@@ -1398,43 +1528,43 @@ router.post('/:id/ai-optimize', auth, rejectGuest, async (req, res) => {
     resume.industry = optimizedData.industry || resume.industry;
     resume.targetRole = optimizedData.targetRole || resume.targetRole;
     resume.professionalBrand = optimizedData.professionalBrand || resume.professionalBrand;
-    
+
     resume.personalBranding = {
       ...(resume.personalBranding || {}),
       ...(optimizedData.personalBranding || {})
     };
-    
+
     resume.careerHighlights = optimizedData.careerHighlights || resume.careerHighlights || [];
     resume.coreCompetencies = optimizedData.coreCompetencies || resume.coreCompetencies || [];
     resume.atsKeywords = optimizedData.atsKeywords || resume.atsKeywords || [];
     resume.missingKeywords = optimizedData.missingKeywords || resume.missingKeywords || [];
     resume.keywordMatchPercentage = optimizedData.keywordMatchPercentage || resume.keywordMatchPercentage || 0;
-    
+
     resume.resumeScores = {
       ...(resume.resumeScores || {}),
       ...(optimizedData.resumeScores || {})
     };
-    
+
     resume.hrScorecard = {
       ...(resume.hrScorecard || {}),
       ...(optimizedData.hrScorecard || {})
     };
-    
+
     resume.hiringDecision = {
       ...(resume.hiringDecision || {}),
       ...(optimizedData.hiringDecision || {})
     };
-    
+
     resume.industryBenchmarking = {
       ...(resume.industryBenchmarking || {}),
       ...(optimizedData.industryBenchmarking || {})
     };
-    
+
     resume.prioritizedImprovementPlan = optimizedData.prioritizedImprovementPlan || resume.prioritizedImprovementPlan || [];
     resume.missingSkills = optimizedData.missingSkills || resume.missingSkills || [];
     resume.strengths = optimizedData.strengths || resume.strengths || [];
     resume.weaknesses = optimizedData.weaknesses || resume.weaknesses || [];
-    
+
     // Store AI-optimized versions
     resume.optimizedSummary = optimizedData.optimizedSummary || resume.optimizedSummary;
     resume.optimizedExperience = optimizedData.optimizedExperience || resume.optimizedExperience;
@@ -1442,9 +1572,16 @@ router.post('/:id/ai-optimize', auth, rejectGuest, async (req, res) => {
     resume.optimizedSkills = optimizedData.optimizedSkills || resume.optimizedSkills;
     resume.hrRecommendations = optimizedData.hrRecommendations || resume.hrRecommendations || [];
 
+    // 🎯 Capture before save
+    const wasCompleteBefore = !!resume.isComplete;
+
     await resume.save();
 
     console.log('✅ AI Resume Intelligence Engine: Optimization completed successfully');
+
+    if (!wasCompleteBefore && resume.isComplete) {
+      await fireCvCompleted(req.user._id, resume._id);
+    }
 
     res.json({
       success: true,
@@ -1478,9 +1615,9 @@ router.post('/:id/ai-optimize', auth, rejectGuest, async (req, res) => {
     });
   } catch (error) {
     console.error('❌ AI Resume Intelligence Engine error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message || 'Failed to optimize resume with AI' 
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to optimize resume with AI'
     });
   }
 });
@@ -1497,11 +1634,11 @@ router.get('/:id/ai-pdf', auth, async (req, res) => {
 
     // Check if resume has AI optimizations
     const hasOptimizations = !!(resume.optimizedSummary || resume.optimizedExperience || resume.optimizedSkills);
-    
+
     if (!hasOptimizations) {
       // If no AI optimizations exist, run them first
       console.log('🧠 No AI optimizations found. Running AI Intelligence Engine first...');
-      
+
       const resumeForAI = {
         personalInfo: resume.personalInfo || {},
         professionalSummary: resume.professionalSummary || {},
@@ -1525,7 +1662,7 @@ router.get('/:id/ai-pdf', auth, async (req, res) => {
       resume.optimizedSkills = optimizedData.optimizedSkills || resume.skills;
       resume.personalBranding = optimizedData.personalBranding || {};
       resume.coreCompetencies = optimizedData.coreCompetencies || [];
-      
+
       await resume.save();
       console.log('✅ AI optimizations applied and saved');
     }
@@ -1550,7 +1687,7 @@ router.get('/:id/ai-pdf', auth, async (req, res) => {
 
   } catch (error) {
     console.error('❌ AI-Enhanced PDF generation error:', error);
-    
+
     // Only send error json if headers haven't been sent yet
     if (!res.headersSent) {
       res.status(500).json({

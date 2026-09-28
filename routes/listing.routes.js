@@ -5,6 +5,7 @@ const auth = require('../middleware/auth.middleware');
 const SkillOffer = require('../models/SkillOffer');
 const upload = require('../middleware/listingUpload.middleware');
 const attachProfessionalProfiles = require('../utils/attachProfessionalProfiles');
+const { track } = require('../services/engagement');
 
 // Helper function to get user ID consistently
 const getUserId = (req) => {
@@ -61,7 +62,15 @@ router.post('/', auth, async (req, res) => {
       .lean();
 
     await attachProfessionalProfiles(populatedListing, 'ownerId');
-    
+    try {
+  await track(ownerId, 'skill_posted', {
+    meta: { listingId: listing._id.toString() },
+    dedupeKey: `skill_post:${ownerId}:${listing._id}`,
+  });
+} catch (e) {
+  console.error('[engagement] skill_posted hook failed:', e.message);
+}
+
     res.status(201).json(populatedListing);
   } catch (err) {
     if (err.name === 'ValidationError') {

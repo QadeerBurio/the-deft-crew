@@ -16,7 +16,7 @@ const mongoose = require("mongoose");
 const Package = require("../models/Package");
 const fs = require("fs");
 const router = express.Router();
-
+const EngagementEvent = require("../models/EngagementEvent");
 // ==========================================
 // OTP STORE & EMAIL TRANSPORTER
 // ==========================================
@@ -81,6 +81,9 @@ const authMiddleware = (req, res, next) => {
 // ==========================================
 // SIGNUP ROUTE - FIXED
 // ==========================================
+// ==========================================
+// SIGNUP ROUTE - FIXED
+// ==========================================
 router.post("/signup", async (req, res) => {
   try {
     const {
@@ -96,7 +99,9 @@ router.post("/signup", async (req, res) => {
       address,
       instagram,
       referralCodeInput,
-      city,  
+      city,
+      gender,            // ← ADD
+  academicLevel,     // ← ADD
     } = req.body;
 
     // 1. Validate required fields
@@ -116,7 +121,7 @@ router.post("/signup", async (req, res) => {
     let universityId = null;
     let name = "";
 
-    // 4. Role Logic
+    // 4. Role logic
     if (role === "student") {
       if (!fullName || !universityName) {
         return res.status(400).json({ error: "Name and university required" });
@@ -144,7 +149,7 @@ router.post("/signup", async (req, res) => {
       name = fullName || "Admin";
     }
 
-    // 5. Handle Referrer lookup (One time only)
+    // 5. Handle Referrer lookup
     let referrer = null;
     if (referralCodeInput) {
       referrer = await User.findOne({
@@ -165,11 +170,12 @@ router.post("/signup", async (req, res) => {
       address,
       instagram,
       status: role === "admin" ? "Verified" : "Not Verified",
-       city: city?.trim() || "Karachi",   // ✅ ADD THIS — auto-default
+      city: city?.trim() || "Karachi",
       referredBy: referrer ? referrer._id : null,
+       gender: gender || "",                 // ← ADD
+  academicLevel: academicLevel || "",   // ← ADD
     };
 
-    // Add role-specific fields
     if (role === "brand") {
       userData.brandName = brandName;
       userData.companyName = brandName;
@@ -179,24 +185,175 @@ router.post("/signup", async (req, res) => {
 
     const user = await User.create(userData);
 
-    // 7. Update referral count
-    if (referrer) {
-      const updatedReferrer = await User.findByIdAndUpdate(
-        referrer._id,
-        { $inc: { referralCount: 1 } },
-        { new: true }
-      );
-
-      if (
-        updatedReferrer.referralCount >= 10 &&
-        !updatedReferrer.canApplyForTdcCard
-      ) {
-        updatedReferrer.canApplyForTdcCard = true;
-        await updatedReferrer.save();
-      }
+    // 🎯 Ensure the new user has an engagement profile from day one
+    try {
+      const { ensureProfile } = require("../services/engagement");
+      await ensureProfile(user._id);
+    } catch (e) {
+      console.error("[engagement] ensureProfile on signup failed:", e.message);
     }
 
-    // 8. Notification for student
+    // ═════════════════════════════════════════════════════════════
+    // 7. REFERRAL PIPELINE — only when there's a referrer
+    // ═════════════════════════════════════════════════════════════
+    // ═════════════════════════════════════════════════════════════
+// 7. REFERRAL PIPELINE — only when there's a referrer
+// ═════════════════════════════════════════════════════════════
+if (referrer) {
+  // 7a. Increment RAW signup count
+  const updatedReferrer = await User.findByIdAndUpdate(
+    referrer._id,
+    { $inc: { referralCount: 1 } },
+    { new: true }
+  );
+
+  // 7b. Auto-unlock TDC card at 10 raw signups
+  if (
+    updatedReferrer.referralCount >= 10 &&
+    !updatedReferrer.canApplyForTdcCard
+  ) {
+    updatedReferrer.canApplyForTdcCard = true;
+    await updatedReferrer.save();
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // 7c. AWARD +50 (signup bonus) + +100 (immediate verification)
+  //     BOTH on signup — total +150 to referrer
+  //     AND +100 welcome to referee (new user)
+  // ═══════════════════════════════════════════════════════════
+  try {
+    const points = require("../services/engagement/points");
+
+    // ── +50 to REFERRER (invite bonus) ──
+    const signupKey = `referral_signup_bonus:${user._id}`;
+    try {
+      await EngagementEvent.create({
+        user: referrer._id,
+        name: 'referral_signup_bonus',
+        feature: null,
+        dayKey: new Date().toISOString().split('T')[0],
+        meta: { refereeId: String(user._id) },
+        source: 'system',
+        dedupeKey: signupKey,
+      });
+    } catch (e) {
+      // ignore duplicate event
+    }
+
+    const signupAward = await points.award(
+      String(referrer._id),
+      50,
+      'referral:signup_bonus',
+      {
+        actorRole: 'referral',
+        refType: 'referral',
+        refId: String(user._id),
+        idemKey: signupKey,
+      }
+    );
+    console.log('[signup] referrer +50:', signupAward);
+
+    // ── +100 to REFERRER (verified referral, immediate) ──
+    const verifiedKey = `referral:verified:referrer:${referrer._id}:${user._id}`;
+    const verifiedAward = await points.award(
+      String(referrer._id),
+      100,
+      'referral:verified',
+      {
+        actorRole: 'referral',
+        refType: 'referral',
+        refId: String(user._id),
+        idemKey: verifiedKey,
+      }
+    );
+    console.log('[signup] referrer +100:', verifiedAward);
+
+    // ── +100 to REFEREE (welcome bonus for new user) ──
+    const welcomeKey = `referral:welcome:${user._id}`;
+    const welcomeAward = await points.award(
+      String(user._id),
+      100,
+      'referral:welcome',
+      {
+        actorRole: 'referral',
+        refType: 'referral',
+        refId: String(referrer._id),
+        idemKey: welcomeKey,
+      }
+    );
+    console.log('[signup] referee +100:', welcomeAward);
+
+    // ── Update verifiedReferralCount on referrer's profile ──
+    try {
+      const EngagementProfile = require("../models/EngagementProfile");
+      const User2 = require("../models/User");
+      const referees = await User2.find({ referredBy: referrer._id })
+        .select('_id')
+        .lean();
+      const refereeIds = referees.map((r) => r._id);
+
+      // For immediate-credit model, all referees count as verified
+      const verifiedCount = refereeIds.length;
+
+      await EngagementProfile.findOneAndUpdate(
+        { user: referrer._id },
+        { $set: { verifiedReferralCount: verifiedCount } },
+        { upsert: true }
+      );
+    } catch (e) {
+      console.error('[signup] verifiedReferralCount sync failed:', e.message);
+    }
+
+    // ── Popup for referrer ──
+    try {
+      const popups = require("../services/engagement/popups");
+      await popups.enqueue(String(referrer._id), {
+        kind: 'referral_credited',
+        mood: 'hype',
+        line: `${user.name || 'someone'} just joined with your code! +150 pts.`,
+        cta: { label: 'view crew', route: 'Points', params: {} },
+        payload: { refereeId: String(user._id), amount: 150 },
+        priority: 30,
+      });
+    } catch (e) {
+      console.error('[signup] popup enqueue failed:', e.message);
+    }
+
+    // ── Re-evaluate referrer level + badges ──
+    try {
+      const { evaluateLevelsNow, evaluateBadgesNow } = require("../services/engagement/engine");
+      await evaluateLevelsNow(String(referrer._id));
+      setImmediate(() => evaluateBadgesNow(String(referrer._id)).catch(() => {}));
+    } catch (e) {
+      console.error('[signup] eval failed:', e.message);
+    }
+  } catch (e) {
+    console.error("[signup] referral awards FAILED:", e.message);
+    console.error(e.stack);
+  }
+
+  // 7d. Live badge eval — AFTER canApplyForTdcCard is updated
+  try {
+    const { evaluateBadgesNow } = require("../services/engagement/engine");
+    const result = await evaluateBadgesNow(referrer._id);
+    if (result?.granted?.length) {
+      console.log(
+        `[signup] granted badges to referrer ${referrer._id}:`,
+        result.granted
+      );
+    }
+  } catch (e) {
+    console.error("[signup] referrer badge eval failed:", e.message);
+  }
+}
+// ═════════════════════════════════════════════════════════════
+// END referral pipeline
+// ═════════════════════════════════════════════════════════════
+    // ═════════════════════════════════════════════════════════════
+    // END referral pipeline
+    // ═════════════════════════════════════════════════════════════
+
+    // 8. Welcome notification for new student (OUTSIDE the if-referrer block)
     if (role === "student") {
       try {
         await Notification.create({
@@ -221,15 +378,14 @@ router.post("/signup", async (req, res) => {
       }
     }
 
-    // Return success response without password
+    // 9. Return success response without password
     const userResponse = user.toObject();
     delete userResponse.password;
 
-    res.status(201).json({ 
-      message: "Signup successful", 
-      user: userResponse
+    res.status(201).json({
+      message: "Signup successful",
+      user: userResponse,
     });
-
   } catch (err) {
     console.error("Signup Error:", err);
     res.status(500).json({ error: err.message });
@@ -629,10 +785,68 @@ router.post("/exchange/apply", authMiddleware, async (req, res) => {
       type: "System",
       icon: "clipboard-check",
     });
-
+try {
+  const { track } = require('../services/engagement');
+  await track(req.userId, 'scholarship_applied', {
+    meta: { programId, applicationId: newApp._id.toString() },
+    dedupeKey: `scholarship_apply:${req.userId}:${programId}`,
+  });
+} catch (e) {
+  console.error('[engagement] scholarship_applied hook failed:', e.message);
+}
     res.status(201).json({ success: true, message: "Application Submitted" });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ==========================================
+// SCHOLARSHIP — TRACK EXTERNAL APPLY (awards scholarship_applied points)
+// Called when user taps "Apply Now" on a program and opens the university website.
+// Idempotent: same user + same program = only one award ever.
+// ==========================================
+router.post("/exchange/track-external", authMiddleware, async (req, res) => {
+  try {
+    const { programId } = req.body;
+    const userId = req.userId;
+
+    if (!userId) {
+      return res.status(401).json({ error: "Authentication required" });
+    }
+    if (!programId) {
+      return res.status(400).json({ error: "programId is required" });
+    }
+
+    // Validate ObjectId format
+    if (!mongoose.Types.ObjectId.isValid(programId)) {
+      return res.status(400).json({ error: "Invalid programId" });
+    }
+
+    // 🎯 Fire scholarship_applied with a stable dedupe key.
+    //    Same dedupeKey as /exchange/apply so a user can't double-earn
+    //    by both internally applying AND opening the external link.
+    let engagement = null;
+    try {
+      const { track } = require("../services/engagement");
+      engagement = await track(String(userId), "scholarship_applied", {
+        meta: { programId: String(programId), viaExternal: true },
+        dedupeKey: `scholarship_apply:${userId}:${programId}`,
+      });
+    } catch (e) {
+      console.error("[engagement] external scholarship_applied failed:", e.message);
+    }
+
+    return res.json({
+      success: true,
+      message: "Scholarship link opened — points awarded",
+      engagement: engagement || undefined,
+    });
+  } catch (err) {
+    console.error("Track external scholarship error:", err);
+    res.status(500).json({
+      error: "Failed to track external scholarship",
+      details: err.message,
+    });
   }
 });
 

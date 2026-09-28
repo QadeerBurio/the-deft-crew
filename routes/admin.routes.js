@@ -1231,7 +1231,35 @@ router.patch("/verify-user/:targetUserId", auth, isAdmin, async (req, res) => {
   }
 });
 
+// ═══════════════════════════════════════════════════════════
+// ADMIN — BROADCAST APP UPDATE
+// ═══════════════════════════════════════════════════════════
+router.post('/broadcast/app-update', auth, isAdmin, async (req, res) => {
+  try {
+    const { title, body, version, forceUpdate = false } = req.body;
 
+    const pushGateway = require('../services/engagement/pushGateway');
+
+    const result = await pushGateway.broadcastToAll({
+      copyKey: 'app_update',
+      title: title || 'tdc just got better',
+      body: body || 'new features live. update now.',
+      mood: 'sorted',
+      data: {
+        route: 'Home',
+        params: { version, forceUpdate },
+        screen: 'AppUpdate',
+        version,
+      },
+    });
+
+    console.log('[broadcast] app-update:', result);
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error('[broadcast/app-update]', err);
+    res.status(500).json({ message: err.message });
+  }
+});
 
 
 module.exports = router;

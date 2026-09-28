@@ -38,6 +38,12 @@ try {
 
 const CACHE_TTL = 120;
 
+// ============================================================
+// ✅ PENDING SCANS — declared at TOP so every route can access them
+// ============================================================
+const pendingScans = [];
+const processedScans = new Set();
+
 async function clearBrandCaches(brandId) {
   await cache.del(`offers:brand:${brandId}`);
   await cache.del('offers:summary');
@@ -73,7 +79,16 @@ router.post("/", auth, uploadOffer.single("image"), async (req, res) => {
     const offer = await Offer.create(offerData);
 
     await clearBrandCaches(req.userId);
-
+// ✅ Broadcast new offer to students (fire-and-forget)
+setImmediate(async () => {
+  try {
+    const pushGateway = require('../services/engagement/pushGateway');
+    const result = await pushGateway.broadcastNewOffer(offer);
+    console.log('[offer] broadcast:', result);
+  } catch (e) {
+    console.error('[offer] broadcast failed:', e.message);
+  }
+});
     res.json({
       message: "Offer created successfully. Old offers removed.",
       offer,
@@ -139,8 +154,6 @@ router.get("/my-offers", auth, async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 });
-
-// routes/offer.routes.js - Add this CLAIM endpoint fix
 
 // CLAIM: Add offer to "My Discounts" - FIXED
 router.post("/claim/:offerId", auth, async (req, res) => {
@@ -239,83 +252,102 @@ router.post("/unclaim/:offerId", auth, async (req, res) => {
 });
 
 // REDEEM: Finalize payment and remove from active claims
-router.post("/redeem-payment", auth, async (req, res) => {
+router.post('/redeem-payment', auth, async (req, res) => {
   try {
-    const { offerId, userId, billAmount, savedAmount } = req.body;
-    
+    // B7: only brand / employee / admin can call this
+    const requester = await User.findById(req.userId).select('role').lean();
+    if (!requester || !['brand', 'employee', 'admin'].includes(requester.role)) {
+      return res.status(403).json({ message: 'Only the scanner side can redeem' });
+    }
+
+    const { offerId, userId, billAmount } = req.body;
     if (!offerId || !userId || !billAmount) {
-      return res.status(400).json({ message: "Missing required fields" });
+      return res.status(400).json({ message: 'Missing required fields' });
     }
 
     const offer = await Offer.findById(offerId);
-    if (!offer) return res.status(404).json({ message: "Offer not found" });
+    if (!offer) return res.status(404).json({ message: 'Offer not found' });
 
-    // Check if user already redeemed this offer today
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    
-    const todayRedemptions = offer.redemptions.filter(r => {
-      const redeemDate = new Date(r.redeemedAt);
-      redeemDate.setHours(0, 0, 0, 0);
-      return r.student.toString() === userId && redeemDate.getTime() === today.getTime();
+    // Server computes the saved amount (B7)
+    const discount = Number(offer.discountPercentage) || 0;
+    const bill = Number(billAmount);
+    const computedSaved = Math.round((bill * discount) / 100);
+
+    // Daily cap (Karachi day)
+    const { dayKey } = require('../utils/karachiTime');
+    const today = dayKey();
+
+    const todayRedemptions = offer.redemptions.filter((r) => {
+      const k = dayKey(new Date(r.redeemedAt));
+      return r.student.toString() === userId && k === today;
     });
 
-    // Max 2 redemptions per day per user
     if (todayRedemptions.length >= 2) {
-      return res.status(400).json({ 
-        message: "You have already used this discount 2 times today. Please try again tomorrow." 
+      return res.status(400).json({
+        message: 'You have already used this discount 2 times today. Please try again tomorrow.',
       });
     }
 
     offer.redemptions.push({
       student: userId,
-      billAmount: Number(billAmount),
-      savedAmount: Number(savedAmount),
+      billAmount: bill,
+      savedAmount: computedSaved,
       redeemedAt: new Date(),
     });
 
-    // Only remove from claimedBy if this is the second redemption
-    const totalRedemptions = offer.redemptions.filter(r => r.student.toString() === userId);
-    
-    // If user has used 2 redemptions, remove from claimedBy
+    const totalRedemptions = offer.redemptions.filter(
+      (r) => r.student.toString() === userId
+    );
     if (totalRedemptions.length >= 2) {
       offer.claimedBy = offer.claimedBy.filter(
-        id => id.toString() !== userId.toString()
+        (id) => id.toString() !== userId.toString()
       );
     }
-    
     await offer.save();
 
-    // Mark scan as processed
+    // Mark pending scan as processed
     try {
-      const pendingScanIndex = pendingScans.findIndex(
-        scan => scan.studentId === userId && scan.status === 'pending'
+      const idx = pendingScans.findIndex(
+        (scan) => scan.studentId === userId && scan.status === 'pending'
       );
-      if (pendingScanIndex !== -1) {
-        pendingScans[pendingScanIndex].status = 'processed';
+      if (idx !== -1) {
+        pendingScans[idx].status = 'processed';
         processedScans.add(userId);
       }
     } catch (err) {
-      console.error("Error marking scan as processed:", err);
+      console.error('Error marking scan as processed:', err);
     }
 
-    res.json({ 
-      message: "Redemption successful! Voucher used.", 
-      offer,
-      redemptionsUsed: totalRedemptions.length,
-      redemptionsRemaining: 2 - totalRedemptions.length
-    });
+    // 🎯 Engagement hook — fires ONCE per (student, offer) using a stable dedupe key
+    try {
+      const { track } = require('../services/engagement');
+      await track(userId.toString(), 'deal_redeemed', {
+        meta: { offerId: offer._id.toString(), savedAmount: computedSaved },
+        dedupeKey: `deal:${userId}:${offer._id}`,
+      });
+    } catch (e) {
+      console.error('[engagement] deal_redeemed hook failed:', e.message);
+    }
 
+    // Notification (copy follows brand rules — lowercase, full stop, no emoji)
     await Notification.create({
       recipient: userId,
-      title: "Payment Successful! 🎉",
-      description: `Congratulations! You just saved Rs. ${savedAmount} at ${offer.title}. ${totalRedemptions.length >= 2 ? 'You have used both redemptions for today.' : `You have ${2 - totalRedemptions.length} redemption${2 - totalRedemptions.length > 1 ? 's' : ''} remaining for today.`}`,
-      type: "System",
-      icon: "checkmark-circle",
+      title: 'payment successful.',
+      description: `you saved rs ${computedSaved} at ${offer.title}.`,
+      type: 'System',
+      icon: 'checkmark-circle',
+    }).catch(() => {});
+
+    return res.json({
+      message: 'Redemption successful! Voucher used.',
+      offer,
+      redemptionsUsed: totalRedemptions.length,
+      redemptionsRemaining: 2 - totalRedemptions.length,
+      savedAmount: computedSaved,
     });
   } catch (err) {
-    console.error("Error in redeem-payment:", err);
-    res.status(500).json({ message: err.message });
+    console.error('Error in redeem-payment:', err);
+    return res.status(500).json({ message: err.message });
   }
 });
 
@@ -384,39 +416,6 @@ router.get("/summary", auth, async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 });
-
-// // GET: Student's active vouchers with redemption info
-// router.get("/claimed", auth, async (req, res) => {
-//   try {
-//     const claimedOffers = await Offer.find({ claimedBy: req.userId })
-//       .populate("brand", "name logo websiteUrl")
-//       .lean()
-//       .exec();
-    
-//     // Add redemption info to each offer
-//     const offersWithInfo = claimedOffers.map(offer => {
-//       const today = new Date();
-//       today.setHours(0, 0, 0, 0);
-      
-//       const todayRedemptions = offer.redemptions.filter(r => {
-//         const redeemDate = new Date(r.redeemedAt);
-//         redeemDate.setHours(0, 0, 0, 0);
-//         return r.student.toString() === req.userId && redeemDate.getTime() === today.getTime();
-//       });
-      
-//       return {
-//         ...offer,
-//         redemptionsToday: todayRedemptions.length,
-//         maxRedemptionsPerDay: 2,
-//         canRedeem: todayRedemptions.length < 2
-//       };
-//     });
-    
-//     res.json(offersWithInfo);
-//   } catch (err) {
-//     res.status(500).json({ message: err.message });
-//   }
-// });
 
 // STATS: Total student savings
 router.get("/my-total-savings", auth, async (req, res) => {
@@ -495,7 +494,6 @@ router.get("/claimed-users", auth, async (req, res) => {
   }
 });
 
-// REPORT: Brand's total savings/sales report
 // REPORT: Brand's total savings/sales report - ENHANCED to include promo codes
 router.get("/savings-report", auth, async (req, res) => {
   try {
@@ -526,7 +524,7 @@ router.get("/savings-report", auth, async (req, res) => {
           saved: r.savedAmount || 0,
           paid: (r.billAmount || 0) - (r.savedAmount || 0),
           date: r.redeemedAt,
-          redemptionType: "qr", // In-store redemption
+          redemptionType: "qr",
           platform: "in-store",
           promoCode: r.promoCode || null,
           offerId: offer._id,
@@ -572,8 +570,8 @@ router.get("/savings-report", auth, async (req, res) => {
         saved: saved,
         paid: paid,
         date: pc.usedAt || pc.updatedAt,
-        redemptionType: "promo", // Online redemption
-        platform: brandPlatform, // "shopify" | "woocommerce" | "custom"
+        redemptionType: "promo",
+        platform: brandPlatform,
         promoCode: pc.code,
         offerId: pc.offer?._id,
         offerImage: pc.offer?.image,
@@ -587,7 +585,7 @@ router.get("/savings-report", auth, async (req, res) => {
       (a, b) => new Date(b.date) - new Date(a.date)
     );
 
-    // 4. Remove duplicates (in case a promo redemption also wrote to offer.redemptions)
+    // 4. Remove duplicates
     const seen = new Set();
     const deduped = combined.filter(item => {
       const key = `${item.name}-${item.date}-${item.saved}-${item.promoCode || 'qr'}`;
@@ -626,13 +624,11 @@ router.get("/:offerId/image", auth, async (req, res) => {
   }
 });
 
-// GET: Fetch offer images with filters - FIXED VERSION
 // GET: Fetch offer images with filters - SHOW ONLY APPROVED BRANDS' OFFERS
 router.get("/images/all", auth, async (req, res) => {
   try {
     const { brandId, category, limit = 100 } = req.query;
     
-    // Build filter - only get offers with images
     const filter = { 
       image: { $ne: null, $ne: '' }
     };
@@ -647,7 +643,6 @@ router.get("/images/all", auth, async (req, res) => {
       return res.json(JSON.parse(cached));
     }
 
-    // Get all offers with images
     const offers = await Offer.find(filter)
       .select('_id title image brand discountPercentage category isOnline isInStore')
       .populate({
@@ -655,44 +650,20 @@ router.get("/images/all", auth, async (req, res) => {
         select: 'name logo brandApprovalStatus role',
         match: { 
           role: 'brand',
-          brandApprovalStatus: 'approved' // ONLY approved brands
+          brandApprovalStatus: 'approved'
         }
       })
       .lean()
       .exec();
 
-    // Filter out offers where brand doesn't exist or is not approved
     const validOffers = offers.filter(offer => {
-      // Check if brand exists and has an _id
-      if (!offer.brand || !offer.brand._id) {
-        console.log(`Offer ${offer._id} filtered: No brand found`);
-        return false;
-      }
-      
-      // Check if brand is approved
-      if (offer.brand.brandApprovalStatus !== 'approved') {
-        console.log(`Offer ${offer._id} filtered: Brand ${offer.brand.name} status: ${offer.brand.brandApprovalStatus}`);
-        return false;
-      }
-      
-      // Check if image exists and is valid
-      if (!offer.image || offer.image === null || offer.image === '') {
-        console.log(`Offer ${offer._id} filtered: No image`);
-        return false;
-      }
-      
-      // Check if image is not a placeholder
+      if (!offer.brand || !offer.brand._id) return false;
+      if (offer.brand.brandApprovalStatus !== 'approved') return false;
+      if (!offer.image || offer.image === null || offer.image === '') return false;
       if (offer.image.includes('via.placeholder.com') || 
-          offer.image.includes('placeholder')) {
-        console.log(`Offer ${offer._id} filtered: Placeholder image`);
-        return false;
-      }
-      
+          offer.image.includes('placeholder')) return false;
       return true;
     });
-
-    console.log(`Total offers found: ${offers.length}`);
-    console.log(`Valid offers from approved brands: ${validOffers.length}`);
 
     const response = {
       count: validOffers.length,
@@ -733,10 +704,6 @@ router.get("/images/all", auth, async (req, res) => {
 
 // ============= QR SCAN ROUTES =============
 
-// Track pending student scans
-const pendingScans = [];
-const processedScans = new Set();
-
 // POST - Student scans QR and sends data
 router.post("/scan-verify", auth, async (req, res) => {
   try {
@@ -749,7 +716,6 @@ router.post("/scan-verify", auth, async (req, res) => {
       });
     }
     
-    // Check if student has already used 2 redemptions today
     const offer = await Offer.findById(offerId);
     if (!offer) {
       return res.status(404).json({ 
@@ -776,7 +742,6 @@ router.post("/scan-verify", auth, async (req, res) => {
       });
     }
     
-    // Check for existing pending scan
     const existingScan = pendingScans.find(
       scan => scan.studentId === studentId.toString() && 
               scan.brandId === (brandId ? brandId.toString() : '') && 
@@ -824,6 +789,8 @@ router.post("/scan-verify", auth, async (req, res) => {
     while (pendingScans.length > 50) {
       pendingScans.shift();
     }
+    
+    // 🚫 No engagement hook here — /redeem-payment is the only place that awards points
     
     res.json({ 
       success: true, 
@@ -973,7 +940,6 @@ router.get("/brandss", async (req, res) => {
       .lean()
       .exec();
 
-    // Get offers for each brand
     const brandsWithOffers = await Promise.all(
       brands.map(async (brand) => {
         const offers = await Offer.find({ brand: brand._id })
@@ -1004,22 +970,12 @@ router.get("/brandss", async (req, res) => {
 });
 
 
-
-
-// routes/offer.routes.js - Add these new routes to existing file
-
 // ==================== GENERATE PROMO CODE FROM OFFER ====================
-// POST /api/offers/generate-promo/:offerId
-// This is a convenience route that calls the promo code generation
 router.post("/generate-promo/:offerId", auth, async (req, res) => {
   try {
     const { offerId } = req.params;
     const studentId = req.userId;
     
-    // Forward to promo code generation
-    const promoCodeGen = require('./promoCode.routes');
-    
-    // Find offer first
     const offer = await Offer.findById(offerId)
       .populate('brand', 'name')
       .lean();
@@ -1031,7 +987,6 @@ router.post("/generate-promo/:offerId", auth, async (req, res) => {
       });
     }
     
-    // Check if student has claimed this offer
     if (!offer.claimedBy.includes(studentId)) {
       return res.status(403).json({ 
         success: false, 
@@ -1039,7 +994,6 @@ router.post("/generate-promo/:offerId", auth, async (req, res) => {
       });
     }
     
-    // Check if offer is online
     if (!offer.isOnline) {
       return res.status(400).json({ 
         success: false, 
@@ -1047,7 +1001,6 @@ router.post("/generate-promo/:offerId", auth, async (req, res) => {
       });
     }
     
-    // Check if student already has an active promo code
     const PromoCode = require("../models/PromoCode");
     const existingActive = await PromoCode.findOne({
       offer: offerId,
@@ -1063,7 +1016,6 @@ router.post("/generate-promo/:offerId", auth, async (req, res) => {
       });
     }
     
-    // Check daily limit
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     
@@ -1082,12 +1034,10 @@ router.post("/generate-promo/:offerId", auth, async (req, res) => {
       });
     }
     
-    // Generate promo code
     const brandPrefix = offer.brand?.name?.substring(0, 3).toUpperCase() || 'TDC';
     const random = Math.random().toString(36).substring(2, 8).toUpperCase();
     const promoCode = `${brandPrefix}${random}`;
     
-    // Create promo code
     const newPromoCode = await PromoCode.create({
       code: promoCode,
       offer: offerId,
@@ -1100,12 +1050,10 @@ router.post("/generate-promo/:offerId", auth, async (req, res) => {
       maxUses: 1
     });
     
-    // Add to offer's promo codes
     await Offer.findByIdAndUpdate(offerId, {
       $push: { promoCodesGenerated: newPromoCode._id }
     });
     
-    // Create notification
     await Notification.create({
       recipient: studentId,
       title: "🎉 Promo Code Generated!",
@@ -1137,7 +1085,6 @@ router.post("/generate-promo/:offerId", auth, async (req, res) => {
 });
 
 // ==================== GET OFFER WITH PROMO CODE INFO ====================
-// GET /api/offers/:offerId/promo-info
 router.get("/:offerId/promo-info", auth, async (req, res) => {
   try {
     const { offerId } = req.params;
@@ -1156,17 +1103,14 @@ router.get("/:offerId/promo-info", auth, async (req, res) => {
       });
     }
     
-    // Check if user has claimed this offer
     const hasClaimed = offer.claimedBy.includes(userId);
     
-    // Check if user has an active promo code
     const activePromo = await PromoCode.findOne({
       offer: offerId,
       student: userId,
       status: 'active'
     }).lean();
     
-    // Get today's redemptions for this user
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     
@@ -1176,7 +1120,6 @@ router.get("/:offerId/promo-info", auth, async (req, res) => {
       return r.student.toString() === userId && redeemDate.getTime() === today.getTime();
     });
     
-    // Get total redemptions for this user
     const totalRedemptions = offer.redemptions.filter(r => 
       r.student.toString() === userId
     );
@@ -1219,17 +1162,12 @@ router.get("/:offerId/promo-info", auth, async (req, res) => {
   }
 });
 
-
-
-// routes/offer.routes.js - ADD THIS ROUTE
-
 // GET: Full redemption list for a specific brand (admin view)
 router.get("/brand/:brandId/redemptions", auth, async (req, res) => {
   try {
     const PromoCode = require("../models/PromoCode");
     const { brandId } = req.params;
 
-    // Verify requester is admin OR the brand itself
     const requester = await User.findById(req.userId).lean().select('role');
     if (!requester) {
       return res.status(403).json({ message: "Unauthorized" });
@@ -1241,7 +1179,6 @@ router.get("/brand/:brandId/redemptions", auth, async (req, res) => {
       return res.status(403).json({ message: "You can only view your own redemptions" });
     }
 
-    // 1. QR / in-store redemptions
     const offers = await Offer.find({ brand: brandId })
       .populate({
         path: "redemptions.student",
@@ -1274,7 +1211,6 @@ router.get("/brand/:brandId/redemptions", auth, async (req, res) => {
       return acc;
     }, []);
 
-    // 2. Online promo code redemptions
     const usedPromoCodes = await PromoCode.find({
       brand: brandId,
       status: 'used'
@@ -1315,7 +1251,6 @@ router.get("/brand/:brandId/redemptions", auth, async (req, res) => {
       };
     });
 
-    // 3. Combine + dedupe + sort
     const combined = [...qrRedemptions, ...promoRedemptions].sort(
       (a, b) => new Date(b.date) - new Date(a.date)
     );
@@ -1328,7 +1263,6 @@ router.get("/brand/:brandId/redemptions", auth, async (req, res) => {
       return true;
     });
 
-    // Stats
     const totalRevenue = deduped.reduce((sum, r) => sum + (r.paid || 0), 0);
     const totalBill = deduped.reduce((sum, r) => sum + (r.bill || 0), 0);
     const totalSaved = deduped.reduce((sum, r) => sum + (r.saved || 0), 0);
@@ -1355,29 +1289,22 @@ router.get("/brand/:brandId/redemptions", auth, async (req, res) => {
   }
 });
 
-
-
-
 // ============================================================
 // GET: All Brands Revenue Summary (Admin view)
-// GET /api/offers/admin/brands-revenue
 // ============================================================
 router.get("/admin/brands-revenue", auth, async (req, res) => {
   try {
     const PromoCode = require("../models/PromoCode");
 
-    // Check admin
     const admin = await User.findById(req.userId).lean().select('role');
     if (!admin || admin.role !== 'admin') {
       return res.status(403).json({ message: "Only admins allowed" });
     }
 
-    // 1. Get all brands
     const brands = await User.find({ role: 'brand' })
       .select('name brandName logo category brandApprovalStatus platform address phone email websiteUrl isOnline isInStore createdAt')
       .lean();
 
-    // 2. Get all offers (for QR redemptions)
     const allOffers = await Offer.find({})
       .populate({
         path: "redemptions.student",
@@ -1385,12 +1312,10 @@ router.get("/admin/brands-revenue", auth, async (req, res) => {
       })
       .lean();
 
-    // 3. Get all used promo codes (for online redemptions)
     const allPromoCodes = await PromoCode.find({ status: 'used' })
       .populate('offer', 'title image discountPercentage')
       .lean();
 
-    // 4. Group offers by brand
     const offersByBrand = {};
     allOffers.forEach(offer => {
       const brandId = offer.brand?.toString();
@@ -1399,7 +1324,6 @@ router.get("/admin/brands-revenue", auth, async (req, res) => {
       offersByBrand[brandId].push(offer);
     });
 
-    // 5. Group promo codes by brand
     const promosByBrand = {};
     allPromoCodes.forEach(pc => {
       const brandId = pc.brand?.toString();
@@ -1408,13 +1332,11 @@ router.get("/admin/brands-revenue", auth, async (req, res) => {
       promosByBrand[brandId].push(pc);
     });
 
-    // 6. Compute stats per brand
     const brandsWithRevenue = brands.map(brand => {
       const brandId = brand._id.toString();
       const brandOffers = offersByBrand[brandId] || [];
       const brandPromos = promosByBrand[brandId] || [];
 
-      // QR / in-store redemptions
       let qrRevenue = 0;
       let qrBill = 0;
       let qrSaved = 0;
@@ -1433,7 +1355,6 @@ router.get("/admin/brands-revenue", auth, async (req, res) => {
         });
       });
 
-      // Online / promo code redemptions
       let promoRevenue = 0;
       let promoBill = 0;
       let promoCount = 0;
@@ -1450,7 +1371,6 @@ router.get("/admin/brands-revenue", auth, async (req, res) => {
 
       const promoSaved = Math.round((promoBill * (brandPromos[0]?.discountPercentage || 0)) / 100);
 
-      // Total
       const totalRevenue = qrRevenue + promoRevenue;
       const totalBill = qrBill + promoBill;
       const totalSaved = qrSaved + promoSaved;
@@ -1460,7 +1380,6 @@ router.get("/admin/brands-revenue", auth, async (req, res) => {
         ...uniquePromoStudents
       ]).size;
 
-      // Top offer (by redemption count)
       let topOffer = "—";
       let topCount = 0;
       brandOffers.forEach(offer => {
@@ -1486,14 +1405,12 @@ router.get("/admin/brands-revenue", auth, async (req, res) => {
         isOnline: brand.isOnline || false,
         isInStore: brand.isInStore || false,
 
-        // Revenue metrics
         totalRevenue,
         totalBill,
         totalSaved,
         totalRedemptions,
         uniqueStudents,
 
-        // Breakdown
         qrRevenue,
         qrBill,
         qrSaved,
@@ -1503,17 +1420,14 @@ router.get("/admin/brands-revenue", auth, async (req, res) => {
         promoBill,
         promoCount,
 
-        // Best offer
         topOffer,
         topOfferCount: topCount,
         offersCount: brandOffers.length,
       };
     });
 
-    // 7. Sort by total revenue DESC
     brandsWithRevenue.sort((a, b) => b.totalRevenue - a.totalRevenue);
 
-    // 8. Global totals
     const grandTotalRevenue = brandsWithRevenue.reduce((s, b) => s + b.totalRevenue, 0);
     const grandTotalBill = brandsWithRevenue.reduce((s, b) => s + b.totalBill, 0);
     const grandTotalSaved = brandsWithRevenue.reduce((s, b) => s + b.totalSaved, 0);
@@ -1542,4 +1456,5 @@ router.get("/admin/brands-revenue", auth, async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 });
+
 module.exports = router;

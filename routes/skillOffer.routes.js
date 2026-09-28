@@ -8,9 +8,13 @@ const auth = require('../middleware/auth.middleware');
 const { Conversation } = require('../models/Chat');
 const mongoose = require('mongoose');
 const attachProfessionalProfiles = require('../utils/attachProfessionalProfiles');
-const { createAndSendNotification, NotificationTemplates } = require('../utils/notificationHelper');
-// ✅ FIX: Import the User model (was missing — caused "User is not defined")
+const {
+  createAndSendNotification,
+  NotificationTemplates,
+} = require('../utils/notificationHelper');
+const { track } = require('../services/engagement');
 const User = require('../models/User');
+
 // Helper to get user ID consistently
 const getUserId = (req) => {
   return req.userId || req.user?._id || req.user?.id || req.user?.userId;
@@ -19,27 +23,26 @@ const getUserId = (req) => {
 // ==================== CREATE OFFER ====================
 router.post('/', auth, async (req, res) => {
   try {
-    const { 
-      listingId, 
-      message, 
-      offeredSkillName, 
-      offeredSkillLevel, 
-      proposedPrice, 
-      applicationNotes 
+    const {
+      listingId,
+      message,
+      offeredSkillName,
+      offeredSkillLevel,
+      proposedPrice,
+      applicationNotes,
     } = req.body;
-    
+
     const offerorId = getUserId(req);
 
     if (!offerorId) {
-      return res.status(401).json({ 
+      return res.status(401).json({
         error: 'User authentication required',
-        details: 'Please login to make an offer'
+        details: 'Please login to make an offer',
       });
     }
 
     const offerorIdStr = offerorId.toString();
 
-    // Check if listing exists
     const listing = await Listing.findById(listingId).populate('ownerId', 'name');
     if (!listing) {
       return res.status(404).json({ error: 'Listing not found' });
@@ -53,22 +56,20 @@ router.post('/', auth, async (req, res) => {
       return res.status(400).json({ error: 'You cannot offer on your own listing' });
     }
 
-    // Check for existing pending offer
     const existingOffer = await SkillOffer.findOne({
       listingId: listingId,
       offerorId: offerorIdStr,
-      status: { $in: ['pending', 'accepted'] }
+      status: { $in: ['pending', 'accepted'] },
     });
 
     if (existingOffer) {
-      return res.status(409).json({ 
+      return res.status(409).json({
         error: 'You already have a pending offer for this listing',
         offerId: existingOffer._id,
-        status: existingOffer.status
+        status: existingOffer.status,
       });
     }
 
-    // Create the offer
     const offerData = {
       listingId: listingId,
       offerorId: offerorIdStr,
@@ -84,13 +85,13 @@ router.post('/', auth, async (req, res) => {
     const offer = new SkillOffer(offerData);
     await offer.save();
 
-    // ✅ SEND NOTIFICATION TO LISTING OWNER
+    // ✅ NOTIFY LISTING OWNER
     try {
       const offeror = await User.findById(offerorIdStr).select('name fullName');
       const offerorName = offeror?.fullName || offeror?.name || 'Someone';
-      
+
       const template = NotificationTemplates.newOffer(offerorName, listing.title);
-      
+
       await createAndSendNotification({
         recipientId: listing.ownerId._id,
         senderId: offerorIdStr,
@@ -105,31 +106,27 @@ router.post('/', auth, async (req, res) => {
         link: `/listing/${listing._id}`,
       });
 
-      console.log('[SkillOffer] Notification sent to listing owner:', listing.ownerId._id);
+      console.log('[SkillOffer] Notification sent to owner:', listing.ownerId._id);
     } catch (notifError) {
-      console.error('[SkillOffer] Failed to send notification:', notifError);
-      // Don't fail the request if notification fails
+      console.error('[SkillOffer] notification failed:', notifError.message);
     }
 
     res.status(201).json({
       success: true,
       message: 'Offer submitted successfully',
-      offer
+      offer,
     });
-
   } catch (err) {
     console.error('Error creating offer:', err);
-    
+
     if (err.code === 11000) {
-      return res.status(409).json({ 
+      return res.status(409).json({
         error: 'You already have a pending offer for this listing',
-        details: 'Duplicate offer detected'
+        details: 'Duplicate offer detected',
       });
     }
-    
-    res.status(500).json({ 
-      error: err.message || 'Failed to create offer'
-    });
+
+    res.status(500).json({ error: err.message || 'Failed to create offer' });
   }
 });
 
@@ -152,8 +149,8 @@ router.get('/listing/:listingId', auth, async (req, res) => {
     const currentUserId = userId.toString();
 
     if (listingOwnerId !== currentUserId) {
-      return res.status(403).json({ 
-        error: 'Unauthorized: Only the listing owner can view offers'
+      return res.status(403).json({
+        error: 'Unauthorized: Only the listing owner can view offers',
       });
     }
 
@@ -165,7 +162,6 @@ router.get('/listing/:listingId', auth, async (req, res) => {
     await attachProfessionalProfiles(offers, 'offerorId');
 
     res.json({ success: true, offers });
-
   } catch (err) {
     console.error('Error fetching offers:', err);
     res.status(500).json({ error: 'Failed to fetch offers' });
@@ -194,7 +190,6 @@ router.get('/my-offers', auth, async (req, res) => {
     await attachProfessionalProfiles(offers, 'listingId.ownerId');
 
     res.json({ success: true, offers });
-
   } catch (err) {
     console.error('Error fetching my offers:', err);
     res.status(500).json({ error: 'Failed to fetch your offers' });
@@ -213,7 +208,9 @@ router.patch('/:offerId/status', auth, async (req, res) => {
     }
 
     if (!['accepted', 'rejected'].includes(status)) {
-      return res.status(400).json({ error: 'Invalid status. Must be "accepted" or "rejected"' });
+      return res.status(400).json({
+        error: 'Invalid status. Must be "accepted" or "rejected"',
+      });
     }
 
     const offer = await SkillOffer.findById(offerId);
@@ -222,9 +219,9 @@ router.patch('/:offerId/status', auth, async (req, res) => {
     }
 
     if (offer.status !== 'pending') {
-      return res.status(400).json({ 
+      return res.status(400).json({
         error: 'This offer has already been processed',
-        currentStatus: offer.status
+        currentStatus: offer.status,
       });
     }
 
@@ -234,26 +231,26 @@ router.patch('/:offerId/status', auth, async (req, res) => {
     }
 
     if (listing.ownerId.toString() !== userId.toString()) {
-      return res.status(403).json({ error: 'Unauthorized: You are not the listing owner' });
+      return res.status(403).json({
+        error: 'Unauthorized: You are not the listing owner',
+      });
     }
 
     // Update offer status
     offer.status = status;
     await offer.save();
 
-    // If accepted, create a match
+    // If accepted, create match + conversation
     let match = null;
     if (status === 'accepted') {
-      // Create a chat conversation
       const conversation = new Conversation({
         participants: [listing.ownerId.toString(), offer.offerorId.toString()],
         lastMessage: 'Match created!',
         unreadCount: 0,
-        lastActivity: new Date()
+        lastActivity: new Date(),
       });
       await conversation.save();
 
-      // Create the match
       match = new Match({
         listingId: listing._id,
         offerId: offer._id,
@@ -261,38 +258,49 @@ router.patch('/:offerId/status', auth, async (req, res) => {
         offerorId: offer.offerorId.toString(),
         conversationId: conversation._id,
         status: 'active',
-        acceptedAt: new Date()
+        acceptedAt: new Date(),
       });
       await match.save();
 
-      // Update offer with matchId
       offer.matchId = match._id;
       await offer.save();
 
-      // Update listing status to matched
+      // Update listing status
       listing.status = 'matched';
       await listing.save();
 
-      // Reject all other pending offers for this listing
+      // Reject all other pending offers
       await SkillOffer.updateMany(
-        { 
-          listingId: listing._id, 
-          _id: { $ne: offerId },
-          status: 'pending' 
-        },
+        { listingId: listing._id, _id: { $ne: offerId }, status: 'pending' },
         { status: 'rejected' }
       );
+
+      // 🆕 Engagement hook — BOTH parties get credit
+      try {
+        await track(listing.ownerId.toString(), 'skill_swapped', {
+          meta: { offerId: offer._id.toString(), listingId: listing._id.toString() },
+          dedupeKey: `skill_swap:${listing.ownerId}:${offer._id}`,
+        });
+        await track(offer.offerorId.toString(), 'skill_swapped', {
+          meta: { offerId: offer._id.toString(), listingId: listing._id.toString() },
+          dedupeKey: `skill_swap:${offer.offerorId}:${offer._id}`,
+        });
+        console.log('[SkillOffer] skill_swapped tracked for both parties');
+      } catch (e) {
+        console.error('[engagement] skill_swapped hook failed:', e.message);
+      }
     }
 
-    // ✅ SEND NOTIFICATION TO OFFEROR
+    // ✅ NOTIFY OFFEROR
     try {
       const owner = await User.findById(userId).select('name fullName');
       const ownerName = owner?.fullName || owner?.name || 'The listing owner';
-      
-      const template = status === 'accepted' 
-        ? NotificationTemplates.offerAccepted(ownerName, listing.title)
-        : NotificationTemplates.offerRejected(ownerName, listing.title);
-      
+
+      const template =
+        status === 'accepted'
+          ? NotificationTemplates.offerAccepted(ownerName, listing.title)
+          : NotificationTemplates.offerRejected(ownerName, listing.title);
+
       await createAndSendNotification({
         recipientId: offer.offerorId,
         senderId: userId,
@@ -308,18 +316,17 @@ router.patch('/:offerId/status', auth, async (req, res) => {
         link: status === 'accepted' ? `/match/${match?._id}` : `/listing/${listing._id}`,
       });
 
-      console.log('[SkillOffer] Status notification sent to offeror:', offer.offerorId);
+      console.log('[SkillOffer] Status notification sent:', offer.offerorId);
     } catch (notifError) {
-      console.error('[SkillOffer] Failed to send status notification:', notifError);
+      console.error('[SkillOffer] status notif failed:', notifError.message);
     }
 
     res.json({
       success: true,
       message: `Offer ${status}`,
       offer,
-      match
+      match,
     });
-
   } catch (err) {
     console.error('Error updating offer:', err);
     res.status(500).json({ error: err.message || 'Failed to update offer' });
@@ -346,9 +353,9 @@ router.patch('/:offerId/withdraw', auth, async (req, res) => {
     }
 
     if (offer.status !== 'pending') {
-      return res.status(400).json({ 
+      return res.status(400).json({
         error: 'This offer cannot be withdrawn',
-        currentStatus: offer.status
+        currentStatus: offer.status,
       });
     }
 
@@ -358,9 +365,8 @@ router.patch('/:offerId/withdraw', auth, async (req, res) => {
     res.json({
       success: true,
       message: 'Offer withdrawn successfully',
-      offer
+      offer,
     });
-
   } catch (err) {
     console.error('Error withdrawing offer:', err);
     res.status(500).json({ error: 'Failed to withdraw offer' });

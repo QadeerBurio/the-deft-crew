@@ -50,6 +50,28 @@ const NotificationSchema = new mongoose.Schema({
     type: String,
     default: "bell"
   },
+   // ✅ Mood drives the in-app banner emoji
+    mood: {
+      type: String,
+      default: 'sorted',
+      enum: [
+        'sorted',
+        'excited',
+        'sleepy',
+        'panic',
+        'sus',
+        'cheeky',
+        'shook',
+        'hype',
+        'smug',
+        'shock',
+        'broke',
+        'money',
+        'ghost',
+        'urgent',
+      ],
+    },
+
   link: {
     type: String,
     default: ""

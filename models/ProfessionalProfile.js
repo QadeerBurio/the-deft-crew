@@ -27,6 +27,6 @@ const professionalProfileSchema = new mongoose.Schema({
   completedAt: { type: Date },
 }, { timestamps: true });
 
-professionalProfileSchema.index({ userId: 1 }, { unique: true });
+professionalProfileSchema.index( { unique: true });
 
 module.exports = mongoose.model('ProfessionalProfile', professionalProfileSchema);

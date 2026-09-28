@@ -387,6 +387,11 @@ router.post("/generate", auth, async (req, res) => {
 
 // ============================================================
 // VERIFY PROMO CODE (brand dashboard, in-person)
+// NOTE: This endpoint DOES change state (marks code as used,
+// adds redemption to offer). But the engagement hook was
+// removed from here to avoid double-counting when the frontend
+// also calls /confirm-redemption. Only /confirm-redemption
+// awards points now.
 // ============================================================
 router.post("/verify", auth, async (req, res) => {
   try {
@@ -547,6 +552,8 @@ router.post("/verify", auth, async (req, res) => {
       type: "System",
       icon: "cash-outline",
     });
+
+    // 🚫 engagement hook removed here — only /confirm-redemption awards points
 
     res.json({
       success: true,
@@ -991,6 +998,8 @@ router.post("/brand-verify", auth, async (req, res) => {
     const savedAmount = Math.round(discountAmount);
     const finalAmount = Number(billAmount) - savedAmount;
 
+    // 🚫 engagement hook removed here — this is a DRY-RUN endpoint
+
     res.json({
       success: true,
       verified: true,
@@ -1034,6 +1043,7 @@ router.post("/brand-verify", auth, async (req, res) => {
 
 // ============================================================
 // CONFIRM REDEMPTION (state-changing, brand dashboard)
+// THIS is the ONLY endpoint that awards deal_redeemed points.
 // ============================================================
 router.post("/confirm-redemption", auth, async (req, res) => {
   try {
@@ -1135,6 +1145,18 @@ router.post("/confirm-redemption", auth, async (req, res) => {
       type: "System",
       icon: "cash-outline",
     });
+
+    // 🎯 engagement hook — the ONLY place this fires
+    // Uses promoCodeDoc._id in the dedupe key so retries are idempotent.
+    try {
+      const { track } = require("../services/engagement");
+      await track(studentId.toString(), "deal_redeemed", {
+        meta: { offerId: offer._id.toString(), savedAmount },
+        dedupeKey: `deal:${studentId}:${offer._id}:${promoCodeDoc._id}`,
+      });
+    } catch (e) {
+      console.error("[engagement] promo deal hook failed:", e.message);
+    }
 
     res.json({
       success: true,
