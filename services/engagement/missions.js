@@ -14,24 +14,24 @@ const PREFERENCE = {
 
 // Mission copy (server-owned, so social can change without an app release)
 const LINES = {
-  discounts:   { before: 'paying full price? never again.',           after: 'rs saved. sorted.' },
-  resume:      { before: 'cv from matric? lets fix that.',            after: 'your cv is sorted.' },
-  jobs:        { before: 'your first internship wont apply itself.',  after: 'you applied. thats the hard part.' },
-  social:      { before: 'say it. anonymously or not.',               after: 'you said it.' },
-  events:      { before: 'something happening on campus.',            after: 'you rsvped. see you there.' },
-  scholarship: { before: 'big dreams. bigger applications.',          after: 'you went for it.' },
-  skillshare:  { before: 'teach something. learn something.',         after: 'skill swapped.' },
-  traveling:   { before: 'somewhere new is waiting.',                 after: 'trip booked.' },
+  discounts:   { before: 'paying full price? never again.',           after: 'Rs saved. sorted.' },
+  resume:      { before: 'No experiance, No problem!',                after: 'your cv is sorted.' },
+  jobs:        { before: 'your first internship wont apply itself.',  after: 'you applied. thats the hard part. Sorted!' },
+  social:      { before: 'say it. anonymously or not.',               after: 'you said it. Sorted!' },
+  events:      { before: 'something happening on campus.',            after: 'you rsvped. see you there. Sorted' },
+  scholarship: { before: 'big dreams. bigger applications.',          after: 'you went for it. Sorted' },
+  skillshare:  { before: 'teach something. learn something.',         after: 'skill swapped. Sorted' },
+  traveling:   { before: 'somewhere new is waiting.',                 after: 'Trip Planned. Sorted!' },
 };
 
 // Route hints for the mobile CTA button
 const ROUTES = {
   discounts:   { route: 'Brands', params: {} },
-  resume:      { route: 'Resume', params: {} },
+  resume:      { route: 'ResumeDashboard', params: {} },
   jobs:        { route: 'Career', params: {} },
   social:      { route: 'Social', params: { initialTab: 'Confession' } },
   events:      { route: 'Events', params: {} },
-  scholarship: { route: 'Exchange', params: {} },
+  scholarship: { route: 'ExchangeScreen', params: {} },
   skillshare:  { route: 'Dashboard', params: {} },
   traveling:   { route: 'Travelling', params: {} },
 };

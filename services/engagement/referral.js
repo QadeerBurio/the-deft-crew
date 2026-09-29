@@ -63,7 +63,7 @@ async function creditReferralOnSignup(refereeUserId) {
         kind: 'referral_signup',
         mood: 'excited',
         line: `${referee.name || 'someone'} just joined with your code! +50 pts.`,
-        cta: { label: 'view crew', route: 'Points', params: {} },
+        cta: { label: 'view crew', route: 'RewardsScreen', params: {} },
         payload: { refereeId: refereeIdStr, amount: 50 },
         priority: 25,
       });
