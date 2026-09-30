@@ -66,12 +66,17 @@ router.get('/feed', async (req, res) => {
       sort = 'newest',
       page = 1,
       limit = 100,
+       city, 
     } = req.query;
 
     const query = {
       isExpired: false,
       status: { $ne: 'rejected' },
     };
+     // 👇 City filter
+    if (city && city !== 'All') {
+      query.city = new RegExp(`^${city}$`, 'i');   // case-insensitive exact match
+    }
 
     if (category && category !== 'All') {
       query.$or = [

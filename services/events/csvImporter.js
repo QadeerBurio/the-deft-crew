@@ -193,6 +193,7 @@ function parseEventsFile(filePathOrBuffer, originalFilename = '') {
       categories: category ? [category] : [],
       externalUrl,
       image,
+      city: city || undefined, 
       source: 'csv',
       sourceId: externalUrl || `${title}_${rawDate}`.replace(/[^a-zA-Z0-9]/g, '_')
     };
