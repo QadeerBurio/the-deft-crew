@@ -233,16 +233,21 @@ router.get("/claimed", auth, async (req, res) => {
 });
 
 // UNCLAIM: Remove offer from "My Discounts"
+// routes/offers.js - UNCLAIM with fixed Mongoose option
 router.post("/unclaim/:offerId", auth, async (req, res) => {
   try {
     const offer = await Offer.findById(req.params.offerId);
     if (!offer) return res.status(404).json({ message: "Offer not found" });
 
+    // ✅ FIXED: Use returnDocument: 'after' instead of new: true
     await Offer.findByIdAndUpdate(
       req.params.offerId,
       { $pull: { claimedBy: req.userId } },
-      { new: true }
+      { returnDocument: 'after' } // ✅ Fixed deprecation
     );
+
+    // Also clear the user's claimed offers cache
+    await cache.del(`offers:claimed:${req.userId}`);
 
     res.json({ message: "Offer unclaimed successfully" });
   } catch (err) {

@@ -26,6 +26,9 @@ const TYPE_TO_MOOD = {
   offer_accepted: 'hype',
   offer_rejected: 'sleepy',
   match_created: 'hype',
+  listing_created: 'excited',
+  listing_updated: 'sorted',
+  listing_deleted: 'sleepy',
 
   // Messages
   message: 'cheeky',

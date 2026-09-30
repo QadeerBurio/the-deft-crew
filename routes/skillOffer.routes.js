@@ -97,11 +97,15 @@ router.post('/', auth, async (req, res) => {
         senderId: offerorIdStr,
         title: template.title,
         description: template.description,
-        type: template.type,
+        type: template.type,                     // 'new_offer'
         metadata: {
+          screen: 'ManageOffers',                // ← first screen owner sees
           listingId: listing._id.toString(),
           offerId: offer._id.toString(),
-          screen: 'ManageOffers',
+          params: {
+            listingId: listing._id.toString(),
+            offerId: offer._id.toString(),
+          },
         },
         link: `/listing/${listing._id}`,
       });
@@ -109,7 +113,7 @@ router.post('/', auth, async (req, res) => {
       console.log('[SkillOffer] Notification sent to owner:', listing.ownerId._id);
     } catch (notifError) {
       console.error('[SkillOffer] notification failed:', notifError.message);
-    }
+    } 
 
     res.status(201).json({
       success: true,
@@ -291,7 +295,7 @@ router.patch('/:offerId/status', auth, async (req, res) => {
       }
     }
 
-    // ✅ NOTIFY OFFEROR
+       // ✅ NOTIFY OFFEROR
     try {
       const owner = await User.findById(userId).select('name fullName');
       const ownerName = owner?.fullName || owner?.name || 'The listing owner';
@@ -301,19 +305,30 @@ router.patch('/:offerId/status', auth, async (req, res) => {
           ? NotificationTemplates.offerAccepted(ownerName, listing.title)
           : NotificationTemplates.offerRejected(ownerName, listing.title);
 
+      const targetScreen =
+        status === 'accepted' ? 'MatchChat' : 'MyOffers';
+
       await createAndSendNotification({
         recipientId: offer.offerorId,
         senderId: userId,
         title: template.title,
         description: template.description,
-        type: template.type,
+        type: template.type,                     // 'offer_accepted' | 'offer_rejected'
         metadata: {
+          screen: targetScreen,
           listingId: listing._id.toString(),
           offerId: offer._id.toString(),
-          matchId: match?._id?.toString(),
-          screen: status === 'accepted' ? 'MatchChat' : 'MyOffers',
+          matchId: match?._id?.toString() || null,
+          params: {
+            listingId: listing._id.toString(),
+            offerId: offer._id.toString(),
+            ...(match?._id ? { matchId: match._id.toString() } : {}),
+          },
         },
-        link: status === 'accepted' ? `/match/${match?._id}` : `/listing/${listing._id}`,
+        link:
+          status === 'accepted'
+            ? `/match/${match?._id}`
+            : `/listing/${listing._id}`,
       });
 
       console.log('[SkillOffer] Status notification sent:', offer.offerorId);
