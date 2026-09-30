@@ -848,4 +848,55 @@ router.post('/track-external/:eventId', auth, async (req, res) => {
     res.status(500).json({ error: 'Failed to track external event', details: err.message });
   }
 });
+// ============================================================
+// GET DISTINCT CATEGORIES (type + categories[] + tags[])
+// Mirrors how cities are derived — used by the mobile client
+// to build the category filter chips dynamically.
+// ============================================================
+router.get('/categories', async (req, res) => {
+  try {
+    const [types, cats, tags] = await Promise.all([
+      Event.distinct('type', { isExpired: false, status: { $ne: 'rejected' } }),
+      Event.distinct('categories', { isExpired: false, status: { $ne: 'rejected' } }),
+      Event.distinct('tags', { isExpired: false, status: { $ne: 'rejected' } }),
+    ]);
+
+    const set = new Set();
+    const push = (v) => {
+      if (!v) return;
+      const s = String(v).trim();
+      if (s && s.toLowerCase() !== 'general') set.add(s);
+    };
+
+    (types || []).forEach(push);
+    (cats  || []).forEach(push);
+    (tags  || []).forEach(push);
+
+    const categories = Array.from(set).sort((a, b) =>
+      a.localeCompare(b, undefined, { sensitivity: 'base' })
+    );
+
+    res.json({ categories });
+  } catch (err) {
+    console.error('Fetch categories error:', err);
+    res.status(500).json({ message: 'Failed to fetch categories' });
+  }
+});
+router.get('/cities', async (req, res) => {
+  try {
+    const cities = await Event.distinct('city', {
+      isExpired: false,
+      status: { $ne: 'rejected' },
+      city: { $ne: '' },
+    });
+    const cleaned = (cities || [])
+      .map((c) => (c || '').toString().trim())
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+    res.json({ cities: cleaned });
+  } catch (err) {
+    console.error('Fetch cities error:', err);
+    res.status(500).json({ message: 'Failed to fetch cities' });
+  }
+});
 module.exports = router;
