@@ -20,16 +20,57 @@ const MONTHS = {
   sep: 8, sept: 8, september: 8, oct: 9, october: 9, nov: 10, november: 10, dec: 11, december: 11
 };
 
-/**
- * Escape special regex characters
- */
+// Known Pakistani cities for normalization (case-insensitive match)
+const KNOWN_CITIES = [
+  'Karachi', 'Lahore', 'Islamabad', 'Rawalpindi', 'Faisalabad',
+  'Multan', 'Peshawar', 'Quetta', 'Hyderabad', 'Sialkot',
+  'Gujranwala', 'Bahawalpur', 'Sargodha', 'Sukkur', 'Larkana'
+];
+
 function escapeRegExp(string) {
   return (string || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 /**
- * Clean & Parse raw date string into a UTC JS Date object matching calendar date
+ * ✅ FIX: Normalize a city string coming from CSV/XLSX.
+ * - Trims whitespace
+ * - Matches against known city names case-insensitively
+ * - Returns canonical casing if matched, otherwise returns the trimmed raw value
+ * - Returns '' (empty string) if the input is empty/undefined so we never
+ *   silently fall back to "Karachi".
  */
+function normalizeCity(rawCity) {
+  if (!rawCity) return '';
+  const trimmed = String(rawCity).trim();
+  if (!trimmed) return '';
+
+  // If multiple cities are listed (e.g. "Lahore, Karachi, Islamabad"),
+  // take the first one as the primary city.
+  const first = trimmed.split(',')[0].trim();
+  if (!first) return '';
+
+  const match = KNOWN_CITIES.find(
+    (c) => c.toLowerCase() === first.toLowerCase()
+  );
+  return match || first;
+}
+
+/**
+ * ✅ FIX: Try to extract a city from the venue / location string when the
+ * dedicated `city` column is missing or empty. Matches known city names
+ * anywhere in the string (case-insensitive).
+ */
+function inferCityFromLocation(location) {
+  if (!location) return '';
+  const haystack = String(location).toLowerCase();
+  for (const city of KNOWN_CITIES) {
+    if (haystack.includes(city.toLowerCase())) {
+      return city;
+    }
+  }
+  return '';
+}
+
 function parseEventDate(rawDate) {
   if (!rawDate) return null;
 
@@ -48,13 +89,9 @@ function parseEventDate(rawDate) {
   }
 
   try {
-    // 1. Strip ordinal suffixes (1st, 2nd, 3rd, 4th, etc.)
     str = str.replace(/(\d+)(st|nd|rd|th)/gi, '$1');
-
-    // 2. Extract first day from ranges (e.g. "5 - 6 Sep 2026", "26 Aug - 30 Sep 2026")
     str = str.replace(/(\b\d{1,2})\s*(?:-|–|—|to)\s*\d{1,2}\b/gi, '$1');
 
-    // 3. Extract time components if present (e.g. 5:00 pm, 7:00-10:00 pm)
     let hours = 0;
     let minutes = 0;
     const timeMatch = str.match(/(\d{1,2})(?::(\d{2}))?\s*(?:(?:-|to)\s*\d{1,2}(?::\d{2})?)?\s*(am|pm)/i);
@@ -66,7 +103,6 @@ function parseEventDate(rawDate) {
       if (ampm === 'am' && hours === 12) hours = 0;
     }
 
-    // 4. Extract Month
     const monthMatch = str.match(/(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)/i);
     if (!monthMatch) {
       console.warn(`⚠️ [csvImporter] Unable to parse month from date: "${rawDate}"`);
@@ -75,12 +111,12 @@ function parseEventDate(rawDate) {
     const monthKey = monthMatch[1].toLowerCase().slice(0, 3);
     const monthIndex = MONTHS[monthKey];
 
-    // 5. Extract Year
     const yearMatch = str.match(/\b(20\d{2})\b/);
     const year = yearMatch ? parseInt(yearMatch[1], 10) : 2026;
 
-    // 6. Extract Day number
-    const dayCleanStr = str.replace(/\b(20\d{2})\b/, '').replace(/\d{1,2}(?::\d{2})?\s*(?:(?:-|to)\s*\d{1,2}(?::\d{2})?)?\s*(am|pm)/gi, '');
+    const dayCleanStr = str
+      .replace(/\b(20\d{2})\b/, '')
+      .replace(/\d{1,2}(?::\d{2})?\s*(?:(?:-|to)\s*\d{1,2}(?::\d{2})?)?\s*(am|pm)/gi, '');
     const dayMatch = dayCleanStr.match(/\b(\d{1,2})\b/);
     if (!dayMatch) {
       console.warn(`⚠️ [csvImporter] Unable to parse day from date: "${rawDate}"`);
@@ -88,7 +124,6 @@ function parseEventDate(rawDate) {
     }
     const day = parseInt(dayMatch[1], 10);
 
-    // Construct UTC date so calendar date is preserved without timezone shifts
     const utcDate = new Date(Date.UTC(year, monthIndex, day, hours, minutes, 0));
     if (isNaN(utcDate.getTime())) {
       console.warn(`⚠️ [csvImporter] Invalid Date result for "${rawDate}"`);
@@ -102,9 +137,6 @@ function parseEventDate(rawDate) {
   }
 }
 
-/**
- * Determine event image (custom URL if present in row, otherwise category vector asset path)
- */
 function getEventImage(row, category) {
   const rawImage = row.image || row.image_url || row.imageurl || row.source_image || row.photo;
   if (rawImage && typeof rawImage === 'string' && rawImage.trim().length > 0) {
@@ -141,10 +173,6 @@ function getEventImage(row, category) {
   return DEFAULT_CATEGORY_IMAGES.default;
 }
 
-/**
- * Import and parse events from CSV or XLSX file path / Buffer
- * Returns array of clean event objects (without saving to DB)
- */
 function parseEventsFile(filePathOrBuffer, originalFilename = '') {
   let workbook;
 
@@ -162,7 +190,7 @@ function parseEventsFile(filePathOrBuffer, originalFilename = '') {
   const worksheet = workbook.Sheets[sheetName];
   const rawRows = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
 
-  const events = rawRows.map(row => {
+  const events = rawRows.map((row) => {
     // Normalize header keys to lowercase with underscores
     const normalizedRow = {};
     for (const key of Object.keys(row)) {
@@ -176,6 +204,23 @@ function parseEventsFile(filePathOrBuffer, originalFilename = '') {
     const description = (normalizedRow.description || normalizedRow.desc || normalizedRow.details || '').toString().trim();
     const category = (normalizedRow.category || normalizedRow.type || '').toString().trim();
     const externalUrl = (normalizedRow.source_url || normalizedRow.sourceurl || normalizedRow.url || normalizedRow.link || '').toString().trim();
+
+    // ✅ FIX: Read the city column (supports several header spellings).
+    const rawCity =
+      normalizedRow.city ||
+      normalizedRow.event_city ||
+      normalizedRow.town ||
+      '';
+
+    // ✅ FIX: Normalize the explicit city first, then fall back to inferring
+    // the city from the venue/location string. NEVER default to "Karachi".
+    let city = normalizeCity(rawCity);
+    if (!city) {
+      city = inferCityFromLocation(location);
+    }
+    if (!city) {
+      city = inferCityFromLocation(title); // last resort — some titles include the city
+    }
 
     // Skip empty rows without title
     if (!title) return null;
@@ -193,9 +238,11 @@ function parseEventsFile(filePathOrBuffer, originalFilename = '') {
       categories: category ? [category] : [],
       externalUrl,
       image,
-      city: city || undefined, 
+      city,                       // ✅ FIX: real city value (may be '' if unknown)
       source: 'csv',
-      sourceId: externalUrl || `${title}_${rawDate}`.replace(/[^a-zA-Z0-9]/g, '_')
+      sourceId:
+        externalUrl ||
+        `${title}_${rawDate}`.replace(/[^a-zA-Z0-9]/g, '_')
     };
 
     return eventObj;
@@ -204,9 +251,6 @@ function parseEventsFile(filePathOrBuffer, originalFilename = '') {
   return events;
 }
 
-/**
- * Import events from file and save to MongoDB with duplicate protection on title + date + location
- */
 async function importEventsToDatabase(filePathOrBuffer, originalFilename = '') {
   const parsedEvents = parseEventsFile(filePathOrBuffer, originalFilename);
 
@@ -219,7 +263,6 @@ async function importEventsToDatabase(filePathOrBuffer, originalFilename = '') {
     const dateTrimmed = eventData.date.trim();
     const locationTrimmed = eventData.location.trim();
 
-    // Check for duplicate on title + date + location (case-insensitive, exact match)
     const existing = await Event.findOne({
       title: { $regex: new RegExp(`^${escapeRegExp(titleTrimmed)}$`, 'i') },
       date: { $regex: new RegExp(`^${escapeRegExp(dateTrimmed)}$`, 'i') },
@@ -240,7 +283,6 @@ async function importEventsToDatabase(filePathOrBuffer, originalFilename = '') {
     }
   }
 
-  // Socket.io broadcast on new event (fires when CSV adds new events)
   if (added > 0 && eventSocket && typeof eventSocket.emitNewEventsImported === 'function') {
     try {
       eventSocket.emitNewEventsImported(added, insertedEvents);
@@ -261,5 +303,7 @@ module.exports = {
   parseEventsFile,
   importEventsToDatabase,
   parseEventDate,
+  normalizeCity,
+  inferCityFromLocation,
   DEFAULT_CATEGORY_IMAGES
 };

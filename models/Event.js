@@ -3,7 +3,7 @@ const mongoose = require('mongoose');
 const EventSchema = new mongoose.Schema({
   title: { type: String, required: true, trim: true },
   organizer: { type: String, required: false, trim: true, default: 'Organizer' },
-  city: { type: String, required: true, trim: true,  },
+city: { type: String, required: false, default: '', trim: true },
   type: { type: String, required: true, default: 'General' },
   description: { type: String, default: '' },
   prize: { type: String, default: 'TBD' },
