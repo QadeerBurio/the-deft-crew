@@ -169,6 +169,7 @@ const createNotification = async (
 // createAndSendNotification — persists + fires push to device
 // Called from routes with a structured payload
 // ═══════════════════════════════════════════════════════════════
+// utils/notificationHelper.js — FIXED: Complete metadata in push
 const createAndSendNotification = async ({
   recipientId,
   senderId,
@@ -187,7 +188,6 @@ const createAndSendNotification = async ({
 
     if (String(recipientId) === String(senderId)) return null;
 
-    // Resolve mood (explicit > type-based > default)
     const resolvedMood = mood || TYPE_TO_MOOD[type] || 'sorted';
 
     // 1. Save the notification
@@ -202,15 +202,26 @@ const createAndSendNotification = async ({
 
     if (!notification) return null;
 
-    // 2. Fire device push (fire-and-forget)
+    // 2. Fire device push
     setImmediate(async () => {
       try {
         const pushData = {
+          // Core identifiers
           notificationId: notification._id.toString(),
           type,
           mood: resolvedMood,
+          
+          // Navigation
           screen: metadata?.screen || null,
+          route: metadata?.route || null,
+          
+          // Link
           link: link || null,
+          
+          // Channel (for Android)
+          channelId: metadata?.channelId || 'default',
+          
+          // All metadata (includes offerId, listingId, matchId, etc.)
           ...metadata,
         };
 
@@ -220,8 +231,10 @@ const createAndSendNotification = async ({
           description || '',
           pushData
         );
+        
         console.log(
-          `[createAndSendNotification] push sent → ${recipientId} (${type}/${resolvedMood})`
+          `[createAndSendNotification] push sent → ${recipientId} (${type}/${resolvedMood})`,
+          'screen:', pushData.screen
         );
       } catch (err) {
         console.error('[createAndSendNotification] push error:', err.message);

@@ -55,12 +55,17 @@ router.post('/push-opened/:logId', auth, async (req, res) => {
 });
 
 // ── 3. CREATE AND SEND ──
+// routes/notification.routes.js
+// FIXED: mood variable properly defined
+
 router.post('/send', auth, async (req, res) => {
   try {
-    const { recipientId, title, description, type, screenToOpen, metadata } = req.body;
+    const { recipientId, title, description, type, screenToOpen, metadata, mood } = req.body;
+    
     if (!recipientId) return res.status(400).json({ message: 'Recipient ID required' });
 
     const senderId = req.userId || req.user?._id || req.user?.id;
+    const resolvedMood = mood || 'sorted'; // ✅ Define it here
 
     const newNotification = await Notification.create({
       recipient: recipientId,
@@ -68,7 +73,7 @@ router.post('/send', auth, async (req, res) => {
       title,
       description,
       type: type || 'System',
-      mood: mood || 'sorted', // <-- Save mood
+      mood: resolvedMood, // ✅ Use resolved value
       metadata: metadata || {},
       readBy: [],
       deletedBy: [],
@@ -77,7 +82,7 @@ router.post('/send', auth, async (req, res) => {
     await sendToUser(recipientId, title, description, {
       notificationId: newNotification._id.toString(),
       screen: screenToOpen,
-       mood: mood || 'sorted', 
+      mood: resolvedMood, // ✅ Use resolved value
       ...metadata,
     });
 

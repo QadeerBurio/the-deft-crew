@@ -1,10 +1,9 @@
-// utils/pushNotification.js — FIXED: always include mood + iconUrl
+// utils/pushNotification.js — FIXED: Complete push payload
 const { Expo } = require('expo-server-sdk');
 const User = require('../models/User');
 
 const expo = new Expo();
 
-// CDN base for mood icons — set this to your real static host
 const ICON_BASE =
   process.env.PUSH_ICON_BASE ||
   'https://the-deft-crew-production.up.railway.app/assets/dots';
@@ -14,23 +13,37 @@ const iconUrlForMood = (mood) =>
 
 /**
  * Send to every push token on a user document. Removes dead tokens.
- * extraData MUST include `mood` (server passes it from copy.js).
  */
 const sendToUser = async (userId, title, body, extraData = {}) => {
   const user = await User.findById(userId).select('pushTokens').lean();
   const tokens = (user?.pushTokens || []).map((t) => t.token).filter(Boolean);
-  if (tokens.length === 0) return { sent: false, reason: 'no_token' };
+  
+  if (tokens.length === 0) {
+    console.log(`[push] No tokens for user ${userId}`);
+    return { sent: false, reason: 'no_token' };
+  }
 
-  // ✅ Resolve mood (default to 'sorted')
+  // Resolve mood
   const mood = extraData.mood || 'sorted';
   const iconUrl = extraData.iconUrl || iconUrlForMood(mood);
 
-  // ✅ Build the enriched data payload that lands on the device
+  // Build complete data payload
   const data = {
     ...extraData,
     mood,
     iconUrl,
+    // Ensure these are always present
+    type: extraData.type || 'System',
+    channelId: extraData.channelId || 'default',
   };
+
+  console.log(`[push] Sending to ${tokens.length} token(s)`, {
+    title,
+    body: body?.slice(0, 50),
+    type: data.type,
+    mood: data.mood,
+    hasScreen: !!data.screen,
+  });
 
   const messages = tokens
     .filter((t) => Expo.isExpoPushToken(t))
@@ -41,29 +54,34 @@ const sendToUser = async (userId, title, body, extraData = {}) => {
       body,
       data,
       priority: 'high',
-      channelId: extraData.channelId || 'default',
-
-      // ✅ iOS: attach the mood image as richContent
+      channelId: data.channelId,
+      
+      // iOS rich content
       ...(iconUrl && {
         richContent: {
           image: iconUrl,
         },
       }),
-
-      // ✅ Android: attach as a big-picture when available
+      
+      // Android
       ...(iconUrl && {
         mutableContent: true,
       }),
     }));
 
-  if (messages.length === 0) return { sent: false, reason: 'no_token' };
+  if (messages.length === 0) {
+    console.log('[push] No valid Expo tokens');
+    return { sent: false, reason: 'no_token' };
+  }
 
   const chunks = expo.chunkPushNotifications(messages);
   const tickets = [];
+  
   for (const chunk of chunks) {
     try {
       const res = await expo.sendPushNotificationsAsync(chunk);
       tickets.push(...res);
+      console.log(`[push] Sent ${res.length} notifications`);
     } catch (err) {
       console.error('sendToUser send error:', err.message);
     }
@@ -92,6 +110,7 @@ const sendToUser = async (userId, title, body, extraData = {}) => {
             { _id: userId },
             { $pull: { pushTokens: { token: { $in: deadTokens } } } }
           );
+          console.log(`[push] Removed ${deadTokens.length} dead tokens`);
         }
       }
     } catch (err) {
@@ -123,6 +142,8 @@ const sendPushNotification = async (
     ...extraData,
     mood,
     iconUrl,
+    type: extraData.type || 'System',
+    channelId: extraData.channelId || 'default',
   };
 
   const messages = [
@@ -133,7 +154,7 @@ const sendPushNotification = async (
       body,
       data,
       priority: 'high',
-      channelId: extraData.channelId || 'default',
+      channelId: data.channelId,
       ...(iconUrl && { richContent: { image: iconUrl } }),
     },
   ];
