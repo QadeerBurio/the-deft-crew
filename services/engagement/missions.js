@@ -27,7 +27,7 @@ const LINES = {
 // Route hints for the mobile CTA button
 const ROUTES = {
   discounts:   { route: 'Brands', params: {} },
-  resume:      { route: 'ResumeDashboard', params: {} },
+  resume:      { route: 'Resume', params: {} },
   jobs:        { route: 'Career', params: {} },
   social:      { route: 'Social', params: { initialTab: 'Confession' } },
   events:      { route: 'Events', params: {} },
