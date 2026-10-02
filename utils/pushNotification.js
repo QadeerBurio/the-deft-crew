@@ -1,6 +1,6 @@
 // utils/pushNotification.js
-// Sends TDC push notifications with per-type sounds and correct channels.
-// Works with: iOS (uses payload.sound) + Android (uses channel.sound)
+// ✅ FIXED: nested android object → heads-up popup when app is KILLED
+// Works: Expo Go (foreground) + APK (background + killed)
 
 const { Expo } = require('expo-server-sdk');
 const User = require('../models/User');
@@ -15,78 +15,98 @@ const iconUrlForMood = (mood) =>
   mood ? `${ICON_BASE}/${mood}.png` : null;
 
 // ═══════════════════════════════════════════════════════════════
-// TYPE → SOUND + CHANNEL MAP
+// TYPE → SOUND + CHANNEL
 // ═══════════════════════════════════════════════════════════════
 const TYPE_TO_SOUND = {
-  // Social
-  like:                 'tdc_push_default',
-  comment:              'tdc_push_default',
-  follow:               'tdc_push_default',
-  request:              'tdc_push_confession',
-  connection_accepted:  'tdc_push_default',
-  request_declined:     'tdc_push_default',
-
-  // SkillShare
-  new_offer:            'tdc_push_deal',
-  offer_accepted:       'tdc_push_deal',
-  offer_rejected:       'tdc_push_default',
-  match_created:        'tdc_push_deal',
-  listing_created:      'tdc_push_deal',
-  listing_updated:      'tdc_push_default',
-  listing_deleted:      'tdc_push_default',
-
-  // Messages
-  message:              'tdc_push_message',
-
-  // Jobs
-  new_job:              'tdc_push_internship',
-  internship:           'tdc_push_internship',
-  job_application:      'tdc_push_internship',
-  interview:            'tdc_push_internship',
-
-  // Engagement
-  reminder:             'tdc_push_reminder',
-  points:               'tdc_push_points',
-  streak:               'tdc_push_streak',
-  confession:           'tdc_push_confession',
-  event:                'tdc_push_event',
-  level_up:             'tdc_push_level_up',
-  badge:                'tdc_push_level_up',
-
-  // System
-  System:               'tdc_push_default',
-  system:               'tdc_push_default',
-  transaction:          'tdc_push_default',
+  like: 'tdc_push_default',
+  comment: 'tdc_push_default',
+  follow: 'tdc_push_default',
+  request: 'tdc_push_confession',
+  connection_accepted: 'tdc_push_default',
+  request_declined: 'tdc_push_default',
+  new_offer: 'tdc_push_deal',
+  offer_accepted: 'tdc_push_deal',
+  offer_rejected: 'tdc_push_default',
+  match_created: 'tdc_push_deal',
+  listing_created: 'tdc_push_deal',
+  listing_updated: 'tdc_push_default',
+  listing_deleted: 'tdc_push_default',
+  message: 'tdc_push_message',
+  new_job: 'tdc_push_internship',
+  internship: 'tdc_push_internship',
+  job_application: 'tdc_push_internship',
+  interview: 'tdc_push_internship',
+  reminder: 'tdc_push_reminder',
+  points: 'tdc_push_points',
+  streak: 'tdc_push_streak',
+  confession: 'tdc_push_confession',
+  event: 'tdc_push_event',
+  level_up: 'tdc_push_level_up',
+  badge: 'tdc_push_level_up',
+  System: 'tdc_push_default',
+  system: 'tdc_push_default',
+  transaction: 'tdc_push_default',
 };
 
 const TYPE_TO_CHANNEL = {
-  // Deals
-  new_offer:            'deals',
-  offer_accepted:       'deals',
-  match_created:        'deals',
-  listing_created:      'deals',
-
-  // Messages
-  message:              'messages',
-
-  // Jobs
-  new_job:              'jobs',
-  internship:           'jobs',
-  job_application:      'jobs',
-  interview:            'jobs',
-
-  // Engagement
-  reminder:             'reminders',
-  points:               'points',
-  streak:               'streaks',
-  confession:           'confessions',
-  event:                'events',
-  level_up:             'levelup',
-  badge:                'levelup',
+  new_offer: 'deals',
+  offer_accepted: 'deals',
+  match_created: 'deals',
+  listing_created: 'deals',
+  message: 'messages',
+  new_job: 'jobs',
+  internship: 'jobs',
+  job_application: 'jobs',
+  interview: 'jobs',
+  reminder: 'reminders',
+  points: 'points',
+  streak: 'streaks',
+  confession: 'confessions',
+  event: 'events',
+  level_up: 'levelup',
+  badge: 'levelup',
 };
 
 const resolveSound = (type) => TYPE_TO_SOUND[type] || 'tdc_push_default';
 const resolveChannel = (type) => TYPE_TO_CHANNEL[type] || 'engagement';
+
+// ═══════════════════════════════════════════════════════════════
+// ✅ THE KEY FIX — build message with NESTED android object
+//    Without this block, Android will not show heads-up popup
+//    when the app is killed.
+// ═══════════════════════════════════════════════════════════════
+function buildMessage(token, { title, body, data, soundName, channelId, iconUrl }) {
+  return {
+    to: token,
+
+    // iOS sound — Android ignores this, uses channel sound
+    sound: `${soundName}.wav`,
+    title,
+    body,
+    data,
+
+    // iOS priority
+    priority: 'high',
+
+    // Expo top-level channel (safe fallback)
+    channelId,
+
+    // ═══════════════════════════════════════════════════════════
+    // ✅ CRITICAL: NESTED ANDROID OBJECT
+    // This is what triggers heads-up popup when app is killed
+    // ═══════════════════════════════════════════════════════════
+    android: {
+      priority: 'max',              // MAX = heads-up popup even when killed
+      channelId,                    // routes to correct channel (with sound)
+      sound: `${soundName}.wav`,    // sound file in res/raw/
+      visibility: 'public',         // show on lock screen
+    },
+
+    // iOS rich content (mood icon)
+    ...(iconUrl && { mutableContent: true }),
+    ...(iconUrl && { richContent: { image: iconUrl } }),
+  };
+}
 
 // ═══════════════════════════════════════════════════════════════
 // SEND TO USER (multi-device)
@@ -103,47 +123,26 @@ const sendToUser = async (userId, title, body, extraData = {}) => {
   const mood = extraData.mood || 'sorted';
   const type = extraData.type || 'System';
   const iconUrl = extraData.iconUrl || iconUrlForMood(mood);
-
   const soundName = resolveSound(type);
   const channelId = extraData.channelId || resolveChannel(type);
 
-  // data payload — everything the app needs for deep-linking + sound
   const data = {
     ...extraData,
     mood,
     iconUrl,
     type,
     channelId,
-    // Ensure deep-link keys exist
     screen: extraData.screen || extraData.route || null,
     route: extraData.route || extraData.screen || null,
   };
 
   console.log(`[push] Sending to ${tokens.length} token(s)`, {
-    title,
-    type,
-    mood,
-    channelId,
-    soundName,
+    title, type, mood, channelId, soundName,
   });
 
   const messages = tokens
     .filter((t) => Expo.isExpoPushToken(t))
-    .map((t) => ({
-      to: t,
-      // iOS uses this sound; Android ignores it (uses channel sound)
-      sound: `${soundName}.wav`,
-      title,
-      body,
-      data,
-      // CRITICAL: heads-up popup on Android
-      priority: 'max',
-      // Android channel — must match a channel created in the app
-      channelId,
-      // iOS rich content
-      ...(iconUrl && { mutableContent: true }),
-      ...(iconUrl && { richContent: { image: iconUrl } }),
-    }));
+    .map((t) => buildMessage(t, { title, body, data, soundName, channelId, iconUrl }));
 
   if (messages.length === 0) {
     return { sent: false, reason: 'no_token' };
@@ -156,6 +155,16 @@ const sendToUser = async (userId, title, body, extraData = {}) => {
     try {
       const res = await expo.sendPushNotificationsAsync(chunk);
       tickets.push(...res);
+
+      // ✅ Log ticket details so you can verify it worked
+      res.forEach((ticket, i) => {
+        if (ticket.status === 'error') {
+          console.error(`[push] ❌ Ticket error ${i}:`, ticket.message, ticket.details);
+        } else {
+          console.log(`[push] ✅ Ticket OK ${i}: id=${ticket.id}`);
+        }
+      });
+
       console.log(`[push] Sent ${res.length} notifications`);
     } catch (err) {
       console.error('sendToUser send error:', err.message);
@@ -170,10 +179,7 @@ const sendToUser = async (userId, title, body, extraData = {}) => {
       );
       const dead = [];
       for (const [id, receipt] of Object.entries(receipts)) {
-        if (
-          receipt.status === 'error' &&
-          receipt.details?.error === 'DeviceNotRegistered'
-        ) {
+        if (receipt.status === 'error' && receipt.details?.error === 'DeviceNotRegistered') {
           dead.push(id);
         }
       }
@@ -206,7 +212,6 @@ const sendPushNotification = async (targetToken, title, body, extraData = {}) =>
   const mood = extraData.mood || 'sorted';
   const type = extraData.type || 'System';
   const iconUrl = extraData.iconUrl || iconUrlForMood(mood);
-
   const soundName = resolveSound(type);
   const channelId = extraData.channelId || resolveChannel(type);
 
@@ -220,24 +225,21 @@ const sendPushNotification = async (targetToken, title, body, extraData = {}) =>
     route: extraData.route || extraData.screen || null,
   };
 
-  const messages = [
-    {
-      to: targetToken,
-      sound: `${soundName}.wav`,
-      title,
-      body,
-      data,
-      priority: 'max',
-      channelId,
-      ...(iconUrl && { mutableContent: true }),
-      ...(iconUrl && { richContent: { image: iconUrl } }),
-    },
-  ];
+  const message = buildMessage(targetToken, {
+    title, body, data, soundName, channelId, iconUrl,
+  });
 
   try {
-    const chunks = expo.chunkPushNotifications(messages);
+    const chunks = expo.chunkPushNotifications([message]);
     for (const chunk of chunks) {
-      await expo.sendPushNotificationsAsync(chunk);
+      const res = await expo.sendPushNotificationsAsync(chunk);
+      res.forEach((ticket, i) => {
+        if (ticket.status === 'error') {
+          console.error(`[push] ❌ Ticket error ${i}:`, ticket.message, ticket.details);
+        } else {
+          console.log(`[push] ✅ Ticket OK ${i}: id=${ticket.id}`);
+        }
+      });
     }
     return { sent: true };
   } catch (error) {
