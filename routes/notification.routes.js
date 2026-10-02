@@ -8,6 +8,7 @@ const { sendPushNotification, sendToUser } = require('../utils/pushNotification'
 const pushGateway = require('../services/engagement/pushGateway');
 
 // ── 1. SAVE TOKEN (multi-device) ──
+// routes/notification.routes.js
 router.put('/save-token', auth, async (req, res) => {
   try {
     const userId = req.userId || req.user?._id || req.user?.id;
@@ -17,12 +18,19 @@ router.put('/save-token', auth, async (req, res) => {
     const { token, platform } = req.body;
     if (!token) return res.status(400).json({ message: 'Push token required' });
 
+    // ✅ Remove this token from ANY user (handles device switching accounts)
     await User.updateMany(
       { 'pushTokens.token': token },
       { $pull: { pushTokens: { token } } }
     );
 
-    await User.updateOne({ _id: userId }, { $pull: { pushTokens: { token } } });
+    // ✅ Remove old tokens from THIS user (one device = one token)
+    await User.updateOne(
+      { _id: userId },
+      { $pull: { pushTokens: { token: { $ne: token } } } }
+    );
+
+    // ✅ Add the new token
     await User.updateOne(
       { _id: userId },
       {
