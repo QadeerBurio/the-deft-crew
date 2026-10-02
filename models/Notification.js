@@ -22,22 +22,29 @@ const NotificationSchema = new mongoose.Schema({
   type: {
     type: String,
     enum: [
-      // System
-      "System", "Alert", "Update", "Welcome", "Reminder", "Promotion",
-      "Security", "Payment", "Card", "Transaction", "Booking",
-      // Jobs / career
-      "Job Application", "Job Posting", "Application Status", "Interview",
-      "Jobs", "Scholarship", "Course", "Exchange",
-      // Social
-      "Message", "Social", "Like", "Comment", "Follow",
-      // Offers
-      "Offer", "Brand",
-      // Engagement
-      "Badge", "LevelUp", "Streak", "Points", "Reward",
+      "System", 
+      "Job Application", 
+      "Job Posting", 
+      "Application Status", 
+      "Message", 
+      "Event", 
+      "Offer", 
+      "Alert", 
+      "Reminder", 
+      "Welcome", 
+      "Interview",
+      "Exchange",
+      "Scholarship",
+      "Course",
+      "Booking",
+      "Card",
+      "Payment",
+      "Jobs",
+      "Update",
+      "Promotion",
+      "Brand",
     ],
-    default: "System",
- 
-   
+    default: "System"
   },
   icon: {
     type: String,

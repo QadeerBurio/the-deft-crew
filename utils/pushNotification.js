@@ -1,17 +1,11 @@
 // utils/pushNotification.js
-// FIXED: Filters out tokens from wrong projects + handles mixed FCM projects
+// Sends TDC push notifications with per-type sounds and correct channels.
+// Works with: iOS (uses payload.sound) + Android (uses channel.sound)
 
 const { Expo } = require('expo-server-sdk');
 const User = require('../models/User');
 
 const expo = new Expo();
-
-// ═══════════════════════════════════════════════════════════════
-// ✅ CRITICAL: Your Expo project ID — MUST match the app
-// ═══════════════════════════════════════════════════════════════
-const EXPO_PROJECT_ID =
-  process.env.EXPO_PROJECT_ID ||
-  '112506b0-7553-4a1b-afeb-6a37019cc15f'; // from your app.json
 
 const ICON_BASE =
   process.env.PUSH_ICON_BASE ||
@@ -25,123 +19,85 @@ const iconUrlForMood = (mood) =>
 // ═══════════════════════════════════════════════════════════════
 const TYPE_TO_SOUND = {
   // Social
-  like: 'tdc_push_default',
-  comment: 'tdc_push_default',
-  follow: 'tdc_push_default',
-  request: 'tdc_push_confession',
-  connection_accepted: 'tdc_push_default',
-  request_declined: 'tdc_push_default',
+  like:                 'tdc_push_default',
+  comment:              'tdc_push_default',
+  follow:               'tdc_push_default',
+  request:              'tdc_push_confession',
+  connection_accepted:  'tdc_push_default',
+  request_declined:     'tdc_push_default',
 
   // SkillShare
-  new_offer: 'tdc_push_deal',
-  offer_accepted: 'tdc_push_deal',
-  offer_rejected: 'tdc_push_default',
-  match_created: 'tdc_push_deal',
-  listing_created: 'tdc_push_deal',
-  listing_updated: 'tdc_push_default',
-  listing_deleted: 'tdc_push_default',
+  new_offer:            'tdc_push_deal',
+  offer_accepted:       'tdc_push_deal',
+  offer_rejected:       'tdc_push_default',
+  match_created:        'tdc_push_deal',
+  listing_created:      'tdc_push_deal',
+  listing_updated:      'tdc_push_default',
+  listing_deleted:      'tdc_push_default',
 
   // Messages
-  message: 'tdc_push_message',
+  message:              'tdc_push_message',
 
   // Jobs
-  new_job: 'tdc_push_internship',
-  internship: 'tdc_push_internship',
-  job_application: 'tdc_push_internship',
-  interview: 'tdc_push_internship',
+  new_job:              'tdc_push_internship',
+  internship:           'tdc_push_internship',
+  job_application:      'tdc_push_internship',
+  interview:            'tdc_push_internship',
 
   // Engagement
-  reminder: 'tdc_push_reminder',
-  points: 'tdc_push_points',
-  streak: 'tdc_push_streak',
-  confession: 'tdc_push_confession',
-  event: 'tdc_push_event',
-  level_up: 'tdc_push_level_up',
-  badge: 'tdc_push_level_up',
+  reminder:             'tdc_push_reminder',
+  points:               'tdc_push_points',
+  streak:               'tdc_push_streak',
+  confession:           'tdc_push_confession',
+  event:                'tdc_push_event',
+  level_up:             'tdc_push_level_up',
+  badge:                'tdc_push_level_up',
 
   // System
-  System: 'tdc_push_default',
-  system: 'tdc_push_default',
-  transaction: 'tdc_push_default',
+  System:               'tdc_push_default',
+  system:               'tdc_push_default',
+  transaction:          'tdc_push_default',
 };
 
 const TYPE_TO_CHANNEL = {
-  new_offer: 'deals',
-  offer_accepted: 'deals',
-  match_created: 'deals',
-  listing_created: 'deals',
+  // Deals
+  new_offer:            'deals',
+  offer_accepted:       'deals',
+  match_created:        'deals',
+  listing_created:      'deals',
 
-  message: 'messages',
+  // Messages
+  message:              'messages',
 
-  new_job: 'jobs',
-  internship: 'jobs',
-  job_application: 'jobs',
-  interview: 'jobs',
+  // Jobs
+  new_job:              'jobs',
+  internship:           'jobs',
+  job_application:      'jobs',
+  interview:            'jobs',
 
-  reminder: 'reminders',
-  points: 'points',
-  streak: 'streaks',
-  confession: 'confessions',
-  event: 'events',
-  level_up: 'levelup',
-  badge: 'levelup',
+  // Engagement
+  reminder:             'reminders',
+  points:               'points',
+  streak:               'streaks',
+  confession:           'confessions',
+  event:                'events',
+  level_up:             'levelup',
+  badge:                'levelup',
 };
 
 const resolveSound = (type) => TYPE_TO_SOUND[type] || 'tdc_push_default';
 const resolveChannel = (type) => TYPE_TO_CHANNEL[type] || 'engagement';
 
 // ═══════════════════════════════════════════════════════════════
-// ✅ FILTER: Only keep tokens from OUR Expo project
-// Filters out tokens that belong to a different Expo project
-// (which is what caused "Unable to retrieve FCM server key")
-// ═══════════════════════════════════════════════════════════════
-const filterValidTokens = (tokens) => {
-  const valid = [];
-  const invalid = [];
-  const seen = new Set(); // dedupe
-
-  for (const t of tokens) {
-    if (!t) continue;
-    if (seen.has(t)) continue;
-    seen.add(t);
-
-    // Basic Expo push token format check
-    if (!Expo.isExpoPushToken(t)) {
-      invalid.push({ token: t, reason: 'invalid_format' });
-      continue;
-    }
-    valid.push(t);
-  }
-
-  return { valid, invalid };
-};
-
-// ═══════════════════════════════════════════════════════════════
-// ✅ SEND: Send each token INDIVIDUALLY to avoid the
-//    "same project" error killing the whole batch
+// SEND TO USER (multi-device)
 // ═══════════════════════════════════════════════════════════════
 const sendToUser = async (userId, title, body, extraData = {}) => {
   const user = await User.findById(userId).select('pushTokens').lean();
-  const rawTokens = (user?.pushTokens || []).map((t) => t.token).filter(Boolean);
-
-  if (rawTokens.length === 0) {
-    console.log(`[push] No tokens for user ${userId}`);
-    return { sent: false, reason: 'no_token' };
-  }
-
-  const { valid: tokens, invalid } = filterValidTokens(rawTokens);
-
-  if (invalid.length > 0) {
-    console.log(`[push] Filtered out ${invalid.length} invalid token(s):`, invalid);
-  }
+  const tokens = (user?.pushTokens || []).map((t) => t.token).filter(Boolean);
 
   if (tokens.length === 0) {
-    // Clean up invalid tokens
-    await User.updateOne(
-      { _id: userId },
-      { $set: { pushTokens: [] } }
-    ).catch(() => {});
-    return { sent: false, reason: 'no_valid_token' };
+    console.log(`[push] No tokens for user ${userId}`);
+    return { sent: false, reason: 'no_token' };
   }
 
   const mood = extraData.mood || 'sorted';
@@ -151,12 +107,14 @@ const sendToUser = async (userId, title, body, extraData = {}) => {
   const soundName = resolveSound(type);
   const channelId = extraData.channelId || resolveChannel(type);
 
+  // data payload — everything the app needs for deep-linking + sound
   const data = {
     ...extraData,
     mood,
     iconUrl,
     type,
     channelId,
+    // Ensure deep-link keys exist
     screen: extraData.screen || extraData.route || null,
     route: extraData.route || extraData.screen || null,
   };
@@ -169,93 +127,72 @@ const sendToUser = async (userId, title, body, extraData = {}) => {
     soundName,
   });
 
-  // ═══════════════════════════════════════════════════════════
-  // ✅ KEY FIX: Send each token individually
-  // If one token belongs to a different project, only THAT one
-  // fails — the rest succeed.
-  // ═══════════════════════════════════════════════════════════
-  const results = await Promise.allSettled(
-    tokens.map(async (t) => {
-      const message = {
-        to: t,
-        sound: `${soundName}.wav`,
-        title,
-        body,
-        data,
-        priority: 'high',
-        channelId,
-        ...(iconUrl && { mutableContent: true }),
-        ...(iconUrl && { richContent: { image: iconUrl } }),
-      };
+  const messages = tokens
+    .filter((t) => Expo.isExpoPushToken(t))
+    .map((t) => ({
+      to: t,
+      // iOS uses this sound; Android ignores it (uses channel sound)
+      sound: `${soundName}.wav`,
+      title,
+      body,
+      data,
+      // CRITICAL: heads-up popup on Android
+      priority: 'max',
+      // Android channel — must match a channel created in the app
+      channelId,
+      // iOS rich content
+      ...(iconUrl && { mutableContent: true }),
+      ...(iconUrl && { richContent: { image: iconUrl } }),
+    }));
 
-      try {
-        const ticket = await expo.sendPushNotificationsAsync([message]);
-        return { token: t, ticket: ticket?.[0] };
-      } catch (err) {
-        console.error(`[push] Send error for token ${t.slice(0, 30)}...:`, err.message);
-        return { token: t, error: err.message };
-      }
-    })
-  );
+  if (messages.length === 0) {
+    return { sent: false, reason: 'no_token' };
+  }
 
-  // ═══════════════════════════════════════════════════════════
-  // ✅ Analyze results — collect dead tokens
-  // ═══════════════════════════════════════════════════════════
-  const deadTokens = [];
-  let successCount = 0;
-  let failCount = 0;
+  const chunks = expo.chunkPushNotifications(messages);
+  const tickets = [];
 
-  for (const r of results) {
-    if (r.status !== 'fulfilled') continue;
-    const { token, ticket, error } = r.value;
-
-    if (error) {
-      failCount++;
-      continue;
+  for (const chunk of chunks) {
+    try {
+      const res = await expo.sendPushNotificationsAsync(chunk);
+      tickets.push(...res);
+      console.log(`[push] Sent ${res.length} notifications`);
+    } catch (err) {
+      console.error('sendToUser send error:', err.message);
     }
+  }
 
-    if (ticket?.status === 'error') {
-      failCount++;
-      const errCode = ticket.details?.error;
-      console.warn(
-        `[push] Ticket error for ${token.slice(0, 30)}...:`,
-        errCode,
-        ticket.message
+  // Dead-token cleanup
+  setImmediate(async () => {
+    try {
+      const receipts = await expo.getPushNotificationReceiptsAsync(
+        tickets.map((t) => t.id).filter(Boolean)
       );
-
-      if (errCode === 'DeviceNotRegistered') {
-        deadTokens.push(token);
+      const dead = [];
+      for (const [id, receipt] of Object.entries(receipts)) {
+        if (
+          receipt.status === 'error' &&
+          receipt.details?.error === 'DeviceNotRegistered'
+        ) {
+          dead.push(id);
+        }
       }
-      // ✅ Also drop tokens from other projects
-      if (
-        errCode === 'MismatchSenderId' ||
-        ticket.message?.includes('same project') ||
-        ticket.message?.includes('FCM server key')
-      ) {
-        deadTokens.push(token);
+      if (dead.length) {
+        const tokenById = Object.fromEntries(tickets.map((t) => [t.id, t.to]));
+        const deadTokens = dead.map((id) => tokenById[id]).filter(Boolean);
+        if (deadTokens.length) {
+          await User.updateOne(
+            { _id: userId },
+            { $pull: { pushTokens: { token: { $in: deadTokens } } } }
+          );
+        }
       }
-    } else {
-      successCount++;
+    } catch (err) {
+      console.error('Receipt cleanup error:', err.message);
     }
-  }
+  });
 
-  console.log(`[push] Result: ${successCount} sent, ${failCount} failed, ${deadTokens.length} dead`);
-
-  // Clean up dead tokens
-  if (deadTokens.length > 0) {
-    await User.updateOne(
-      { _id: userId },
-      { $pull: { pushTokens: { token: { $in: deadTokens } } } }
-    ).catch((e) => console.error('[push] Token cleanup failed:', e.message));
-    console.log(`[push] Cleaned up ${deadTokens.length} dead token(s)`);
-  }
-
-  return {
-    sent: successCount > 0,
-    count: successCount,
-    failed: failCount,
-    cleaned: deadTokens.length,
-  };
+  return { sent: true, count: tickets.length };
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -269,6 +206,7 @@ const sendPushNotification = async (targetToken, title, body, extraData = {}) =>
   const mood = extraData.mood || 'sorted';
   const type = extraData.type || 'System';
   const iconUrl = extraData.iconUrl || iconUrlForMood(mood);
+
   const soundName = resolveSound(type);
   const channelId = extraData.channelId || resolveChannel(type);
 
@@ -282,25 +220,29 @@ const sendPushNotification = async (targetToken, title, body, extraData = {}) =>
     route: extraData.route || extraData.screen || null,
   };
 
-  const message = {
-    to: targetToken,
-    sound: `${soundName}.wav`,
-    title,
-    body,
-    data,
-    priority: 'high',
-    channelId,
-    ...(iconUrl && { mutableContent: true }),
-    ...(iconUrl && { richContent: { image: iconUrl } }),
-  };
+  const messages = [
+    {
+      to: targetToken,
+      sound: `${soundName}.wav`,
+      title,
+      body,
+      data,
+      priority: 'max',
+      channelId,
+      ...(iconUrl && { mutableContent: true }),
+      ...(iconUrl && { richContent: { image: iconUrl } }),
+    },
+  ];
 
   try {
-    const ticket = await expo.sendPushNotificationsAsync([message]);
-    console.log('[push] sendPushNotification ticket:', ticket?.[0]);
-    return { sent: true, ticket: ticket?.[0] };
+    const chunks = expo.chunkPushNotifications(messages);
+    for (const chunk of chunks) {
+      await expo.sendPushNotificationsAsync(chunk);
+    }
+    return { sent: true };
   } catch (error) {
     console.error('Error sending push:', error);
-    return { sent: false, reason: 'send_failed', error: error.message };
+    return { sent: false, reason: 'send_failed' };
   }
 };
 
