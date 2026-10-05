@@ -3147,18 +3147,7 @@ router.post('/notifications/create-message-notif', auth, async (req, res) => {
       io.to(recipientId.toString()).emit('new_notification', populated);
     }
 
-    // ✅ Device push so the message shows when the app is closed/killed
-    setImmediate(() => {
-      sendToUser(recipientId, sender?.name ? `${sender.name} 💬` : 'new message 💬', preview, {
-        notificationId: notif._id.toString(),
-        type: 'message',
-        mood: 'cheeky',
-        senderId: senderId.toString(),
-        conversationId: conversationId ? String(conversationId) : null,
-        route: 'MessagesScreen',
-        params: {},
-      }).catch((e) => console.error('[message push]', e.message));
-    });
+    // Device push for chat messages is sent from socket/chatSocket.js (send_message)
 
     res.json({ success: true, notification: populated });
   } catch (err) {

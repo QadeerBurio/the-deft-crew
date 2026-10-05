@@ -9,7 +9,7 @@ const copy = require('./copy');
 
 const expo = new Expo();
 
-const { iconUrlForMood } = require('../../utils/pushNotification');
+const { iconUrlForMood, titleWithEmoji, resolveSoundKey, channelForSound } = require('../../utils/pushNotification');
 
 // ── CORE SEND ──
 async function send(userId, msg) {
@@ -48,25 +48,31 @@ async function send(userId, msg) {
     const tokens = (user?.pushTokens || []).map((t) => t.token).filter(Boolean);
     if (tokens.length === 0) return { sent: false, reason: 'no_token' };
 
-    // Mood emoji image (served by this backend at /assets/dots/<mood>.png)
+    // Same emoji image, emoji title and sound as the in-app banner
     const moodImage = iconUrlForMood(mood);
+    const soundKey = resolveSoundKey(type, mood);
+    const channelId = channelForSound(soundKey);
+    const fullTitle = titleWithEmoji(title || 'tdc', mood);
 
     const messages = tokens
       .filter((t) => Expo.isExpoPushToken(t))
       .map((t) => ({
         to: t,
-        title: title || undefined,
+        title: fullTitle,
         body: body || '',
-        sound: 'tdc_push_default.wav',
-        channelId: 'engagement',
+        sound: `${soundKey}.wav`,
+        channelId,
         priority: 'high',
         ttl: 60 * 60 * 24,
-        ...(moodImage ? { richContent: { image: moodImage }, mutableContent: true } : {}),
+        richContent: { image: moodImage },
+        mutableContent: true,
         data: {
           v: 1,
           type,
           mood,
-          iconUrl: moodImage || null,
+          iconUrl: moodImage,
+          channelId,
+          soundKey,
           ...data,
         },
       }));

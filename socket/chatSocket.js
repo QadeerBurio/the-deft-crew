@@ -1,6 +1,69 @@
 // socket.js - If you want to keep it separate
 const { Message, Conversation } = require('../models/Chat');
 const User = require('../models/User');
+const { sendToUser } = require('../utils/pushNotification');
+
+// Push a chat message to every participant who is NOT looking at this chat
+// right now. Covers social DMs, SkillShare match chats and inquiry chats.
+async function pushChatMessage(io, conversationId, senderId, displayMsg) {
+  try {
+    const convo = await Conversation.findById(conversationId).select('participants').lean();
+    if (!convo?.participants?.length) return;
+
+    const sender = await User.findById(senderId).select('name').lean();
+    const senderName = sender?.name || 'someone';
+
+    // Which kind of chat is it? Decides which screen a tap opens.
+    let route = 'MessagesScreen';
+    let baseParams = { conversationId: String(conversationId) };
+    try {
+      const Match = require('../models/Match');
+      const match = await Match.findOne({ conversationId }).select('_id listingId').lean();
+      if (match) {
+        route = 'MatchChat';
+        baseParams = { matchId: String(match._id), listingId: match.listingId ? String(match.listingId) : undefined };
+      } else {
+        const Inquiry = require('../models/Inquiry');
+        const inquiry = await Inquiry.findOne({ conversationId }).select('_id listingId').lean();
+        if (inquiry) {
+          route = 'InquiryChat';
+          baseParams = {
+            threadId: String(conversationId),
+            listingId: inquiry.listingId ? String(inquiry.listingId) : undefined,
+            otherParticipantId: String(senderId),
+          };
+        }
+      }
+    } catch (e) { /* fall back to MessagesScreen */ }
+
+    // Sockets currently inside this chat room = people actively reading it
+    const room = io.sockets.adapter.rooms.get(String(conversationId));
+    const viewing = new Set();
+    if (room) {
+      for (const sid of room) {
+        const s = io.sockets.sockets.get(sid);
+        if (s?.userId) viewing.add(String(s.userId));
+      }
+    }
+
+    const preview = displayMsg.length > 80 ? displayMsg.slice(0, 80) + '…' : displayMsg;
+
+    for (const p of convo.participants) {
+      const pid = String(p._id || p);
+      if (pid === String(senderId) || viewing.has(pid)) continue;
+      sendToUser(pid, `${senderName} 💬`, preview, {
+        type: 'message',
+        mood: 'cheeky',
+        senderId: String(senderId),
+        conversationId: String(conversationId),
+        route,
+        params: route === 'InquiryChat' ? baseParams : { ...baseParams },
+      }).catch((e) => console.error('[chat push]', e.message));
+    }
+  } catch (err) {
+    console.error('[chat push] error:', err.message);
+  }
+}
 
 const onlineUsers = new Map();
 const userCallStatus = new Map();
@@ -101,6 +164,11 @@ module.exports = (io) => {
 
         io.emit('inbox_update');
         console.log(`Message sent to conversation ${conversationId}`);
+
+        // ✅ Device push for people not in this chat (app closed / other screen)
+        if (messageType !== 'call_log') {
+          setImmediate(() => pushChatMessage(io, conversationId, senderId, displayMsg));
+        }
       } catch (err) {
         console.error('Send message error:', err);
         socket.emit('message_error', { error: 'Failed to send message' });

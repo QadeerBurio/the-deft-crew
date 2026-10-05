@@ -8,7 +8,7 @@ const pushLogSchema = new mongoose.Schema(
     priority: { type: Number, default: 0 },
     title: { type: String, default: '' },
     body: { type: String, default: '' },
-     // ✅ Mood icon key (used to build the icon URL)
+    // Mood icon key (used to build the icon URL)
     mood: { type: String, default: 'sorted', index: true },
 
     dayKey: { type: String, index: true },
@@ -17,7 +17,8 @@ const pushLogSchema = new mongoose.Schema(
     deliveredAt: { type: Date, default: null },
     openedAt: { type: Date, default: null },
 
-    ticketId: { type: String, default: null, index: true },
+    // Indexed once below (sparse), so no `index: true` here
+    ticketId: { type: String, default: null },
     receiptStatus: {
       type: String,
       enum: ['pending', 'ok', 'error', 'unknown'],

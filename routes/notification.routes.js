@@ -74,17 +74,12 @@ router.post('/send', auth, async (req, res) => {
       description,
       type: type || 'System',
       mood: resolvedMood, // ✅ Use resolved value
-      metadata: metadata || {},
+      metadata: { ...(metadata || {}), ...(screenToOpen ? { screen: screenToOpen } : {}) },
       readBy: [],
       deletedBy: [],
     });
 
-    await sendToUser(recipientId, title, description, {
-      notificationId: newNotification._id.toString(),
-      screen: screenToOpen,
-      mood: resolvedMood, // ✅ Use resolved value
-      ...metadata,
-    });
+    // Push is sent automatically by the Notification model (post-save hook).
 
     console.log('[Notification] Sent:', newNotification._id, 'to:', recipientId);
     res.status(201).json(newNotification);
@@ -218,6 +213,66 @@ router.delete('/clear-all', auth, async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ message: 'Clear failed' });
+  }
+});
+
+// ── PUSH SELF-TEST ──
+// GET /api/notification/test-push  (logged-in user)
+// Sends a push to your own devices and waits for Expo receipts, so you can see
+// exactly why a push does not show outside the app.
+router.get('/test-push', auth, async (req, res) => {
+  try {
+    const { Expo } = require('expo-server-sdk');
+    const { buildMessage, iconUrlForMood, resolveSoundKey, channelForSound } = require('../utils/pushNotification');
+    const expo = new Expo(process.env.EXPO_ACCESS_TOKEN ? { accessToken: process.env.EXPO_ACCESS_TOKEN } : {});
+
+    const userId = req.userId || req.user?._id || req.user?.id;
+    const user = await User.findById(userId).select('pushTokens').lean();
+    const tokens = (user?.pushTokens || []).map((t) => t.token).filter(Boolean);
+
+    if (!tokens.length) {
+      return res.json({ ok: false, problem: 'NO_TOKEN', fix: 'App never saved a push token. Open the built app (not Expo Go), log in, allow notifications.' });
+    }
+
+    const valid = tokens.filter((t) => Expo.isExpoPushToken(t));
+    const messages = valid.map((t) =>
+      buildMessage(t, {
+        title: '🤩 tdc test push',
+        body: 'if you see this outside the app with the tdc sound, push works ✅',
+        data: { type: 'System', mood: 'excited', route: 'NotificationModal', soundKey: resolveSoundKey('System', 'excited') },
+        soundName: resolveSoundKey('System', 'excited'),
+        channelId: channelForSound(resolveSoundKey('System', 'excited')),
+        iconUrl: iconUrlForMood('excited'),
+      })
+    );
+
+    const tickets = await expo.sendPushNotificationsAsync(messages);
+    await new Promise((r) => setTimeout(r, 6000));
+    const ids = tickets.filter((t) => t.id).map((t) => t.id);
+    const receipts = ids.length ? await expo.getPushNotificationReceiptsAsync(ids) : {};
+
+    const results = tickets.map((t, i) => {
+      const receipt = t.id ? receipts[t.id] : null;
+      const err = t.details?.error || receipt?.details?.error || null;
+      const hints = {
+        InvalidCredentials: 'Upload FCM V1 service account key: eas credentials → Android → Google Service Account → FCM V1.',
+        DeviceNotRegistered: 'Token is dead (app uninstalled/reinstalled). Open the app and log in again.',
+        MessageTooBig: 'Payload too large.',
+        MismatchSenderId: 'google-services.json Firebase project does not match the FCM key uploaded to EAS.',
+      };
+      return {
+        token: valid[i].slice(0, 30) + '…',
+        ticket: t.status,
+        receipt: receipt?.status || (t.id ? 'pending' : null),
+        error: err || t.message || receipt?.message || null,
+        fix: err ? hints[err] || null : null,
+      };
+    });
+
+    res.json({ ok: results.every((r) => r.ticket === 'ok' && r.receipt !== 'error'), tokenCount: tokens.length, results });
+  } catch (err) {
+    console.error('[test-push]', err);
+    res.status(500).json({ ok: false, problem: 'SEND_FAILED', error: err.message });
   }
 });
 

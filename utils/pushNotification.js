@@ -29,10 +29,56 @@ const VALID_MOODS = new Set([
   'smug', 'shock', 'broke', 'money', 'ghost', 'urgent',
 ]);
 
+// 256px circle versions of the in-app banner icons (public/dots/push)
 const iconUrlForMood = (mood) => {
   const m = VALID_MOODS.has(mood) ? mood : 'sorted';
-  return `${ICON_BASE}/${m}.png`;
+  return `${ICON_BASE}/push/${m}.png`;
 };
+
+// Same emoji the in-app banner uses (app/src/utils/notificationIcon.js)
+const MOOD_EMOJI = {
+  sorted: '😌', panic: '😰', excited: '🤩', broke: '😔', sleepy: '😴',
+  shook: '😳', sus: '👀', cheeky: '😜', hype: '🔥', smug: '😏',
+  shock: '😮', urgent: '🚨', money: '💰', ghost: '👻',
+};
+const EMOJI_RE = /\p{Extended_Pictographic}/u;
+
+// Adds the mood emoji in front of the title, unless it already has one
+const titleWithEmoji = (title, mood) => {
+  const t = title || 'TDC';
+  if (EMOJI_RE.test(t)) return t;
+  return `${MOOD_EMOJI[mood] || '✨'} ${t}`;
+};
+
+// ═══════════════════════════════════════════════════════════════
+// SOUND: exact copy of the in-app rule (app/src/lib/tdcSounds.js
+// playSoundForNotification): mood sound first, else type sound.
+// Each sound has its own Android channel "snd_<sound>", because on
+// Android the sound of a background notification comes from its channel.
+// ═══════════════════════════════════════════════════════════════
+const MOOD_SOUND = {
+  sorted: 'tdc_mood_sorted', excited: 'tdc_mood_excited', panic: 'tdc_mood_panic',
+  broke: 'tdc_mood_broke', sleepy: 'tdc_mood_sleepy', shook: 'tdc_mood_shook',
+  sus: 'tdc_mood_sus', cheeky: 'tdc_mood_cheeky', rs: 'tdc_mood_rs',
+};
+
+const TYPE_SOUND = {
+  like: 'tdc_like', comment: 'tdc_like',
+  follow: 'tdc_push_message', request: 'tdc_push_message', connection_accepted: 'tdc_push_message',
+  message: 'tdc_push_message', Message: 'tdc_push_message',
+  new_offer: 'tdc_push_deal', offer_accepted: 'tdc_push_deal', match_created: 'tdc_push_deal',
+  offer_rejected: 'tdc_nope', request_declined: 'tdc_nope',
+  new_job: 'tdc_push_internship', internship: 'tdc_push_internship',
+  confession: 'tdc_push_confession',
+  event: 'tdc_push_event',
+  streak: 'tdc_push_streak',
+  points: 'tdc_push_points', rs: 'tdc_push_points',
+  level_up: 'tdc_push_level_up', badge: 'tdc_push_level_up',
+  reminder: 'tdc_push_reminder',
+};
+
+const resolveSoundKey = (type, mood) => MOOD_SOUND[mood] || TYPE_SOUND[type] || 'tdc_push_default';
+const channelForSound = (soundKey) => `snd_${soundKey}`;
 
 // ═══════════════════════════════════════════════════════════════
 // TYPE → SOUND + CHANNEL
@@ -194,20 +240,22 @@ async function sendMessages(messages, userIdForCleanup = null) {
 }
 
 function buildData(type, extraData) {
-  const mood = VALID_MOODS.has(extraData.mood) ? extraData.mood : 'sorted';
+  const mood = VALID_MOODS.has(extraData.mood) || extraData.mood === 'rs' ? extraData.mood : 'sorted';
   const iconUrl = extraData.iconUrl || iconUrlForMood(mood);
-  const channelId = resolveChannel(type, extraData.channelId);
+  const soundKey = resolveSoundKey(type, mood);
+  const channelId = channelForSound(soundKey);
   const data = {
     ...extraData,
     type,
     mood,
     iconUrl,
     channelId,
+    soundKey,
     screen: extraData.screen || extraData.route || null,
     route: extraData.route || extraData.screen || null,
   };
   // Expo data must be JSON-serializable: stringify ObjectIds
-  return { data: JSON.parse(JSON.stringify(data)), mood, iconUrl, channelId };
+  return { data: JSON.parse(JSON.stringify(data)), mood, iconUrl, channelId, soundKey };
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -225,11 +273,11 @@ const sendToUser = async (userId, title, body, extraData = {}) => {
     }
 
     const type = extraData.type || 'System';
-    const { data, iconUrl, channelId } = buildData(type, extraData);
-    const soundName = resolveSound(type);
+    const { data, iconUrl, channelId, soundKey, mood } = buildData(type, extraData);
+    const fullTitle = titleWithEmoji(title, mood);
 
     const messages = tokens.map((t) =>
-      buildMessage(t, { title, body, data, soundName, channelId, iconUrl })
+      buildMessage(t, { title: fullTitle, body, data, soundName: soundKey, channelId, iconUrl })
     );
 
     console.log(`[push] → user ${userId}: ${tokens.length} device(s)`, { title, type, channelId });
@@ -249,9 +297,9 @@ const sendPushNotification = async (targetToken, title, body, extraData = {}) =>
   if (!Expo.isExpoPushToken(targetToken)) return { sent: false, reason: 'invalid_token' };
 
   const type = extraData.type || 'System';
-  const { data, iconUrl, channelId } = buildData(type, extraData);
+  const { data, iconUrl, channelId, soundKey, mood } = buildData(type, extraData);
   const message = buildMessage(targetToken, {
-    title, body, data, soundName: resolveSound(type), channelId, iconUrl,
+    title: titleWithEmoji(title, mood), body, data, soundName: soundKey, channelId, iconUrl,
   });
 
   const pairs = await sendMessages([message]);
@@ -265,6 +313,12 @@ module.exports = {
   sendMessages,
   buildMessage,
   iconUrlForMood,
+  titleWithEmoji,
+  resolveSoundKey,
+  channelForSound,
+  MOOD_EMOJI,
+  MOOD_SOUND,
+  TYPE_SOUND,
   resolveChannel,
   resolveSound,
   TYPE_TO_SOUND,

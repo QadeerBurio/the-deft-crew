@@ -20,6 +20,9 @@ const TYPE_TO_MOOD = {
   request: 'sus',
   connection_accepted: 'hype',
   request_declined: 'sleepy',
+  reply: 'cheeky',
+  mention: 'sus',
+  alert: 'urgent',
 
   // SkillShare
   new_offer: 'shook',
@@ -99,7 +102,7 @@ const NotificationTemplates = {
 // createNotification — persists a SocialNotification (no push)
 // Kept as default export for backward compat
 // ═══════════════════════════════════════════════════════════════
-const createNotification = async (
+const persistNotification = async (
   recipientId,
   senderId,
   type,
@@ -160,9 +163,82 @@ const createNotification = async (
     await notification.save();
     return notification;
   } catch (error) {
-    console.error('[createNotification]', error.message);
+    console.error('[persistNotification]', error.message);
     return null;
   }
+};
+
+// ═══════════════════════════════════════════════════════════════
+// Push title per type (emoji shows in the system notification too)
+// ═══════════════════════════════════════════════════════════════
+const TYPE_TO_TITLE = {
+  like: 'new like ❤️',
+  comment: 'new comment 💬',
+  reply: 'new reply 💬',
+  mention: 'you got mentioned 👀',
+  follow: 'new follower 🌟',
+  request: 'connection request 👤',
+  connection_accepted: 'connection accepted 🎉',
+  request_declined: 'connection update',
+  alert: 'heads up ⚠️',
+  message: 'new message 💬',
+};
+
+// Where a tap on the system notification should open
+const routeForType = (type, relatedId) => {
+  if (['like', 'comment', 'reply', 'mention'].includes(type) && relatedId) {
+    return { route: 'PostDetailScreen', params: { postId: String(relatedId) } };
+  }
+  if (type === 'message') return { route: 'MessagesScreen', params: {} };
+  return { route: 'Notifications', params: {} };
+};
+
+// Fire-and-forget device push for a saved notification
+const pushForNotification = (notification, { title, body, type, mood, metadata = {}, link = null }) => {
+  setImmediate(async () => {
+    try {
+      const nav = routeForType(type, notification.relatedId);
+      await sendToUser(notification.recipient, title, body, {
+        notificationId: notification._id.toString(),
+        senderId: notification.sender ? String(notification.sender) : null,
+        type,
+        mood,
+        link,
+        route: nav.route,
+        params: nav.params,
+        ...(notification.relatedId ? { postId: String(notification.relatedId) } : {}),
+        ...metadata,
+      });
+    } catch (err) {
+      console.error('[pushForNotification]', err.message);
+    }
+  });
+};
+
+// ═══════════════════════════════════════════════════════════════
+// createNotification — saves the notification AND pushes it to the
+// device so it shows when the app is in background / killed.
+// Same signature as before, so every existing caller gets push.
+// ═══════════════════════════════════════════════════════════════
+const createNotification = async (
+  recipientId,
+  senderId,
+  type,
+  text,
+  relatedId = null,
+  mood = null
+) => {
+  const resolvedMood = mood || TYPE_TO_MOOD[type] || 'sorted';
+  const notification = await persistNotification(recipientId, senderId, type, text, relatedId, resolvedMood);
+  if (notification) {
+    pushForNotification(notification, {
+      title: TYPE_TO_TITLE[type] || 'TDC',
+      body: text || '',
+      type,
+      mood: resolvedMood,
+    });
+  }
+  return notification;
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -190,8 +266,8 @@ const createAndSendNotification = async ({
 
     const resolvedMood = mood || TYPE_TO_MOOD[type] || 'sorted';
 
-    // 1. Save the notification
-    const notification = await createNotification(
+    // 1. Save the notification (no push yet)
+    const notification = await persistNotification(
       recipientId,
       senderId,
       type,
@@ -202,43 +278,17 @@ const createAndSendNotification = async ({
 
     if (!notification) return null;
 
-    // 2. Fire device push
-    setImmediate(async () => {
-      try {
-        const pushData = {
-          // Core identifiers
-          notificationId: notification._id.toString(),
-          type,
-          mood: resolvedMood,
-          
-          // Navigation
-          screen: metadata?.screen || null,
-          route: metadata?.route || null,
-          
-          // Link
-          link: link || null,
-          
-          // Channel (for Android)
-          channelId: metadata?.channelId || 'default',
-          
-          // All metadata (includes offerId, listingId, matchId, etc.)
-          ...metadata,
-        };
-
-        await sendToUser(
-          recipientId,
-          title || 'notification',
-          description || '',
-          pushData
-        );
-        
-        console.log(
-          `[createAndSendNotification] push sent → ${recipientId} (${type}/${resolvedMood})`,
-          'screen:', pushData.screen
-        );
-      } catch (err) {
-        console.error('[createAndSendNotification] push error:', err.message);
-      }
+    // 2. Push to device with the caller's title + navigation metadata
+    pushForNotification(notification, {
+      title: title || 'notification',
+      body: description || '',
+      type,
+      mood: resolvedMood,
+      link,
+      metadata: {
+        ...(metadata?.screen ? { screen: metadata.screen, route: metadata.route || metadata.screen } : {}),
+        ...metadata,
+      },
     });
 
     return notification;
@@ -253,3 +303,5 @@ module.exports.createNotification = createNotification;
 module.exports.createAndSendNotification = createAndSendNotification;
 module.exports.NotificationTemplates = NotificationTemplates;
 module.exports.TYPE_TO_MOOD = TYPE_TO_MOOD;
+module.exports.persistNotification = persistNotification;
+module.exports.pushForNotification = pushForNotification;
