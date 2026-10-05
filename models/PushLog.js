@@ -17,7 +17,7 @@ const pushLogSchema = new mongoose.Schema(
     deliveredAt: { type: Date, default: null },
     openedAt: { type: Date, default: null },
 
-    ticketId: { type: String, default: null, },
+    ticketId: { type: String, default: null, index: true },
     receiptStatus: {
       type: String,
       enum: ['pending', 'ok', 'error', 'unknown'],
