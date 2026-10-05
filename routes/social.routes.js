@@ -3142,11 +3142,23 @@ router.post('/notifications/create-message-notif', auth, async (req, res) => {
     const populated = await Notification.findById(notif._id)
       .populate('sender', 'name profileImage username');
 
-    // Optionally emit via socket for real-time delivery
-    const io = req.app.get('io');
+        const io = req.app.get('io');
     if (io) {
       io.to(recipientId.toString()).emit('new_notification', populated);
     }
+
+    // ✅ Device push so the message shows when the app is closed/killed
+    setImmediate(() => {
+      sendToUser(recipientId, sender?.name ? `${sender.name} 💬` : 'new message 💬', preview, {
+        notificationId: notif._id.toString(),
+        type: 'message',
+        mood: 'cheeky',
+        senderId: senderId.toString(),
+        conversationId: conversationId ? String(conversationId) : null,
+        route: 'MessagesScreen',
+        params: {},
+      }).catch((e) => console.error('[message push]', e.message));
+    });
 
     res.json({ success: true, notification: populated });
   } catch (err) {

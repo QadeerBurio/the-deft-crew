@@ -9,8 +9,7 @@ const copy = require('./copy');
 
 const expo = new Expo();
 
-// CDN base for mood icons — set in .env
-const CDN_BASE_URL = process.env.CDN_BASE_URL || '';
+const { iconUrlForMood } = require('../../utils/pushNotification');
 
 // ── CORE SEND ──
 async function send(userId, msg) {
@@ -49,10 +48,8 @@ async function send(userId, msg) {
     const tokens = (user?.pushTokens || []).map((t) => t.token).filter(Boolean);
     if (tokens.length === 0) return { sent: false, reason: 'no_token' };
 
-    // ✅ Mood icon URL for rich content
-    const moodImage = CDN_BASE_URL
-      ? `${CDN_BASE_URL}/dots/${mood}-1024x512.png`
-      : undefined;
+    // Mood emoji image (served by this backend at /assets/dots/<mood>.png)
+    const moodImage = iconUrlForMood(mood);
 
     const messages = tokens
       .filter((t) => Expo.isExpoPushToken(t))
@@ -60,11 +57,11 @@ async function send(userId, msg) {
         to: t,
         title: title || undefined,
         body: body || '',
-        sound: 'default',
+        sound: 'tdc_push_default.wav',
         channelId: 'engagement',
         priority: 'high',
-        // ✅ Attach mood image as rich content
-        ...(moodImage ? { richContent: { image: moodImage } } : {}),
+        ttl: 60 * 60 * 24,
+        ...(moodImage ? { richContent: { image: moodImage }, mutableContent: true } : {}),
         data: {
           v: 1,
           type,
@@ -170,8 +167,6 @@ async function sendDailyDropPush(drop) {
         'dailyDrop',
         {},
         {
-           mood,                       // ✅ REQUIRED
-    iconUrl: iconUrlForMood(mood), // ✅ RECOMMENDED
           route: 'Home',
           params: { dayKey: drop.dayKey },
           dropId: drop._id.toString(),

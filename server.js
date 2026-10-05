@@ -39,6 +39,8 @@ app.use(express.urlencoded({ extended: true, limit: "5mb" }));
 
 // Static files
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+// Mood emoji images used as the picture in push notifications
+app.use("/assets/dots", express.static(path.join(__dirname, "public", "dots"), { maxAge: "7d" }));
 
 // ---------------- DATABASE ----------------
 connectDB().then(() => {
