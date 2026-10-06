@@ -32,10 +32,14 @@ const VALID_MOODS = new Set([
 // 256px circle versions of the in-app banner icons (public/dots/push)
 // The images must be committed in public/dots/push. If the folder is missing
 // on the server, skip the image instead of sending a broken (404) link.
-const PUSH_IMG_DIR = require('path').join(__dirname, '..', 'public', 'dots', 'push');
-const HAS_LOCAL_IMAGES = require('fs').existsSync(PUSH_IMG_DIR);
+// public/dots/push or uploads/dots/push (both are served at /assets/dots/push)
+const PUSH_IMG_DIR = ['public', 'uploads']
+  .map((base) => require('path').join(__dirname, '..', base, 'dots', 'push'))
+  .find((dir) => require('fs').existsSync(dir));
+const HAS_LOCAL_IMAGES = !!PUSH_IMG_DIR;
+if (HAS_LOCAL_IMAGES) console.log('🖼️  [push] mood images from', PUSH_IMG_DIR);
 if (!HAS_LOCAL_IMAGES && !process.env.PUSH_ICON_BASE) {
-  console.warn('⚠️  [push] public/dots/push not found on server: push images are OFF. Run: git add public && git commit && git push');
+  console.warn('⚠️  [push] dots/push not found in public/ or uploads/: push images are OFF. Run: git add public && git commit && git push');
 }
 
 const iconUrlForMood = (mood) => {

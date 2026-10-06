@@ -66,18 +66,28 @@ router.post('/test-push', async (req, res) => {
       });
     }
 
-    // Resolve copy
-    let resolvedTitle = title, resolvedBody = body, resolvedMood = 'sorted';
-    if (!resolvedBody) {
-      try {
-        const copy = require('../services/engagement/copy');
-        const filled = copy.fill(copyKey || 'daily_drop', {});
-        resolvedTitle = resolvedTitle || filled.title || undefined;
-        resolvedBody = filled.body || 'new notification';
-        resolvedMood = filled.mood || 'sorted';
-      } catch {
-        resolvedBody = 'new notification';
-      }
+    // Resolve copy. Mood (= emoji, picture, sound) ALWAYS comes from the copy
+    // key, also when the admin types a custom title/body, so the phone shows
+    // exactly what the admin preview shows.
+    const COPY_LABELS = {
+      daily_drop: 'daily drop', streak_warning: 'streak at risk', streak_broken: 'streak broke',
+      freeze_used: 'freeze saved', badge_earned: 'badge earned', tier_unlocked: 'level up',
+      referral_joined: 'referral joined', win_back_soft: 'we kept your seat warm',
+      welcome_back: 'welcome back', exclusive_offer: 'exclusive offer', win_back_ghost: 'we miss you',
+      new_offer: 'new offer', new_for_you: 'new for you', app_update: 'app update',
+      freeze_reset: 'freeze reset', transactional: 'tdc',
+    };
+    const key = copyKey || 'daily_drop';
+    let resolvedTitle = title || COPY_LABELS[key] || 'tdc';
+    let resolvedBody = body;
+    let resolvedMood = 'sorted';
+    try {
+      const copy = require('../services/engagement/copy');
+      const filled = copy.fill(key, {});
+      resolvedMood = filled.mood || 'sorted';
+      if (!resolvedBody) resolvedBody = filled.body || 'new notification';
+    } catch {
+      if (!resolvedBody) resolvedBody = 'new notification';
     }
 
     // Send
@@ -86,7 +96,7 @@ router.post('/test-push', async (req, res) => {
     for (const u of targetUsers) {
       try {
         const result = await pushGateway.sendPushToUser(u._id, {
-          type: copyKey || 'transactional',
+          type: key,
           title: resolvedTitle,
           body: resolvedBody,
           mood: resolvedMood,
