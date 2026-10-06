@@ -30,7 +30,16 @@ const VALID_MOODS = new Set([
 ]);
 
 // 256px circle versions of the in-app banner icons (public/dots/push)
+// The images must be committed in public/dots/push. If the folder is missing
+// on the server, skip the image instead of sending a broken (404) link.
+const PUSH_IMG_DIR = require('path').join(__dirname, '..', 'public', 'dots', 'push');
+const HAS_LOCAL_IMAGES = require('fs').existsSync(PUSH_IMG_DIR);
+if (!HAS_LOCAL_IMAGES && !process.env.PUSH_ICON_BASE) {
+  console.warn('⚠️  [push] public/dots/push not found on server: push images are OFF. Run: git add public && git commit && git push');
+}
+
 const iconUrlForMood = (mood) => {
+  if (!HAS_LOCAL_IMAGES && !process.env.PUSH_ICON_BASE) return null;
   const m = VALID_MOODS.has(mood) ? mood : 'sorted';
   return `${ICON_BASE}/push/${m}.png`;
 };
@@ -277,7 +286,7 @@ async function sendMessages(messages, userIdForCleanup = null) {
 function buildData(type, extraData) {
   const mood = VALID_MOODS.has(extraData.mood) || extraData.mood === 'rs' ? extraData.mood : 'sorted';
   const iconUrl = extraData.iconUrl || iconUrlForMood(mood);
-  const soundKey = resolveSoundKey(type, mood);
+  const soundKey = extraData.soundKey || resolveSoundKey(type, mood);
   const channelId = channelForSound(soundKey);
   const data = {
     ...extraData,

@@ -81,7 +81,7 @@ router.post('/test-push', async (req, res) => {
     }
 
     // Send
-    const results = { sent: 0, failed: 0, skipped: 0, logIds: [], errors: [], reasons: {} };
+    const results = { sent: 0, failed: 0, skipped: 0, logIds: [], errors: [], reasons: {}, legacyDevices: 0 };
 
     for (const u of targetUsers) {
       try {
@@ -94,6 +94,7 @@ router.post('/test-push', async (req, res) => {
         });
         if (result?.sent) {
           results.sent++;
+          results.legacyDevices += result.legacyDevices || 0;
           if (result.logId) results.logIds.push(result.logId);
         } else {
           results.skipped++;
@@ -127,6 +128,10 @@ router.post('/test-push', async (req, res) => {
       skipped: results.skipped, total: targetUsers.length,
       reasons: results.reasons,
       message: results.sent === 0 && topReason ? (REASON_TEXT[topReason] || topReason) : undefined,
+      legacyDevices: results.legacyDevices,
+      note: results.legacyDevices
+        ? `${results.legacyDevices} device(s) still run an old app build: they get the general sound. Uninstall + install the new build.`
+        : undefined,
       logIds: results.logIds.slice(0, 20),
       errors: results.errors,
     });

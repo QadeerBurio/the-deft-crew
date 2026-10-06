@@ -66,13 +66,12 @@ async function send(userId, msg) {
         channelId,
         priority: 'high',
         ttl: 60 * 60 * 24,
-        richContent: { image: moodImage },
-        mutableContent: true,
+        ...(moodImage ? { richContent: { image: moodImage }, mutableContent: true } : {}),
         data: {
           v: 1,
           type,
           mood,
-          iconUrl: moodImage,
+          iconUrl: moodImage || null,
           channelId,
           soundKey,
           ...data,
@@ -152,7 +151,9 @@ async function send(userId, msg) {
       }
     );
 
-    return { sent: true, logId: log._id.toString(), tickets: ticketIds };
+    // Phones on an old app build only have the old channels → generic sound
+    const legacyDevices = messages.filter((m) => !String(m.channelId || '').startsWith('snd_')).length;
+    return { sent: true, logId: log._id.toString(), tickets: ticketIds, legacyDevices };
   } catch (err) {
     console.error('[pushGateway] fatal error:', err);
     return { sent: false, reason: 'exception', error: err.message };

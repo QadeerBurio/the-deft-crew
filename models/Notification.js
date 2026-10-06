@@ -128,8 +128,24 @@ function classify(doc) {
 }
 
 // Mongoose 9: no next() in pre hooks (calling it throws "next is not a function")
+// On create, save the SAME mood / type / sound / title the push will use, so the
+// in-app popup and notifications list look and sound exactly like the push.
 NotificationSchema.pre('save', function () {
   this.$locals.wasNew = this.isNew;
+  if (!this.isNew) return;
+
+  const { resolveSoundKey, titleWithEmoji } = require('../utils/pushNotification');
+  const meta = this.metadata && typeof this.metadata === 'object' ? { ...this.metadata } : {};
+  const c = classify(this);
+
+  if (!this.mood || this.mood === 'sorted') this.mood = c.mood;
+  meta.pushType = meta.pushType || c.pushType;
+  meta.route = meta.route || meta.screen || c.route;
+  meta.soundKey = meta.soundKey || resolveSoundKey(meta.pushType, this.mood);
+  this.metadata = meta;
+  this.markModified('metadata');
+
+  this.title = titleWithEmoji(this.title, this.mood);
 });
 
 NotificationSchema.post('save', function (doc) {
@@ -140,16 +156,14 @@ NotificationSchema.post('save', function (doc) {
   setImmediate(async () => {
     try {
       const { sendToUser } = require('../utils/pushNotification');
-      const c = classify(doc);
-      const mood = doc.mood && doc.mood !== 'sorted' ? doc.mood : c.mood;
       await sendToUser(doc.recipient, doc.title, doc.description, {
         ...meta,
         notificationId: doc._id.toString(),
         notificationType: doc.type,
-        type: meta.pushType || c.pushType,
-        mood,
+        type: meta.pushType,
+        mood: doc.mood,
         link: doc.link || null,
-        route: meta.route || meta.screen || c.route,
+        route: meta.route,
         params: meta.params || {},
       });
     } catch (err) {
