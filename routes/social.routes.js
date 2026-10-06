@@ -571,15 +571,18 @@ router.get('/admin/reports/stats', auth, async (req, res) => {
 router.get('/feed', auth, async (req, res) => {
   try {
     const { category, search, limit = 20, before } = req.query;
-    const userId = req.user._id;
+    // Guests have no _id. Use '' so .toString() never crashes the feed.
+    const userId = req.user?._id || null;
+    const userIdStr = userId ? userId.toString() : '';
 
-    // Get blocked users
-    const blockedUsers = await BlockedUser.find({ userId })
-      .select('blockedUserId');
+    // Get blocked users (none for guests; find({userId: undefined}) would match everyone)
+    const blockedUsers = userId
+      ? await BlockedUser.find({ userId }).select('blockedUserId')
+      : [];
     const blockedUserIds = blockedUsers.map(b => b.blockedUserId ? b.blockedUserId.toString() : '').filter(id => id);
 
     // Get current user's connections
-    const currentUser = await User.findById(userId).select('connections sentRequests receivedRequests');
+    const currentUser = userId ? await User.findById(userId).select('connections sentRequests receivedRequests') : null;
     const userConnections = (currentUser?.connections || []).map(id => id ? id.toString() : '').filter(id => id);
     const userSentRequests = (currentUser?.sentRequests || []).map(id => id ? id.toString() : '').filter(id => id);
 
@@ -647,8 +650,6 @@ router.get('/feed', auth, async (req, res) => {
         } catch (err) {
           authorId = '';
         }
-
-        const userIdStr = userId.toString();
 
         // Determine connection status
         let connectionStatus = 'none';
