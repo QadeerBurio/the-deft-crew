@@ -17,6 +17,9 @@ const userSchema = new mongoose.Schema(
       lowercase: true,
       trim: true,
     },
+    // Email OTP check at signup. false = signed up but code not entered yet.
+    // Missing (old accounts) is treated as verified.
+    emailVerified: { type: Boolean },
     password: {
       type: String,
       required: [true, "Password is required"],

@@ -50,6 +50,68 @@ const otpEmailHtml = (name, otp) => `
     <p>The Deft Crew</p>
   </div>`;
 
+const signupOtpEmailHtml = (name, otp) => `
+  <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 20px;">
+    <h2 style="color: #1a1a1a;">Verify your email</h2>
+    <p>Hi ${name || "there"},</p>
+    <p>Welcome to tdc. Enter this code in the app to finish creating your account:</p>
+    <div style="background: #f9c349; padding: 20px; text-align: center; border-radius: 10px; margin: 20px 0;">
+      <h1 style="color: #1a1a1a; font-size: 36px; letter-spacing: 6px; margin: 0;">${otp}</h1>
+    </div>
+    <p>It expires in <strong>10 minutes</strong>.</p>
+    <p>If you didn't sign up for tdc, ignore this email.</p>
+    <p>The Deft Crew</p>
+  </div>`;
+
+const maskEmail = (email = "") => {
+  const [local = "", domain = ""] = String(email).split("@");
+  return `${local.slice(0, 2)}${"*".repeat(Math.max(local.length - 2, 1))}@${domain}`;
+};
+
+const issueToken = (user) =>
+  jwt.sign(
+    { id: user._id, role: user.role },
+    process.env.JWT_SECRET || "abdulqadeer11111",
+    { expiresIn: "180d" }
+  );
+
+// Creates + emails a signup code. Respects the 1-per-minute limit.
+// Returns { sent, retryAfter?, error? }
+async function sendSignupOtp(user, { force = false } = {}) {
+  const last = await OtpCode.findOne({ user: user._id, purpose: "signup" })
+    .sort({ createdAt: -1 })
+    .lean();
+  if (!force && last && Date.now() - new Date(last.createdAt).getTime() < OTP_RESEND_MS) {
+    const retryAfter = Math.ceil((OTP_RESEND_MS - (Date.now() - new Date(last.createdAt).getTime())) / 1000);
+    return { sent: false, retryAfter };
+  }
+
+  const otp = crypto.randomInt(100000, 1000000).toString();
+  await OtpCode.deleteMany({ user: user._id, purpose: "signup" });
+  const record = await OtpCode.create({
+    user: user._id,
+    purpose: "signup",
+    codeHash: hashOtp(otp),
+    expiresAt: new Date(Date.now() + OTP_TTL_MS),
+  });
+
+  if (process.env.NODE_ENV !== "production") {
+    console.log(`🔑 [dev] signup OTP for ${user.email}: ${otp}`);
+  }
+
+  try {
+    await sendMail({
+      to: user.email,
+      subject: "Your tdc verification code",
+      html: signupOtpEmailHtml(user.name, otp),
+    });
+    return { sent: true };
+  } catch (e) {
+    await OtpCode.deleteOne({ _id: record._id });
+    return { sent: false, error: "mail_failed" };
+  }
+}
+
 // Helper function to cleanup uploaded files
 const cleanupFile = async (file) => {
   if (!file) return;
@@ -90,119 +152,13 @@ const authMiddleware = (req, res, next) => {
 };
 
 // ==========================================
-// SIGNUP ROUTE - FIXED
+// After signup is confirmed: referral points, welcome notification + email.
+// Students: runs after the email code is verified. Others: right away.
 // ==========================================
-// ==========================================
-// SIGNUP ROUTE - FIXED
-// ==========================================
-router.post("/signup", async (req, res) => {
-  try {
-    const {
-      role,
-      email,
-      password,
-      fullName,
-      brandName,
-      rollNo,
-      isAlumni,
-      phone,
-      universityName,
-      address,
-      instagram,
-      referralCodeInput,
-      city,
-      gender,            // ← ADD
-  academicLevel,     // ← ADD
-    } = req.body;
-
-    // 1. Validate required fields
-    if (!email || !password || !role) {
-      return res.status(400).json({ error: "Missing required fields" });
-    }
-
-    // 2. Check if user already exists
-    const existingUser = await User.findOne({ email });
-    if (existingUser) {
-      return res.status(400).json({ error: "Email already used" });
-    }
-
-    // 3. Hash password
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    let universityId = null;
-    let name = "";
-
-    // 4. Role logic
-    if (role === "student") {
-      if (!fullName || !universityName) {
-        return res.status(400).json({ error: "Name and university required" });
-      }
-      name = fullName;
-      let uni = await University.findOne({ name: universityName });
-      if (!uni) uni = await University.create({ name: universityName });
-      universityId = uni._id;
-    } else if (role === "brand") {
-      if (!brandName) {
-        return res.status(400).json({ error: "Brand name required" });
-      }
-      name = brandName;
-    } else if (role === "traveler") {
-      if (!fullName) {
-        return res.status(400).json({ error: "Full name required" });
-      }
-      name = fullName;
-    } else if (role === "employee") {
-      if (!fullName) {
-        return res.status(400).json({ error: "Employee name required" });
-      }
-      name = fullName;
-    } else if (role === "admin") {
-      name = fullName || "Admin";
-    }
-
-    // 5. Handle Referrer lookup
-    let referrer = null;
-    if (referralCodeInput) {
-      referrer = await User.findOne({
-        referralCode: referralCodeInput.toUpperCase(),
-      });
-    }
-
-    // 6. Create the User
-    const userData = {
-      name,
-      email,
-      password: hashedPassword,
-      role,
-      isAlumni: !!isAlumni,
-      rollNo,
-      phone,
-      university: universityId,
-      address,
-      instagram,
-      status: role === "admin" ? "Verified" : "Not Verified",
-      city: city?.trim() || "Karachi",
-      referredBy: referrer ? referrer._id : null,
-       gender: gender || "",                 // ← ADD
-  academicLevel: academicLevel || "",   // ← ADD
-    };
-
-    if (role === "brand") {
-      userData.brandName = brandName;
-      userData.companyName = brandName;
-    } else if (role === "employee") {
-      userData.companyName = fullName;
-    }
-
-    const user = await User.create(userData);
-
-    // 🎯 Ensure the new user has an engagement profile from day one
-    try {
-      const { ensureProfile } = require("../services/engagement");
-      await ensureProfile(user._id);
-    } catch (e) {
-      console.error("[engagement] ensureProfile on signup failed:", e.message);
-    }
+async function completeSignup(user, referrer) {
+  const name = user.name;
+  const email = user.email;
+  const role = user.role;
 
     // ═════════════════════════════════════════════════════════════
     // 7. REFERRAL PIPELINE — only when there's a referrer
@@ -386,6 +342,149 @@ if (referrer) {
       }
     }
 
+}
+
+// ==========================================
+// SIGNUP ROUTE - FIXED
+// ==========================================
+// ==========================================
+// SIGNUP ROUTE - FIXED
+// ==========================================
+router.post("/signup", async (req, res) => {
+  try {
+    const {
+      role,
+      email,
+      password,
+      fullName,
+      brandName,
+      rollNo,
+      isAlumni,
+      phone,
+      universityName,
+      address,
+      instagram,
+      referralCodeInput,
+      city,
+      gender,            // ← ADD
+  academicLevel,     // ← ADD
+    } = req.body;
+
+    // 1. Validate required fields
+    if (!email || !password || !role) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    // 2. Check if user already exists
+    const normalizedEmail = String(email).trim().toLowerCase();
+    const existingUser = await User.findOne({ email: normalizedEmail });
+    if (existingUser) {
+      // Signed up before but never entered the code: start over cleanly
+      if (existingUser.role === "student" && existingUser.emailVerified === false) {
+        await OtpCode.deleteMany({ user: existingUser._id }).catch(() => {});
+        await User.deleteOne({ _id: existingUser._id });
+      } else {
+        return res.status(400).json({ error: "Email already used" });
+      }
+    }
+
+    // 3. Hash password
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    let universityId = null;
+    let name = "";
+
+    // 4. Role logic
+    if (role === "student") {
+      if (!fullName || !universityName) {
+        return res.status(400).json({ error: "Name and university required" });
+      }
+      name = fullName;
+      let uni = await University.findOne({ name: universityName });
+      if (!uni) uni = await University.create({ name: universityName });
+      universityId = uni._id;
+    } else if (role === "brand") {
+      if (!brandName) {
+        return res.status(400).json({ error: "Brand name required" });
+      }
+      name = brandName;
+    } else if (role === "traveler") {
+      if (!fullName) {
+        return res.status(400).json({ error: "Full name required" });
+      }
+      name = fullName;
+    } else if (role === "employee") {
+      if (!fullName) {
+        return res.status(400).json({ error: "Employee name required" });
+      }
+      name = fullName;
+    } else if (role === "admin") {
+      name = fullName || "Admin";
+    }
+
+    // 5. Handle Referrer lookup
+    let referrer = null;
+    if (referralCodeInput) {
+      referrer = await User.findOne({
+        referralCode: referralCodeInput.toUpperCase(),
+      });
+    }
+
+    // 6. Create the User
+    const userData = {
+      name,
+      email: normalizedEmail,
+      password: hashedPassword,
+      role,
+      isAlumni: !!isAlumni,
+      rollNo,
+      phone,
+      university: universityId,
+      address,
+      instagram,
+      status: role === "admin" ? "Verified" : "Not Verified",
+      ...(role === "student" ? { emailVerified: false } : {}),
+      city: city?.trim() || "Karachi",
+      referredBy: referrer ? referrer._id : null,
+       gender: gender || "",                 // ← ADD
+  academicLevel: academicLevel || "",   // ← ADD
+    };
+
+    if (role === "brand") {
+      userData.brandName = brandName;
+      userData.companyName = brandName;
+    } else if (role === "employee") {
+      userData.companyName = fullName;
+    }
+
+    const user = await User.create(userData);
+
+    // 🎯 Ensure the new user has an engagement profile from day one
+    try {
+      const { ensureProfile } = require("../services/engagement");
+      await ensureProfile(user._id);
+    } catch (e) {
+      console.error("[engagement] ensureProfile on signup failed:", e.message);
+    }
+
+    // 7-8. Students: verify email first. Referral points and the welcome
+    //      message only happen after the code is entered (no fake signups).
+    if (role === "student") {
+      const otp = await sendSignupOtp(user, { force: true });
+      return res.status(201).json({
+        message: otp.sent
+          ? `We sent a 6-digit code to ${maskEmail(user.email)}`
+          : "Account created. Tap resend to get your code.",
+        requiresVerification: true,
+        userId: user._id,
+        email: maskEmail(user.email),
+        emailSent: !!otp.sent,
+        expiresIn: OTP_TTL_MS / 1000,
+      });
+    }
+
+    await completeSignup(user, referrer);
+
     // 9. Return success response without password
     const userResponse = user.toObject();
     delete userResponse.password;
@@ -401,13 +500,117 @@ if (referrer) {
 });
 
 // ==========================================
+// SIGNUP: VERIFY EMAIL CODE → account active + logged in
+// ==========================================
+router.post("/signup/verify-otp", async (req, res) => {
+  const userId = String(req.body?.userId || "").trim();
+  const otp = String(req.body?.otp || "").replace(/\D/g, "");
+
+  if (!userId || !otp) {
+    return res.status(400).json({ message: "User ID and code are required" });
+  }
+  if (!mongoose.Types.ObjectId.isValid(userId)) {
+    return res.status(400).json({ message: "Invalid request. Please sign up again." });
+  }
+
+  try {
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ message: "Account not found. Please sign up again." });
+
+    if (user.emailVerified !== false) {
+      // Already verified (double tap / old account): just log in
+      const populated = await User.findById(user._id).select("-password").populate("university");
+      return res.json({ message: "Email already verified", token: issueToken(user), user: populated });
+    }
+
+    const record = await OtpCode.findOne({ user: user._id, purpose: "signup" }).sort({ createdAt: -1 });
+    if (!record) {
+      return res.status(400).json({ message: "No code found. Tap resend to get a new one." });
+    }
+    if (record.expiresAt.getTime() < Date.now()) {
+      await OtpCode.deleteMany({ user: user._id, purpose: "signup" });
+      return res.status(400).json({ message: "Code expired. Tap resend to get a new one." });
+    }
+    if (record.attempts >= OTP_MAX_ATTEMPTS) {
+      await OtpCode.deleteMany({ user: user._id, purpose: "signup" });
+      return res.status(429).json({ message: "Too many wrong tries. Tap resend to get a new code." });
+    }
+
+    const ok =
+      record.codeHash.length === hashOtp(otp).length &&
+      crypto.timingSafeEqual(Buffer.from(record.codeHash), Buffer.from(hashOtp(otp)));
+
+    if (!ok) {
+      record.attempts += 1;
+      await record.save();
+      const left = OTP_MAX_ATTEMPTS - record.attempts;
+      return res.status(400).json({
+        message: left > 0 ? `Wrong code. ${left} tries left.` : "Too many wrong tries. Tap resend to get a new code.",
+      });
+    }
+
+    await OtpCode.deleteMany({ user: user._id, purpose: "signup" });
+    user.emailVerified = true;
+    await user.save();
+
+    // Referral points + welcome notification/email now that the email is real
+    try {
+      const referrer = user.referredBy ? await User.findById(user.referredBy) : null;
+      await completeSignup(user, referrer);
+    } catch (e) {
+      console.error("[signup] completeSignup failed:", e.message);
+    }
+
+    const populated = await User.findById(user._id).select("-password").populate("university");
+    return res.json({ message: "Email verified", token: issueToken(user), user: populated });
+  } catch (err) {
+    console.error("❌ Signup verify error:", err);
+    return res.status(500).json({ message: "Server error. Please try again." });
+  }
+});
+
+// ==========================================
+// SIGNUP: RESEND CODE
+// ==========================================
+router.post("/signup/resend-otp", async (req, res) => {
+  try {
+    const userId = String(req.body?.userId || "").trim();
+    const email = String(req.body?.email || "").trim().toLowerCase();
+
+    let user = null;
+    if (userId && mongoose.Types.ObjectId.isValid(userId)) user = await User.findById(userId);
+    else if (email) user = await User.findOne({ email });
+
+    if (!user) return res.status(404).json({ message: "Account not found. Please sign up again." });
+    if (user.emailVerified !== false) {
+      return res.status(400).json({ message: "Email already verified. Please log in." });
+    }
+
+    const r = await sendSignupOtp(user);
+    if (r.retryAfter) {
+      return res.status(429).json({
+        message: `Please wait ${r.retryAfter}s before requesting a new code.`,
+        retryAfter: r.retryAfter,
+      });
+    }
+    if (!r.sent) {
+      return res.status(503).json({ message: "We couldn't send the email right now. Please try again in a minute." });
+    }
+    return res.json({ message: `New code sent to ${maskEmail(user.email)}`, email: maskEmail(user.email) });
+  } catch (err) {
+    console.error("❌ Signup resend error:", err);
+    return res.status(500).json({ message: "Server error. Please try again." });
+  }
+});
+
+// ==========================================
 // LOGIN ROUTE
 // ==========================================
 router.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    const user = await User.findOne({ email }).populate("university");
+    const user = await User.findOne({ email: String(email || "").trim().toLowerCase() }).populate("university");
 
     if (!user) return res.status(404).json({ message: "User not found" });
 
@@ -415,11 +618,19 @@ router.post("/login", async (req, res) => {
 
     if (!match) return res.status(401).json({ message: "Invalid password" });
 
-    const token = jwt.sign(
-      { id: user._id, role: user.role },
-      process.env.JWT_SECRET || "abdulqadeer11111",
-      { expiresIn: "180d" }
-    );
+    // Signed up but never entered the email code: send one and ask for it
+    if (user.role === "student" && user.emailVerified === false) {
+      const r = await sendSignupOtp(user);
+      return res.status(403).json({
+        message: "Please verify your email first. We sent you a code.",
+        needsVerification: true,
+        userId: user._id,
+        email: maskEmail(user.email),
+        retryAfter: r.retryAfter || 0,
+      });
+    }
+
+    const token = issueToken(user);
 
     res.json({
       token,
