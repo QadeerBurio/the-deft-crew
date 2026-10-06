@@ -2738,7 +2738,12 @@ router.get('/notifications/unread-count', auth, async (req, res) => {
 // -------------------- MESSAGING --------------------
 router.get('/inbox', auth, async (req, res) => {
   try {
-    const userId = req.user._id; // ✅ use _id consistently
+    // Reject guests — this route requires a real, logged-in user
+    if (!req.user || !req.user._id) {
+      return res.status(401).json({ error: 'Not authenticated' });
+    }
+
+    const userId = req.user._id;   // ✅ always an ObjectId now
 
     const conversations = await Conversation.find({
       participants: userId,
@@ -2766,7 +2771,6 @@ router.get('/inbox', auth, async (req, res) => {
         .populate('sender', 'name');
 
       if (lastMsg) {
-        // ✅ Better preview text for media types
         let preview = '';
         if (lastMsg.messageType === 'audio') preview = '🎤 Voice message';
         else if (lastMsg.messageType === 'image') preview = '📷 Photo';
@@ -2778,9 +2782,8 @@ router.get('/inbox', auth, async (req, res) => {
         convObj.lastMessageType = lastMsg.messageType;
         convObj.lastMessageSender = lastMsg.sender;
         convObj.lastMessageTime = lastMsg.createdAt;
-        convObj.lastMessageDuration = lastMsg.duration || 0; // ✅ expose duration
+        convObj.lastMessageDuration = lastMsg.duration || 0;
       } else {
-        // ✅ No messages yet — leave blank so hook doesn't treat it as new
         convObj.lastMessage = '';
         convObj.lastMessageType = 'text';
         convObj.lastMessageSender = null;
