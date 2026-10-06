@@ -57128,3 +57128,20 @@
 {"level":"info","message":"Sync running for adapter: [resumes]","timestamp":"2026-10-06 14:56:01:561"}
 {"level":"info","message":"Fetched 0 items from backend collection \"resumes\"","timestamp":"2026-10-06 14:56:01:561"}
 {"level":"info","message":"Database synchronization completed successfully. Synced: 101, Failed: 0. Duration: 11842ms","timestamp":"2026-10-06 14:56:01:561"}
+{"level":"info","message":"✅ Chat Service connected successfully to dedicated AI database.","timestamp":"2026-10-06 15:04:45:445"}
+{"level":"info","message":"Initializing Automatic Knowledge Synchronization Scheduler...","timestamp":"2026-10-06 15:04:45:445"}
+{"level":"info","message":"Scheduling database sync sweeps every 30 minutes (1800000ms).","timestamp":"2026-10-06 15:04:45:445"}
+{"level":"info","message":"Executing initial startup database synchronization check...","timestamp":"2026-10-06 15:04:51:451"}
+{"level":"info","message":"Starting incremental database synchronization engine...","timestamp":"2026-10-06 15:04:51:451"}
+{"level":"info","message":"Using shared persistent connection for backend sync.","timestamp":"2026-10-06 15:04:51:451"}
+{"level":"info","message":"Incremental sync reference date: 2026-10-06T10:01:50.335Z","timestamp":"2026-10-06 15:04:51:451"}
+{"level":"info","message":"Sync running for adapter: [scholarships]","timestamp":"2026-10-06 15:04:51:451"}
+{"level":"info","message":"Fetched 0 items from backend collection \"exchanges\"","timestamp":"2026-10-06 15:04:51:451"}
+{"level":"info","message":"Sync running for adapter: [jobs]","timestamp":"2026-10-06 15:04:51:451"}
+{"level":"info","message":"Fetched 0 items from backend collection \"jobs\"","timestamp":"2026-10-06 15:04:51:451"}
+{"level":"info","message":"Sync running for adapter: [offers]","timestamp":"2026-10-06 15:04:51:451"}
+{"level":"info","message":"Fetched 0 items from backend collection \"offers\"","timestamp":"2026-10-06 15:04:51:451"}
+{"level":"info","message":"Sync running for adapter: [events]","timestamp":"2026-10-06 15:04:51:451"}
+{"level":"info","message":"Fetched 0 items from backend collection \"events\"","timestamp":"2026-10-06 15:04:51:451"}
+{"level":"info","message":"Sync running for adapter: [universities]","timestamp":"2026-10-06 15:04:51:451"}
+{"level":"info","message":"Fetched 80 items from backend collection \"universities\"","timestamp":"2026-10-06 15:04:51:451"}
