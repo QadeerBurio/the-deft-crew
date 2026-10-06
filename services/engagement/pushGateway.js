@@ -7,9 +7,9 @@ const cfg = require('../../config/engagement.config');
 const { dayKey, weekKey, isQuietHour } = require('../../utils/karachiTime');
 const copy = require('./copy');
 
-const expo = new Expo();
+const expo = new Expo(process.env.EXPO_ACCESS_TOKEN ? { accessToken: process.env.EXPO_ACCESS_TOKEN } : {});
 
-const { iconUrlForMood, titleWithEmoji, resolveSoundKey, channelForToken } = require('../../utils/pushNotification');
+const { iconUrlForMood, titleWithEmoji, resolveSoundKey, channelForToken, sendAllSafe } = require('../../utils/pushNotification');
 
 // ── CORE SEND ──
 async function send(userId, msg) {
@@ -91,9 +91,8 @@ async function send(userId, msg) {
     const ticketIds = [];
     const ticketErrors = [];
     try {
-      const chunks = expo.chunkPushNotifications(messages);
-      for (const chunk of chunks) {
-        const tickets = await expo.sendPushNotificationsAsync(chunk);
+      {
+        const tickets = await sendAllSafe(expo, messages);
         for (const ticket of tickets) {
           if (ticket.status === 'error') {
             console.warn('[pushGateway] ticket error:', ticket.message);
