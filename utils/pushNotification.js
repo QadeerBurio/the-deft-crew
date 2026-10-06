@@ -223,60 +223,27 @@ function buildMessage(token, { title, body, data, soundName, channelId, iconUrl 
 // ═══════════════════════════════════════════════════════════════
 // SEND + RECEIPT CLEANUP
 // ═══════════════════════════════════════════════════════════════
-
-// ═══════════════════════════════════════════════════════════════
-// SAFE SEND
-// Expo rejects a whole request if it mixes tokens from different
-// Expo projects (e.g. an Expo Go token + an APK token on the same user):
-//   PUSH_TOO_MANY_EXPERIENCE_IDS → nothing is delivered ("send_failed").
-// This splits by project and retries, and if anything else goes wrong it
-// retries one message at a time, so one bad token never blocks the rest.
-// Returns one ticket per message, in the same order.
-// ═══════════════════════════════════════════════════════════════
-async function sendChunkSafe(client, chunk) {
-  try {
-    return await client.sendPushNotificationsAsync(chunk);
-  } catch (err) {
-    if (err.code === 'PUSH_TOO_MANY_EXPERIENCE_IDS' && err.details && typeof err.details === 'object') {
-      console.warn('[push] tokens from several Expo projects, sending per project');
-      const byToken = new Map();
-      for (const tokens of Object.values(err.details)) {
-        const group = chunk.filter((m) => tokens.includes(m.to));
-        if (!group.length) continue;
-        const res = await sendChunkSafe(client, group);
-        group.forEach((m, i) => byToken.set(m.to, res[i]));
-      }
-      return chunk.map((m) => byToken.get(m.to) || { status: 'error', message: 'not sent', details: { error: 'PUSH_TOO_MANY_EXPERIENCE_IDS' } });
-    }
-    if (chunk.length > 1) {
-      const out = [];
-      for (const m of chunk) out.push(...(await sendChunkSafe(client, [m])));
-      return out;
-    }
-    console.error('[push] send failed:', err.code || '', err.message);
-    return [{ status: 'error', message: err.message, details: { error: err.code || 'SEND_FAILED' } }];
-  }
-}
-
-async function sendAllSafe(client, messages) {
-  const tickets = [];
-  for (const chunk of client.chunkPushNotifications(messages)) {
-    tickets.push(...(await sendChunkSafe(client, chunk)));
-  }
-  return tickets;
-}
-
 async function sendMessages(messages, userIdForCleanup = null) {
   const pairs = []; // { ticket, token }
-  const tickets = await sendAllSafe(expo, messages);
-  tickets.forEach((ticket, i) => {
-    pairs.push({ ticket, token: messages[i]?.to });
-    if (ticket.status === 'error') {
-      console.error('[push] ❌ ticket error:', ticket.message, ticket.details || '');
-    } else {
-      console.log('[push] ✅ ticket ok:', ticket.id);
+  const chunks = expo.chunkPushNotifications(messages);
+
+  for (const chunk of chunks) {
+    try {
+      const tickets = await expo.sendPushNotificationsAsync(chunk);
+      tickets.forEach((ticket, i) => {
+        const token = chunk[i]?.to;
+        pairs.push({ ticket, token });
+        if (ticket.status === 'error') {
+          console.error('[push] ❌ ticket error:', ticket.message, ticket.details || '');
+        } else {
+          console.log('[push] ✅ ticket ok:', ticket.id);
+        }
+      });
+    } catch (err) {
+      // A 400 here usually means the payload is invalid. Log the body so it's visible.
+      console.error('[push] send failed:', err.message, err.statusCode || '', err.body || '');
     }
-  });
+  }
 
   // Tokens rejected immediately
   const deadNow = pairs
@@ -398,7 +365,6 @@ const sendPushNotification = async (targetToken, title, body, extraData = {}) =>
 };
 
 module.exports = {
-  sendAllSafe,
   sendPushNotification,
   sendToUser,
   sendMessages,

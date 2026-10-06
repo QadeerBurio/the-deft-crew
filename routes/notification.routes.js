@@ -224,7 +224,7 @@ router.delete('/clear-all', auth, async (req, res) => {
 router.get('/test-push', auth, async (req, res) => {
   try {
     const { Expo } = require('expo-server-sdk');
-    const { buildMessage, iconUrlForMood, resolveSoundKey, channelForToken, sendAllSafe } = require('../utils/pushNotification');
+    const { buildMessage, iconUrlForMood, resolveSoundKey, channelForToken } = require('../utils/pushNotification');
     const expo = new Expo(process.env.EXPO_ACCESS_TOKEN ? { accessToken: process.env.EXPO_ACCESS_TOKEN } : {});
 
     const userId = req.userId || req.user?._id || req.user?.id;
@@ -249,7 +249,7 @@ router.get('/test-push', auth, async (req, res) => {
       })
     );
 
-    const tickets = await sendAllSafe(expo, messages);
+    const tickets = await expo.sendPushNotificationsAsync(messages);
     await new Promise((r) => setTimeout(r, 6000));
     const ids = tickets.filter((t) => t.id).map((t) => t.id);
     const receipts = ids.length ? await expo.getPushNotificationReceiptsAsync(ids) : {};

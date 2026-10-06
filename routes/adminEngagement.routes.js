@@ -118,9 +118,6 @@ router.post('/test-push', async (req, res) => {
       MismatchSenderId: 'FCM key is from a different Firebase project than google-services.json',
       no_profile: 'user has no engagement profile',
       pref_off: 'user turned this notification type off',
-      SEND_FAILED: 'Expo rejected the request. Check EXPO_ACCESS_TOKEN (if Enhanced Push Security is on) and Railway logs',
-      PUSH_TOO_MANY_EXPERIENCE_IDS: 'user has tokens from Expo Go and the APK. Sent per app, retry',
-      expo_rejected: 'Expo rejected every device for this user',
     };
     const topReason = Object.keys(results.reasons).sort((a, b) => results.reasons[b] - results.reasons[a])[0];
 
