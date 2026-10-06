@@ -35,9 +35,8 @@ const inquirySchema = new mongoose.Schema({
 // Ensure unique inquiry per user per listing
 inquirySchema.index({ listingId: 1, userId: 1 }, { unique: true });
 
-inquirySchema.pre('save', function(next) {
+inquirySchema.pre('save', function () {
   this.updatedAt = new Date();
-  next();
 });
 
 module.exports = mongoose.model('Inquiry', inquirySchema);

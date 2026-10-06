@@ -9,7 +9,7 @@ const copy = require('./copy');
 
 const expo = new Expo();
 
-const { iconUrlForMood, titleWithEmoji, resolveSoundKey, channelForSound } = require('../../utils/pushNotification');
+const { iconUrlForMood, titleWithEmoji, resolveSoundKey, channelForToken } = require('../../utils/pushNotification');
 
 // ── CORE SEND ──
 async function send(userId, msg) {
@@ -19,7 +19,9 @@ async function send(userId, msg) {
   } = msg;
 
   try {
-    const profile = await EngagementProfile.findOne({ user: userId });
+    // Admin/system pushes (skipCaps) don't need an engagement profile.
+    // Many users never got one, which made test pushes silently skip them.
+    const profile = (await EngagementProfile.findOne({ user: userId })) || (skipCaps ? {} : null);
     if (!profile) return { sent: false, reason: 'no_profile' };
 
     if (pref && profile.notifPrefs && profile.notifPrefs[pref] === false) {
@@ -45,19 +47,19 @@ async function send(userId, msg) {
     }
 
     const user = await User.findById(userId).select('pushTokens').lean();
-    const tokens = (user?.pushTokens || []).map((t) => t.token).filter(Boolean);
-    if (tokens.length === 0) return { sent: false, reason: 'no_token' };
+    const entries = (user?.pushTokens || []).filter((t) => t?.token);
+    if (entries.length === 0) return { sent: false, reason: 'no_token' };
 
     // Same emoji image, emoji title and sound as the in-app banner
     const moodImage = iconUrlForMood(mood);
     const soundKey = resolveSoundKey(type, mood);
-    const channelId = channelForSound(soundKey);
     const fullTitle = titleWithEmoji(title || 'tdc', mood);
 
-    const messages = tokens
-      .filter((t) => Expo.isExpoPushToken(t))
-      .map((t) => ({
-        to: t,
+    const messages = entries
+      .filter((e) => Expo.isExpoPushToken(e.token))
+      .map((e) => ({ e, channelId: channelForToken(e, soundKey) }))
+      .map(({ e, channelId }) => ({
+        to: e.token,
         title: fullTitle,
         body: body || '',
         sound: `${soundKey}.wav`,
@@ -88,6 +90,7 @@ async function send(userId, msg) {
     });
 
     const ticketIds = [];
+    const ticketErrors = [];
     try {
       const chunks = expo.chunkPushNotifications(messages);
       for (const chunk of chunks) {
@@ -95,6 +98,7 @@ async function send(userId, msg) {
         for (const ticket of tickets) {
           if (ticket.status === 'error') {
             console.warn('[pushGateway] ticket error:', ticket.message);
+            ticketErrors.push(ticket.details?.error || ticket.message || 'expo_error');
           } else if (ticket.id) {
             ticketIds.push(ticket.id);
           }
@@ -106,6 +110,22 @@ async function send(userId, msg) {
         { $set: { status: 'failed', receiptError: err.message } }
       );
       return { sent: false, reason: 'send_failed', error: err.message };
+    }
+
+    // Every device rejected it (dead token, missing FCM key...): report, don't count as sent
+    if (ticketIds.length === 0) {
+      const why = ticketErrors[0] || 'expo_rejected';
+      await PushLog.updateOne(
+        { _id: log._id },
+        { $set: { status: 'failed', receiptError: why } }
+      );
+      if (ticketErrors.includes('DeviceNotRegistered')) {
+        await User.updateOne(
+          { _id: userId },
+          { $pull: { pushTokens: { token: { $in: messages.map((m) => m.to) } } } }
+        );
+      }
+      return { sent: false, reason: why };
     }
 
     await PushLog.updateOne(

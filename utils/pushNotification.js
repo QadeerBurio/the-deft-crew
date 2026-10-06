@@ -37,9 +37,20 @@ const iconUrlForMood = (mood) => {
 
 // Same emoji the in-app banner uses (app/src/utils/notificationIcon.js)
 const MOOD_EMOJI = {
-  sorted: '😌', panic: '😰', excited: '🤩', broke: '😔', sleepy: '😴',
-  shook: '😳', sus: '👀', cheeky: '😜', hype: '🔥', smug: '😏',
-  shock: '😮', urgent: '🚨', money: '💰', ghost: '👻',
+  sorted: '😊',
+  panic: '😰',
+  excited: '🤩',
+  broke: '😢',
+  sleepy: '😴',
+  shook: '😮',
+  sus: '😒',
+  cheeky: '😜',
+  hype: '😆',
+  smug: '😏',
+  shock: '😳',
+  urgent: '😨',
+  money: '🤑',
+  ghost: '😑',
 };
 const EMOJI_RE = /\p{Extended_Pictographic}/u;
 
@@ -79,6 +90,30 @@ const TYPE_SOUND = {
 
 const resolveSoundKey = (type, mood) => MOOD_SOUND[mood] || TYPE_SOUND[type] || 'tdc_push_default';
 const channelForSound = (soundKey) => `snd_${soundKey}`;
+
+// Old app builds only have these channels. Sending to a channel that doesn't
+// exist on the phone makes Android fall back to the default channel, which is
+// why most pushes played the general sound.
+const LEGACY_CHANNEL_FOR_SOUND = {
+  tdc_push_deal: 'deals',
+  tdc_push_message: 'messages',
+  tdc_mood_cheeky: 'messages',
+  tdc_push_internship: 'jobs',
+  tdc_push_reminder: 'reminders',
+  tdc_push_points: 'points',
+  tdc_mood_rs: 'points',
+  tdc_push_streak: 'streaks',
+  tdc_push_confession: 'confessions',
+  tdc_push_event: 'events',
+  tdc_push_level_up: 'levelup',
+};
+
+// Pick the channel per device: new builds get the exact sound channel,
+// old builds get the closest channel they actually have.
+const channelForToken = (entry, soundKey) =>
+  entry?.channels === 'snd_v1'
+    ? channelForSound(soundKey)
+    : LEGACY_CHANNEL_FOR_SOUND[soundKey] || 'engagement';
 
 // ═══════════════════════════════════════════════════════════════
 // TYPE → SOUND + CHANNEL
@@ -264,20 +299,33 @@ function buildData(type, extraData) {
 const sendToUser = async (userId, title, body, extraData = {}) => {
   try {
     const user = await User.findById(userId).select('pushTokens').lean();
-    const tokens = [...new Set((user?.pushTokens || []).map((t) => t.token).filter(Boolean))]
-      .filter((t) => Expo.isExpoPushToken(t));
+    const seen = new Set();
+    const entries = (user?.pushTokens || []).filter((e) => {
+      if (!e?.token || seen.has(e.token) || !Expo.isExpoPushToken(e.token)) return false;
+      seen.add(e.token);
+      return true;
+    });
 
-    if (tokens.length === 0) {
+    if (entries.length === 0) {
       console.log(`[push] no valid tokens for user ${userId}`);
       return { sent: false, reason: 'no_token' };
     }
 
     const type = extraData.type || 'System';
-    const { data, iconUrl, channelId, soundKey, mood } = buildData(type, extraData);
+    const { data, iconUrl, soundKey, mood } = buildData(type, extraData);
     const fullTitle = titleWithEmoji(title, mood);
+    const tokens = entries.map((e) => e.token);
+    const channelId = channelForSound(soundKey);
 
-    const messages = tokens.map((t) =>
-      buildMessage(t, { title: fullTitle, body, data, soundName: soundKey, channelId, iconUrl })
+    const messages = entries.map((e) =>
+      buildMessage(e.token, {
+        title: fullTitle,
+        body,
+        data: { ...data, channelId: channelForToken(e, soundKey) },
+        soundName: soundKey,
+        channelId: channelForToken(e, soundKey),
+        iconUrl,
+      })
     );
 
     console.log(`[push] → user ${userId}: ${tokens.length} device(s)`, { title, type, channelId });
@@ -316,6 +364,7 @@ module.exports = {
   titleWithEmoji,
   resolveSoundKey,
   channelForSound,
+  channelForToken,
   MOOD_EMOJI,
   MOOD_SOUND,
   TYPE_SOUND,

@@ -58,7 +58,7 @@ skillOfferSchema.index({ offerorId: 1, listingId: 1 });
 skillOfferSchema.index({ listingId: 1, offerorId: 1, status: 1 });
 
 // Pre-save middleware to update updatedAt
-skillOfferSchema.pre('save', function(next) {
+skillOfferSchema.pre('save', function () {
   this.updatedAt = new Date();
 });
 

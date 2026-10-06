@@ -43,6 +43,7 @@ const NotificationSchema = new mongoose.Schema({
       "Update",
       "Promotion",
       "Brand",
+      "Security",
     ],
     default: "System"
   },
@@ -126,9 +127,9 @@ function classify(doc) {
   return { pushType: 'System', mood: 'sorted', route: 'NotificationModal' };
 }
 
-NotificationSchema.pre('save', function (next) {
+// Mongoose 9: no next() in pre hooks (calling it throws "next is not a function")
+NotificationSchema.pre('save', function () {
   this.$locals.wasNew = this.isNew;
-  next();
 });
 
 NotificationSchema.post('save', function (doc) {

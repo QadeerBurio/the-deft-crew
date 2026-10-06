@@ -278,6 +278,9 @@ academicLevel: {
       {
         token: { type: String, required: true },
         platform: { type: String, enum: ['ios', 'android', 'web', 'unknown'], default: 'unknown' },
+        // Which Android notification channels this app build created:
+        // 'snd_v1' = one channel per sound (new builds), 'legacy' = old builds
+        channels: { type: String, default: 'legacy' },
         updatedAt: { type: Date, default: Date.now },
       },
     ],

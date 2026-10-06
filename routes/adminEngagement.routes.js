@@ -81,7 +81,7 @@ router.post('/test-push', async (req, res) => {
     }
 
     // Send
-    const results = { sent: 0, failed: 0, skipped: 0, logIds: [], errors: [] };
+    const results = { sent: 0, failed: 0, skipped: 0, logIds: [], errors: [], reasons: {} };
 
     for (const u of targetUsers) {
       try {
@@ -97,6 +97,8 @@ router.post('/test-push', async (req, res) => {
           if (result.logId) results.logIds.push(result.logId);
         } else {
           results.skipped++;
+          const r = result?.reason || 'unknown';
+          results.reasons[r] = (results.reasons[r] || 0) + 1;
         }
       } catch (e) {
         results.failed++;
@@ -104,12 +106,27 @@ router.post('/test-push', async (req, res) => {
       }
     }
 
-    console.log(`[test-push] ${audience} sent=${results.sent} skip=${results.skipped} fail=${results.failed}`);
+    console.log(`[test-push] ${audience} sent=${results.sent} skip=${results.skipped} fail=${results.failed}`, results.reasons);
+
+    // Plain-English reason so the admin panel can show why a user was skipped
+    const REASON_TEXT = {
+      no_token: 'user has no push token (not logged in on the new app build, or notifications denied)',
+      no_valid_token: 'user only has old/invalid tokens. ask them to open the app and log in again',
+      DeviceNotRegistered: 'app was uninstalled or reinstalled. token removed, user must open the app again',
+      InvalidCredentials: 'FCM V1 key missing in EAS. run: eas credentials',
+      MismatchSenderId: 'FCM key is from a different Firebase project than google-services.json',
+      no_profile: 'user has no engagement profile',
+      pref_off: 'user turned this notification type off',
+    };
+    const topReason = Object.keys(results.reasons).sort((a, b) => results.reasons[b] - results.reasons[a])[0];
 
     res.json({
-      ok: true, audience,
+      ok: results.sent > 0 || targetUsers.length === 0,
+      audience,
       sent: results.sent, failed: results.failed,
       skipped: results.skipped, total: targetUsers.length,
+      reasons: results.reasons,
+      message: results.sent === 0 && topReason ? (REASON_TEXT[topReason] || topReason) : undefined,
       logIds: results.logIds.slice(0, 20),
       errors: results.errors,
     });

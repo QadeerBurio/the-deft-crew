@@ -3,7 +3,6 @@ require("dotenv").config();
 const express = require("express");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
-const nodemailer = require("nodemailer");
 const { body, validationResult } = require("express-validator");
 const multer = require("multer");
 const { storage, uploadLogo, hasCloudinary, deleteFromCloudinary } = require("../config/cloudinary");
@@ -18,26 +17,38 @@ const fs = require("fs");
 const router = express.Router();
 const EngagementEvent = require("../models/EngagementEvent");
 // ==========================================
-// OTP STORE & EMAIL TRANSPORTER
+// EMAIL + OTP
+// Email goes over HTTPS (Resend/Brevo) because Railway blocks SMTP.
+// OTPs are stored hashed in MongoDB (models/OtpCode.js), not in memory.
 // ==========================================
-const otpStore = {};
-const transporter = nodemailer.createTransport({
-  host: process.env.EMAIL_HOST || "smtp.hostinger.com",
-  port: Number(process.env.EMAIL_PORT || 465),
-  secure: process.env.EMAIL_SECURE !== "false",
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-});
+const crypto = require("crypto");
+const { sendMail, logMailerStatus } = require("../utils/mailer");
+const OtpCode = require("../models/OtpCode");
 
-transporter.verify((error, success) => {
-  if (error) {
-    console.error("❌ SMTP Connection Error:", error);
-  } else {
-    console.log("✅ SMTP Server is ready");
-  }
-});
+logMailerStatus();
+
+const OTP_TTL_MS = 10 * 60 * 1000;   // code valid for 10 minutes
+const OTP_RESEND_MS = 60 * 1000;     // 1 new code per minute
+const OTP_MAX_ATTEMPTS = 5;          // wrong tries before code is burned
+
+const hashOtp = (otp) =>
+  crypto
+    .createHash("sha256")
+    .update(`${otp}:${process.env.JWT_SECRET || "abdulqadeer11111"}`)
+    .digest("hex");
+
+const otpEmailHtml = (name, otp) => `
+  <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 20px;">
+    <h2 style="color: #1a1a1a;">Password reset code</h2>
+    <p>Hi ${name || "there"},</p>
+    <p>Use this code to reset your tdc password:</p>
+    <div style="background: #f9c349; padding: 20px; text-align: center; border-radius: 10px; margin: 20px 0;">
+      <h1 style="color: #1a1a1a; font-size: 36px; letter-spacing: 6px; margin: 0;">${otp}</h1>
+    </div>
+    <p>It expires in <strong>10 minutes</strong>.</p>
+    <p>If you didn't ask for this, ignore this email. Your password stays the same.</p>
+    <p>The Deft Crew</p>
+  </div>`;
 
 // Helper function to cleanup uploaded files
 const cleanupFile = async (file) => {
@@ -365,14 +376,11 @@ if (referrer) {
           readBy: [],
         });
 
-        transporter
-          .sendMail({
-            from: `"The Deft Crew" <${process.env.EMAIL_FROM}>`,
-            to: email,
-            subject: "Welcome to the Crew! 🚀",
-            html: `<p>Welcome <b>${name}</b>! Your account is now active.</p>`,
-          })
-          .catch((err) => console.log("Mail Error:", err.message));
+        sendMail({
+          to: email,
+          subject: "Welcome to the Crew! 🚀",
+          html: `<p>Welcome <b>${name}</b>! Your account is now active.</p>`,
+        }).catch((err) => console.log("Mail Error:", err.message));
       } catch (nError) {
         console.error("Notification/Email Error:", nError.message);
       }
@@ -553,7 +561,7 @@ router.get("/check-vip-status", authMiddleware, async (req, res) => {
 // FORGOT PASSWORD (SEND OTP)
 // ==========================================
 router.post("/forgot-password", async (req, res) => {
-  const { emailOrPhone } = req.body;
+  const emailOrPhone = String(req.body?.emailOrPhone || "").trim();
 
   if (!emailOrPhone) {
     return res.status(400).json({ message: "Email or phone required" });
@@ -561,91 +569,67 @@ router.post("/forgot-password", async (req, res) => {
 
   try {
     const user = await User.findOne({
-      $or: [
-        { email: emailOrPhone.toLowerCase().trim() },
-        { phone: emailOrPhone.trim() }
-      ],
-    });
+      $or: [{ email: emailOrPhone.toLowerCase() }, { phone: emailOrPhone }],
+    }).select("_id name email");
 
     if (!user) {
       return res.status(404).json({ message: "No account found with this email or phone" });
     }
+    if (!user.email) {
+      return res.status(400).json({ message: "This account has no email. Contact support." });
+    }
 
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    // 1 code per minute
+    const last = await OtpCode.findOne({ user: user._id, purpose: "password-reset" })
+      .sort({ createdAt: -1 })
+      .lean();
+    if (last && Date.now() - new Date(last.createdAt).getTime() < OTP_RESEND_MS) {
+      const wait = Math.ceil((OTP_RESEND_MS - (Date.now() - new Date(last.createdAt).getTime())) / 1000);
+      return res.status(429).json({
+        message: `Please wait ${wait}s before requesting a new code.`,
+        userId: user._id,
+        retryAfter: wait,
+      });
+    }
 
-    otpStore[user._id] = {
-      otp,
-      expires: Date.now() + 5 * 60 * 1000,
-    };
+    const otp = crypto.randomInt(100000, 1000000).toString();
 
-    console.log(`🔑 OTP for ${user.email}: ${otp}`);
-
-   try {
-  const info = await transporter.sendMail({
-    from: `"The Deft Crew" <${process.env.EMAIL_FROM}>`,
-    to: user.email,
-    subject: "Password Reset OTP - The Deft Crew",
-    html: `
-      <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 20px;">
-        <h2 style="color: #1a1a1a;">Password Reset Request</h2>
-
-        <p>Hello ${user.name || "User"},</p>
-
-        <p>Use the following OTP code to reset your password:</p>
-
-        <div style="
-          background: #f9c349;
-          padding: 20px;
-          text-align: center;
-          border-radius: 10px;
-          margin: 20px 0;
-        ">
-          <h1 style="
-            color: #1a1a1a;
-            font-size: 36px;
-            letter-spacing: 5px;
-            margin: 0;
-          ">
-            ${otp}
-          </h1>
-        </div>
-
-        <p>This OTP expires in <strong>5 minutes</strong>.</p>
-
-        <p>If you did not request this password reset, you can safely ignore this email.</p>
-
-        <p>
-          Regards,<br>
-          <strong>The Deft Crew Team</strong>
-        </p>
-      </div>
-    `,
-  });
-
-  console.log(`✅ OTP email sent to ${user.email}`);
-  console.log(`📨 Message ID: ${info.messageId}`);
-
-  return res.json({
-    message: "OTP sent successfully to your email",
-    userId: user._id,
-  });
-
-} catch (mailError) {
-
-  console.error("❌ OTP email failed:", mailError);
-
-  delete otpStore[user._id];
-
-  return res.status(500).json({
-    message: "Unable to send OTP email. Please try again later.",
-  });
-}
-
-    return res.json({
-      message: "OTP sent successfully to your email",
-      userId: user._id,
+    // Only the newest code is valid
+    await OtpCode.deleteMany({ user: user._id, purpose: "password-reset" });
+    const record = await OtpCode.create({
+      user: user._id,
+      purpose: "password-reset",
+      codeHash: hashOtp(otp),
+      expiresAt: new Date(Date.now() + OTP_TTL_MS),
     });
 
+    if (process.env.NODE_ENV !== "production") {
+      console.log(`🔑 [dev] OTP for ${user.email}: ${otp}`);
+    }
+
+    try {
+      await sendMail({
+        to: user.email,
+        subject: "Your tdc password reset code",
+        html: otpEmailHtml(user.name, otp),
+      });
+    } catch (mailError) {
+      await OtpCode.deleteOne({ _id: record._id });
+      return res.status(503).json({
+        message: "We couldn't send the email right now. Please try again in a minute.",
+      });
+    }
+
+    // Masked email so the user knows where to look
+    const [local, domain] = user.email.split("@");
+    const masked = `${local.slice(0, 2)}${"*".repeat(Math.max(local.length - 2, 1))}@${domain}`;
+
+    return res.json({
+      message: `Code sent to ${masked}`,
+      userId: user._id,
+      email: masked,
+      expiresIn: OTP_TTL_MS / 1000,
+    });
   } catch (err) {
     console.error("❌ Forgot password error:", err);
     return res.status(500).json({ message: "Server error. Please try again." });
@@ -656,57 +640,101 @@ router.post("/forgot-password", async (req, res) => {
 // VERIFY OTP
 // ==========================================
 router.post("/verify-otp", async (req, res) => {
-  const { userId, otp } = req.body;
+  const userId = String(req.body?.userId || "").trim();
+  const otp = String(req.body?.otp || "").replace(/\D/g, "");
 
   if (!userId || !otp) {
     return res.status(400).json({ message: "User ID and OTP are required" });
   }
-
-  const record = otpStore[userId];
-
-  if (!record) return res.status(400).json({ message: "No OTP request found. Please request a new OTP." });
-  if (record.expires < Date.now()) {
-    delete otpStore[userId];
-    return res.status(400).json({ message: "OTP has expired. Please request a new one." });
-  }
-  if (record.otp !== otp.trim()) {
-    return res.status(400).json({ message: "Invalid OTP. Please check and try again." });
+  if (!mongoose.Types.ObjectId.isValid(userId)) {
+    return res.status(400).json({ message: "Invalid request. Please request a new code." });
   }
 
-  const tempToken = jwt.sign(
-    { id: userId, purpose: 'password-reset' },
-    process.env.JWT_SECRET || "abdulqadeer11111",
-    { expiresIn: "10m" }
-  );
+  try {
+    const record = await OtpCode.findOne({ user: userId, purpose: "password-reset" }).sort({ createdAt: -1 });
 
-  delete otpStore[userId];
+    if (!record) {
+      return res.status(400).json({ message: "No code found. Please request a new one." });
+    }
+    if (record.expiresAt.getTime() < Date.now()) {
+      await OtpCode.deleteMany({ user: userId, purpose: "password-reset" });
+      return res.status(400).json({ message: "Code expired. Please request a new one." });
+    }
+    if (record.attempts >= OTP_MAX_ATTEMPTS) {
+      await OtpCode.deleteMany({ user: userId, purpose: "password-reset" });
+      return res.status(429).json({ message: "Too many wrong tries. Please request a new code." });
+    }
 
-  res.json({ message: "OTP verified", resetToken: tempToken });
+    const ok =
+      record.codeHash.length === hashOtp(otp).length &&
+      crypto.timingSafeEqual(Buffer.from(record.codeHash), Buffer.from(hashOtp(otp)));
+
+    if (!ok) {
+      record.attempts += 1;
+      await record.save();
+      const left = OTP_MAX_ATTEMPTS - record.attempts;
+      return res.status(400).json({
+        message: left > 0 ? `Wrong code. ${left} tries left.` : "Too many wrong tries. Please request a new code.",
+      });
+    }
+
+    await OtpCode.deleteMany({ user: userId, purpose: "password-reset" });
+
+    const resetToken = jwt.sign(
+      { id: userId, purpose: "password-reset" },
+      process.env.JWT_SECRET || "abdulqadeer11111",
+      { expiresIn: "15m" }
+    );
+
+    return res.json({ message: "OTP verified", resetToken });
+  } catch (err) {
+    console.error("❌ Verify OTP error:", err);
+    return res.status(500).json({ message: "Server error. Please try again." });
+  }
 });
 
 // ==========================================
 // RESET PASSWORD
 // ==========================================
 router.post("/reset-password", async (req, res) => {
-  const { resetToken, newPassword } = req.body;
+  const { resetToken, newPassword } = req.body || {};
 
   if (!resetToken || !newPassword) {
     return res.status(400).json({ message: "Token and new password required" });
   }
+  if (String(newPassword).length < 6) {
+    return res.status(400).json({ message: "Password must be at least 6 characters" });
+  }
+
+  let decoded;
+  try {
+    decoded = jwt.verify(resetToken, process.env.JWT_SECRET || "abdulqadeer11111");
+  } catch (err) {
+    return res.status(400).json({ message: "Session expired. Please request a new code." });
+  }
+  if (decoded.purpose !== "password-reset") {
+    return res.status(400).json({ message: "Invalid reset session." });
+  }
 
   try {
-    const decoded = jwt.verify(resetToken, process.env.JWT_SECRET || "abdulqadeer11111");
     const user = await User.findById(decoded.id);
     if (!user) return res.status(404).json({ message: "User not found" });
 
-    user.password = await bcrypt.hash(newPassword, 10);
+    user.password = await bcrypt.hash(String(newPassword), 10);
     await user.save();
 
-    delete otpStore[decoded.id];
+    await OtpCode.deleteMany({ user: user._id });
 
-    res.json({ message: "Password reset successfully" });
+    sendMail({
+      to: user.email,
+      subject: "Your tdc password was changed",
+      html: `<p>Hi ${user.name || "there"},</p><p>Your password was just reset. If this wasn't you, contact support right away.</p><p>The Deft Crew</p>`,
+    }).catch(() => {});
+
+    return res.json({ message: "Password reset successfully" });
   } catch (err) {
-    res.status(400).json({ message: "Session expired. Please request a new OTP." });
+    console.error("❌ Reset password error:", err);
+    return res.status(500).json({ message: "Server error. Please try again." });
   }
 });
 
@@ -919,9 +947,7 @@ router.delete("/delete-account", authMiddleware, async (req, res) => {
 
     await User.findByIdAndDelete(userId);
 
-    if (otpStore[userId]) {
-      delete otpStore[userId];
-    }
+    await OtpCode.deleteMany({ user: userId }).catch(() => {});
 
     console.log(`✅ Account deleted: ${user.email} (${userId})`);
 
@@ -1110,8 +1136,7 @@ router.post("/change-password", authMiddleware, async (req, res) => {
     
     // Send email notification
     try {
-      await transporter.sendMail({
-        from: `"The Deft Crew" <${process.env.EMAIL_FROM}>`,
+      await sendMail({
         to: user.email,
         subject: "Password Changed Successfully - The Deft Crew",
         html: `

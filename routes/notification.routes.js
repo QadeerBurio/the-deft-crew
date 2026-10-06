@@ -14,7 +14,7 @@ router.put('/save-token', auth, async (req, res) => {
     if (!userId || userId === 'guest-user') {
       return res.status(401).json({ message: 'User ID required' });
     }
-    const { token, platform } = req.body;
+    const { token, platform, channels } = req.body;
     if (!token) return res.status(400).json({ message: 'Push token required' });
 
     await User.updateMany(
@@ -29,7 +29,8 @@ router.put('/save-token', auth, async (req, res) => {
         $push: {
           pushTokens: {
             token,
-            platform: platform || 'unknown',
+            platform: ['ios', 'android', 'web'].includes(platform) ? platform : 'unknown',
+            channels: channels === 'snd_v1' ? 'snd_v1' : 'legacy',
             updatedAt: new Date(),
           },
         },
@@ -223,25 +224,27 @@ router.delete('/clear-all', auth, async (req, res) => {
 router.get('/test-push', auth, async (req, res) => {
   try {
     const { Expo } = require('expo-server-sdk');
-    const { buildMessage, iconUrlForMood, resolveSoundKey, channelForSound } = require('../utils/pushNotification');
+    const { buildMessage, iconUrlForMood, resolveSoundKey, channelForToken } = require('../utils/pushNotification');
     const expo = new Expo(process.env.EXPO_ACCESS_TOKEN ? { accessToken: process.env.EXPO_ACCESS_TOKEN } : {});
 
     const userId = req.userId || req.user?._id || req.user?.id;
     const user = await User.findById(userId).select('pushTokens').lean();
-    const tokens = (user?.pushTokens || []).map((t) => t.token).filter(Boolean);
+    const entries = (user?.pushTokens || []).filter((t) => t?.token);
+    const tokens = entries.map((t) => t.token);
 
     if (!tokens.length) {
       return res.json({ ok: false, problem: 'NO_TOKEN', fix: 'App never saved a push token. Open the built app (not Expo Go), log in, allow notifications.' });
     }
 
-    const valid = tokens.filter((t) => Expo.isExpoPushToken(t));
-    const messages = valid.map((t) =>
-      buildMessage(t, {
+    const validEntries = entries.filter((e) => Expo.isExpoPushToken(e.token));
+    const valid = validEntries.map((e) => e.token);
+    const messages = validEntries.map((e) =>
+      buildMessage(e.token, {
         title: '🤩 tdc test push',
         body: 'if you see this outside the app with the tdc sound, push works ✅',
         data: { type: 'System', mood: 'excited', route: 'NotificationModal', soundKey: resolveSoundKey('System', 'excited') },
         soundName: resolveSoundKey('System', 'excited'),
-        channelId: channelForSound(resolveSoundKey('System', 'excited')),
+        channelId: channelForToken(e, resolveSoundKey('System', 'excited')),
         iconUrl: iconUrlForMood('excited'),
       })
     );

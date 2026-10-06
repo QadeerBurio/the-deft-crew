@@ -53,7 +53,7 @@ const courseSchema = new mongoose.Schema({
 });
 
 // Update the updatedAt field on save
-courseSchema.pre('save', function(next) {
+courseSchema.pre('save', function () {
   this.updatedAt = Date.now();
   
 });

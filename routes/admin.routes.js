@@ -51,6 +51,33 @@ const isAdmin = async (req, res, next) => {
 
 // ==================== USER MANAGEMENT ROUTES ====================
 
+// NOTE: /users/all must be registered BEFORE /users/:role,
+// otherwise Express matches role="all" and returns 400.
+// ✅ Get ALL users (for super admin)
+router.get("/users/all", auth, isAdmin, async (req, res) => {
+  try {
+    const users = await User.find()
+      .populate("university", "name")
+      .populate("referredBy", "name email")
+      .select("-password")
+      .sort({ createdAt: -1 });
+
+    const stats = {
+      total: users.length,
+      students: users.filter(u => u.role === "student").length,
+      brands: users.filter(u => u.role === "brand").length,
+      employees: users.filter(u => u.role === "employee").length,
+      travelers: users.filter(u => u.role === "traveler").length,
+      admins: users.filter(u => u.role === "admin").length,
+    };
+
+    res.json({ users, stats });
+  } catch (err) {
+    console.error("Error fetching all users:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ✅ Get users by ANY role (Student, Brand, Employee, Traveler)
 // In admin.routes.js - Modify the GET users by role endpoint
 router.get("/users/:role", auth, isAdmin, async (req, res) => {
@@ -118,31 +145,6 @@ router.get("/users/password/:id", auth, isAdmin, async (req, res) => {
       success: false,
       error: err.message 
     });
-  }
-});
-
-// ✅ Get ALL users (for super admin)
-router.get("/users/all", auth, isAdmin, async (req, res) => {
-  try {
-    const users = await User.find()
-      .populate("university", "name")
-      .populate("referredBy", "name email")
-      .select("-password")
-      .sort({ createdAt: -1 });
-
-    const stats = {
-      total: users.length,
-      students: users.filter(u => u.role === "student").length,
-      brands: users.filter(u => u.role === "brand").length,
-      employees: users.filter(u => u.role === "employee").length,
-      travelers: users.filter(u => u.role === "traveler").length,
-      admins: users.filter(u => u.role === "admin").length,
-    };
-
-    res.json({ users, stats });
-  } catch (err) {
-    console.error("Error fetching all users:", err);
-    res.status(500).json({ error: err.message });
   }
 });
 
