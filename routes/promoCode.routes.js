@@ -122,33 +122,9 @@ async function createWooCommerceCoupon(
 // ============================================================
 // CACHE (Redis, with in-memory fallback)
 // ============================================================
-let cache;
-try {
-  const Redis = require("ioredis");
-  cache = new Redis(process.env.REDIS_URL);
-  cache.on("error", (e) => console.warn("[cache] redis error:", e.message));
-} catch (e) {
-  cache = {
-    store: new Map(),
-    async get(key) {
-      const item = this.store.get(key);
-      if (!item) return null;
-      if (Date.now() > item.expiry) {
-        this.store.delete(key);
-        return null;
-      }
-      return item.data;
-    },
-    async set(key, data, ttl = 300) {
-      this.store.set(key, { data, expiry: Date.now() + ttl * 1000 });
-    },
-    async del(pattern) {
-      for (const key of this.store.keys()) {
-        if (key.includes(pattern)) this.store.delete(key);
-      }
-    },
-  };
-}
+// Shared with offer.routes.js, so clearing "offers:claimed:<id>" here
+// really refreshes My Discounts.
+const cache = require("../utils/cache");
 
 // ============================================================
 // GENERATE PROMO CODE

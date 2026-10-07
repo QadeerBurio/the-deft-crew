@@ -8,33 +8,19 @@ const Slider = require("../models/Slider");
 const router = express.Router();
 const { uploadOffer } = require("../config/cloudinary");
 
-// Add Redis cache if available, fallback to in-memory cache
-let cache;
-try {
-  const Redis = require('ioredis');
-  cache = new Redis(process.env.REDIS_URL);
-} catch (e) {
-  cache = {
-    store: new Map(),
-    async get(key) { 
-      const item = this.store.get(key);
-      if (!item) return null;
-      if (Date.now() > item.expiry) {
-        this.store.delete(key);
-        return null;
-      }
-      return item.data;
-    },
-    async set(key, data, ttl = 300) {
-      this.store.set(key, { data, expiry: Date.now() + ttl * 1000 });
-    },
-    async del(pattern) {
-      for (const key of this.store.keys()) {
-        if (key.includes(pattern)) this.store.delete(key);
-      }
-    }
-  };
-}
+// Shared cache (same instance as promoCode.routes.js, so clears reach both)
+const cache = require("../utils/cache");
+const { clearOfferCaches } = require("../utils/cache");
+const { getBrandCitiesMap } = require("../utils/brandCities");
+
+// Offers/claims change all the time, never let a phone or proxy cache them
+router.use((req, res, next) => {
+  if (req.method === "GET") res.set("Cache-Control", "no-store");
+  next();
+});
+
+// ?fresh=1 skips the server cache (pull-to-refresh)
+const wantsFresh = (req) => req.query.fresh === "1" || req.query.fresh === "true";
 
 const CACHE_TTL = 120;
 
@@ -44,9 +30,8 @@ const CACHE_TTL = 120;
 const pendingScans = [];
 const processedScans = new Set();
 
-async function clearBrandCaches(brandId) {
-  await cache.del(`offers:brand:${brandId}`);
-  await cache.del('offers:summary');
+async function clearBrandCaches(brandId, userId) {
+  await clearOfferCaches({ brandId: brandId?.toString(), userId: userId?.toString() });
 }
 
 // CREATE: Create new offer
@@ -172,8 +157,8 @@ router.post("/claim/:offerId", auth, async (req, res) => {
     offer.claimedBy.push(req.userId);
     await offer.save();
 
-    // Clear cache for this user's claimed offers
-    await cache.del(`offers:claimed:${req.userId}`);
+    // Clear this student's claimed list AND the brand/summary lists (claimedBy changed)
+    await clearBrandCaches(offer.brand, req.userId);
 
     res.json({ 
       message: "Discount added to your profile!", 
@@ -191,16 +176,22 @@ router.get("/claimed", auth, async (req, res) => {
   try {
     const cacheKey = `offers:claimed:${req.userId}`;
     
-    // Try cache first
-    const cached = await cache.get(cacheKey);
-    if (cached) {
-      return res.json(JSON.parse(cached));
+    // Try cache first (skipped on ?fresh=1)
+    if (!wantsFresh(req)) {
+      const cached = await cache.get(cacheKey);
+      if (cached) {
+        return res.json(JSON.parse(cached));
+      }
     }
 
     const claimedOffers = await Offer.find({ claimedBy: req.userId })
-      .populate("brand", "name logo websiteUrl")
+      .populate("brand", "name brandName logo websiteUrl city address isOnline isInStore")
       .lean()
       .exec();
+
+    // Cities per brand (brand city + branch cities) for the city filter in the app
+    const brandDocs = claimedOffers.map((o) => o.brand).filter((b) => b && b._id);
+    const citiesMap = await getBrandCitiesMap(brandDocs);
     
     // Add redemption info to each offer
     const offersWithInfo = claimedOffers.map(offer => {
@@ -218,6 +209,9 @@ router.get("/claimed", auth, async (req, res) => {
         redemptionsToday: todayRedemptions.length,
         maxRedemptionsPerDay: 2,
         canRedeem: todayRedemptions.length < 2,
+        brandCities: offer.brand?._id
+          ? citiesMap.get(offer.brand._id.toString()) || ["Karachi"]
+          : ["Karachi"],
         isClaimed: true // Explicit flag
       };
     });
@@ -246,8 +240,8 @@ router.post("/unclaim/:offerId", auth, async (req, res) => {
       { returnDocument: 'after' } // ✅ Fixed deprecation
     );
 
-    // Also clear the user's claimed offers cache
-    await cache.del(`offers:claimed:${req.userId}`);
+    // Clear this student's claimed list AND the brand/summary lists
+    await clearBrandCaches(offer.brand, req.userId);
 
     res.json({ message: "Offer unclaimed successfully" });
   } catch (err) {
@@ -310,6 +304,9 @@ router.post('/redeem-payment', auth, async (req, res) => {
     }
     await offer.save();
 
+    // Redemption changes claimedBy + redemptions → clear every list that shows them
+    await clearBrandCaches(offer.brand, userId);
+
     // Mark pending scan as processed
     try {
       const idx = pendingScans.findIndex(
@@ -361,9 +358,11 @@ router.get("/brand/:brandId", auth, async (req, res) => {
   try {
     const cacheKey = `offers:brand:${req.params.brandId}`;
     
-    const cached = await cache.get(cacheKey);
-    if (cached) {
-      return res.json(JSON.parse(cached));
+    if (!wantsFresh(req)) {
+      const cached = await cache.get(cacheKey);
+      if (cached) {
+        return res.json(JSON.parse(cached));
+      }
     }
 
     const offers = await Offer.find({ brand: req.params.brandId })
@@ -384,9 +383,11 @@ router.get("/summary", auth, async (req, res) => {
   try {
     const cacheKey = 'offers:summary';
     
-    const cached = await cache.get(cacheKey);
-    if (cached) {
-      return res.json(JSON.parse(cached));
+    if (!wantsFresh(req)) {
+      const cached = await cache.get(cacheKey);
+      if (cached) {
+        return res.json(JSON.parse(cached));
+      }
     }
 
     const offers = await Offer.aggregate([

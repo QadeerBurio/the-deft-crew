@@ -81,4 +81,23 @@ offerSchema.index({ 'redemptions.student': 1 });
 offerSchema.index({ "redemptions.promoCodeId": 1 });
 offerSchema.index({ "redemptions.externalOrderId": 1 });
 
+// Any change to an offer (claim, redeem, webhook order, edit) clears the
+// cached lists, so Brands / OfferScreen / My Discounts never show old data.
+function clearOfferListCaches(doc) {
+  try {
+    const cache = require("../utils/cache");
+    const brandId = doc?.brand?._id || doc?.brand;
+    Promise.all([
+      cache.del("offers:summary"),
+      brandId ? cache.del(`offers:brand:${brandId}`) : null,
+      cache.delPrefix("offers:claimed:"),
+    ]).catch(() => {});
+  } catch (e) {}
+}
+
+offerSchema.post("save", clearOfferListCaches);
+offerSchema.post("findOneAndUpdate", clearOfferListCaches);
+offerSchema.post("findOneAndDelete", clearOfferListCaches);
+offerSchema.post("deleteOne", { document: true, query: false }, clearOfferListCaches);
+
 module.exports = mongoose.model("Offer", offerSchema);

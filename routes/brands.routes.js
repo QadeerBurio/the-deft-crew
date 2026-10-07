@@ -4,23 +4,37 @@ const Offer = require("../models/Offer");
 const User = require("../models/User");
 const auth = require("../middleware/auth.middleware");
 
+const {
+  DEFAULT_CITY,
+  getBrandCitiesMap,
+  matchesCity,
+  normalizeCity,
+} = require("../utils/brandCities");
+
 const router = express.Router();
 
-// GET brands - Only show APPROVED brands, sorted by newest first
-router.get("/", async (req, res) => {
-  try {
-    // Only fetch brands that are approved
-    const brands = await User.find({ 
-      role: "brand",
-      brandApprovalStatus: "approved" // Only show approved brands
-    })
-      .select("name email logo category brandName address isOnline isInStore phone createdAt")
-      .sort({ createdAt: -1 }) // NEWEST FIRST
-      .lean()
-      .exec();
-    
-    // Format brand data
-    const formattedBrands = brands.map(brand => ({
+// Brand lists change often (claims, new offers), never let a phone/proxy cache them
+router.use((req, res, next) => {
+  if (req.method === "GET") res.set("Cache-Control", "no-store");
+  next();
+});
+
+// Loads approved brands with their cities (brand city + active branch cities)
+async function loadApprovedBrands() {
+  const brands = await User.find({
+    role: "brand",
+    brandApprovalStatus: "approved",
+  })
+    .select("name email logo category brandName address city isOnline isInStore phone createdAt")
+    .sort({ createdAt: -1 })
+    .lean()
+    .exec();
+
+  const citiesMap = await getBrandCitiesMap(brands);
+
+  return brands.map((brand) => {
+    const cities = citiesMap.get(brand._id.toString()) || [DEFAULT_CITY];
+    return {
       _id: brand._id,
       name: brand.brandName || brand.name,
       logo: brand.logo || null,
@@ -30,14 +44,54 @@ router.get("/", async (req, res) => {
       isInStore: brand.isInStore || false,
       address: brand.address || "",
       phone: brand.phone || "",
+      city: cities[0],
+      cities,
       displayImage: brand.logo || null,
       createdAt: brand.createdAt || new Date().toISOString(),
-    }));
-    
-    res.json(formattedBrands);
+    };
+  });
+}
+
+// GET brands - only APPROVED brands, newest first
+// Optional: ?city=Karachi  (online-only brands are included in every city)
+router.get("/", async (req, res) => {
+  try {
+    let list = await loadApprovedBrands();
+
+    const city = normalizeCity(req.query.city || "");
+    if (city && city.toLowerCase() !== "all") {
+      list = list.filter(
+        (b) => matchesCity(b.cities, city) || (b.isOnline && !b.isInStore)
+      );
+    }
+
+    res.json(list);
   } catch (err) {
     console.error("Error fetching brands:", err);
     res.status(500).json({ message: "Server error" });
+  }
+});
+
+// GET /api/brands/cities → [{ city, count }], Karachi first
+router.get("/cities", async (req, res) => {
+  try {
+    const list = await loadApprovedBrands();
+    const counts = new Map();
+    for (const b of list) {
+      for (const c of b.cities) counts.set(c, (counts.get(c) || 0) + 1);
+    }
+    if (!counts.has(DEFAULT_CITY)) counts.set(DEFAULT_CITY, 0);
+
+    const cities = [...counts.entries()]
+      .map(([city, count]) => ({ city, count }))
+      .sort((a, b) =>
+        a.city === DEFAULT_CITY ? -1 : b.city === DEFAULT_CITY ? 1 : b.count - a.count
+      );
+
+    res.json({ success: true, default: DEFAULT_CITY, cities });
+  } catch (err) {
+    console.error("Error fetching brand cities:", err);
+    res.status(500).json({ success: false, message: "Server error" });
   }
 });
 router.get("/stats", auth, async (req, res) => {
