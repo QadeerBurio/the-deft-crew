@@ -46,15 +46,15 @@ router.post('/test-push', async (req, res) => {
 
     if (audience === 'single') {
       if (!userId) return res.status(400).json({ message: 'userId required' });
-      const user = await User.findById(userId).select('_id name pushTokens').lean();
+      const user = await User.findById(userId).select('_id name email pushTokens').lean();
       if (!user) return res.status(404).json({ message: 'user not found' });
       targetUsers = [user];
     } else if (audience === 'all') {
       targetUsers = await User.find({ 'pushTokens.0': { $exists: true } })
-        .select('_id name pushTokens').limit(10000).lean();
+        .select('_id name email pushTokens').limit(10000).lean();
     } else if (['student', 'brand', 'traveler', 'employee', 'admin'].includes(audience)) {
       targetUsers = await User.find({ role: audience, 'pushTokens.0': { $exists: true } })
-        .select('_id name pushTokens').limit(10000).lean();
+        .select('_id name email pushTokens').limit(10000).lean();
     } else {
       return res.status(400).json({ message: `unknown audience: ${audience}` });
     }
@@ -91,7 +91,7 @@ router.post('/test-push', async (req, res) => {
     }
 
     // Send
-    const results = { sent: 0, failed: 0, skipped: 0, logIds: [], errors: [], reasons: {}, legacyDevices: 0 };
+    const results = { sent: 0, failed: 0, skipped: 0, logIds: [], errors: [], reasons: {}, legacyDevices: 0, details: [] };
 
     for (const u of targetUsers) {
       try {
@@ -110,6 +110,11 @@ router.post('/test-push', async (req, res) => {
           results.skipped++;
           const r = result?.reason || 'unknown';
           results.reasons[r] = (results.reasons[r] || 0) + 1;
+          const tokenCount = (u.pushTokens || []).length;
+          console.warn(`[test-push] ✗ not sent → ${u.email || u._id} | reason=${r} | tokens=${tokenCount}${result?.error ? ` | ${result.error}` : ''}`);
+          if (results.details.length < 20) {
+            results.details.push({ email: u.email || String(u._id), reason: r, tokens: tokenCount, error: result?.error || null });
+          }
         }
       } catch (e) {
         results.failed++;
@@ -128,6 +133,12 @@ router.post('/test-push', async (req, res) => {
       MismatchSenderId: 'FCM key is from a different Firebase project than google-services.json',
       no_profile: 'user has no engagement profile',
       pref_off: 'user turned this notification type off',
+      send_failed: 'Expo rejected the request (see Railway log line [test-push] ✗ for the exact error)',
+      SEND_FAILED: 'Expo rejected the request (see Railway log line [test-push] ✗ for the exact error)',
+      UNAUTHORIZED: 'Expo needs an access token: set EXPO_ACCESS_TOKEN in Railway (Enhanced Push Security is on)',
+      PUSH_TOO_MANY_EXPERIENCE_IDS: 'user has tokens from Expo Go and the APK. Retried per app',
+      expo_rejected: 'Expo rejected every device for this user',
+      exception: 'server error while sending (see Railway log)',
     };
     const topReason = Object.keys(results.reasons).sort((a, b) => results.reasons[b] - results.reasons[a])[0];
 
@@ -139,6 +150,7 @@ router.post('/test-push', async (req, res) => {
       reasons: results.reasons,
       message: results.sent === 0 && topReason ? (REASON_TEXT[topReason] || topReason) : undefined,
       legacyDevices: results.legacyDevices,
+      details: results.details,
       note: results.legacyDevices
         ? `${results.legacyDevices} device(s) still run an old app build: they get the general sound. Uninstall + install the new build.`
         : undefined,

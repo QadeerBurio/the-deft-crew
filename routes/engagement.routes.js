@@ -524,6 +524,9 @@ router.get('/home', auth, async (req, res) => {
     const profile = await EngagementProfile.findOne({ user: req.userId }).lean();
     const today = dayKey();
     const dropDoc = await drops.todayDrop();
+    // Includes my vote + counts + target, so after a reload the card still
+    // shows the result and the "view" button
+    const dropDTO = dropDoc ? await drops.dropForUser(dropDoc, req.userId) : null;
 
     const cards = missions.FEATURES.map((f) => ({
       feature: f,
@@ -537,7 +540,7 @@ router.get('/home', auth, async (req, res) => {
     }));
 
     res.json({
-      drop: dropDoc ? drops.toDTO(dropDoc, null) : null,
+      drop: dropDTO,
       missions: {
         sortedCount: profile?.sortedCount || 0,
         total: 8,
@@ -1089,21 +1092,7 @@ router.get('/drops/today', auth, async (req, res) => {
   if (req.isGuest) return res.json(null);
   const drop = await drops.todayDrop();
   if (!drop) return res.json(null);
-
-  const DropReaction = require('../models/DropReaction');
-  const mine = await DropReaction.findOne({
-    drop: drop._id,
-    user: req.userId,
-  }).lean();
-
-  const counts = {};
-  const agg = await DropReaction.aggregate([
-    { $match: { drop: drop._id } },
-    { $group: { _id: '$choice', n: { $sum: 1 } } },
-  ]);
-  for (const row of agg) counts[row._id] = row.n;
-
-  res.json(drops.toDTO(drop, mine?.choice || null, counts));
+  res.json(await drops.dropForUser(drop, req.userId));
 });
 
 router.post('/drops/:dayKey/react', auth, requireAuth, async (req, res) => {
@@ -1123,7 +1112,7 @@ router.post('/drops/:dayKey/react', auth, requireAuth, async (req, res) => {
     });
 
     // ✅ Also return the target so the app knows where to navigate
-    const target = drops.resolveTarget(drop.contentRef);
+    const target = await drops.resolveTargetAsync(drop.contentRef, drop.type);
 
     res.json({
       myChoice,

@@ -37,6 +37,12 @@ router.put('/save-token', auth, async (req, res) => {
       }
     );
 
+    // Keep only the 5 most recent devices
+    await User.updateOne(
+      { _id: userId },
+      { $push: { pushTokens: { $each: [], $sort: { updatedAt: -1 }, $slice: 5 } } }
+    );
+
     console.log('[Notification] Push token saved for user:', userId);
     res.json({ success: true });
   } catch (err) {

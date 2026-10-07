@@ -33,32 +33,76 @@ async function react(userId, dayKeyStr, choice) {
 }
 
 // ────────────────────────────────────────────
-// Target resolver — enriches DTO with route + params
+// Target resolver: where tapping the drop takes the student.
+// Route names must match the app's navigators exactly:
+//   Career, Exchange, Events, OfferScreen, Brands, FeedScreen (HomeStack)
+//   Dashboard → ListingDetail (SkillShare stack, nested)
+// The "open*" params make each screen open that exact item.
 // ────────────────────────────────────────────
-function resolveTarget(contentRef) {
-  if (!contentRef || !contentRef.kind || !contentRef.id) return null;
+const TYPE_FALLBACK = {
+  internship: { kind: 'job', route: 'Career', params: {} },
+  brand: { kind: 'brand', route: 'Brands', params: {} },
+  event: { kind: 'event', route: 'Events', params: {} },
+  scholarship: { kind: 'scholarship', route: 'Exchange', params: {} },
+  confession: { kind: 'confession', route: 'FeedScreen', params: { tab: 'Confession' } },
+  best_confession: { kind: 'confession', route: 'FeedScreen', params: { tab: 'Confession' } },
+  listing: { kind: 'listing', route: 'Dashboard', params: {} },
+};
+
+// Sync version (no DB). Brand targets without a known brandId open Brands.
+function resolveTarget(contentRef, dropType = null, brandId = null) {
+  if (!contentRef || !contentRef.kind || !contentRef.id) {
+    return TYPE_FALLBACK[dropType] || null;
+  }
   const id = String(contentRef.id);
 
   switch (contentRef.kind) {
     case 'internship':
     case 'job':
-      return { kind: 'job', route: 'Career', params: { jobId: id } };
+      return { kind: 'job', route: 'Career', params: { openJobId: id, jobId: id } };
     case 'scholarship':
-      return { kind: 'scholarship', route: 'ExchangeScreen', params: { programId: id } };
+      return { kind: 'scholarship', route: 'Exchange', params: { openProgramId: id, programId: id } };
     case 'event':
-      return { kind: 'event', route: 'Events', params: { eventId: id } };
+      return { kind: 'event', route: 'Events', params: { openEventId: id, eventId: id } };
     case 'brand':
-      return { kind: 'brand', route: 'Brands', params: { offerId: id } };
+    case 'offer':
+      return brandId
+        ? {
+            kind: 'brand',
+            route: 'OfferScreen',
+            params: { brand: { _id: String(brandId) }, offerId: id },
+          }
+        : { kind: 'brand', route: 'Brands', params: { offerId: id } };
     case 'confession':
-      return { kind: 'confession', route: 'Confession', params: { postId: id } };
+      return { kind: 'confession', route: 'FeedScreen', params: { tab: 'Confession', postId: id } };
     case 'listing':
-      return { kind: 'listing', route: 'ListingDetail', params: { id } };
+      return {
+        kind: 'listing',
+        route: 'Dashboard',
+        params: { screen: 'ListingDetail', params: { id, listingId: id } },
+      };
     default:
-      return null;
+      return TYPE_FALLBACK[dropType] || null;
   }
 }
 
-function toDTO(drop, myChoice = null, counts = null) {
+// Async version: for brand drops, contentRef.id can be an OFFER id or a BRAND id.
+// Looks up the brand so the app can open OfferScreen directly.
+async function resolveTargetAsync(contentRef, dropType = null) {
+  if (contentRef?.id && (contentRef.kind === 'brand' || contentRef.kind === 'offer')) {
+    try {
+      const Offer = require('../../models/Offer');
+      const offer = await Offer.findById(contentRef.id).select('brand').lean();
+      if (offer?.brand) return resolveTarget(contentRef, dropType, offer.brand);
+      const User = require('../../models/User');
+      const brand = await User.findOne({ _id: contentRef.id, role: 'brand' }).select('_id').lean();
+      if (brand) return resolveTarget(contentRef, dropType, brand._id);
+    } catch (e) {}
+  }
+  return resolveTarget(contentRef, dropType);
+}
+
+function toDTO(drop, myChoice = null, counts = null, target = undefined) {
   if (!drop) return null;
   return {
     dayKey: drop.dayKey,
@@ -73,8 +117,25 @@ function toDTO(drop, myChoice = null, counts = null) {
     },
     myChoice,
     counts: counts || undefined,
-    target: resolveTarget(drop.contentRef),
+    target: target !== undefined ? target : resolveTarget(drop.contentRef, drop.type),
   };
 }
 
-module.exports = { todayDrop, react, toDTO, resolveTarget };
+// Full drop for one student: their vote, live counts and the target
+async function dropForUser(drop, userId) {
+  if (!drop) return null;
+  const counts = {};
+  for (const opt of drop.action?.options || []) counts[opt] = 0;
+  const [mine, agg, target] = await Promise.all([
+    userId ? DropReaction.findOne({ drop: drop._id, user: userId }).lean() : null,
+    DropReaction.aggregate([
+      { $match: { drop: drop._id } },
+      { $group: { _id: '$choice', n: { $sum: 1 } } },
+    ]),
+    resolveTargetAsync(drop.contentRef, drop.type),
+  ]);
+  for (const row of agg) counts[row._id] = row.n;
+  return toDTO(drop, mine?.choice || null, counts, target);
+}
+
+module.exports = { todayDrop, react, toDTO, resolveTarget, resolveTargetAsync, dropForUser };

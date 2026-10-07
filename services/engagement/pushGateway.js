@@ -7,9 +7,9 @@ const cfg = require('../../config/engagement.config');
 const { dayKey, weekKey, isQuietHour } = require('../../utils/karachiTime');
 const copy = require('./copy');
 
-const expo = new Expo();
+const expo = new Expo(process.env.EXPO_ACCESS_TOKEN ? { accessToken: process.env.EXPO_ACCESS_TOKEN } : {});
 
-const { iconUrlForMood, titleWithEmoji, resolveSoundKey, channelForToken } = require('../../utils/pushNotification');
+const { iconUrlForMood, titleWithEmoji, resolveSoundKey, channelForToken, sendAllSafe } = require('../../utils/pushNotification');
 
 // ── CORE SEND ──
 async function send(userId, msg) {
@@ -90,14 +90,15 @@ async function send(userId, msg) {
 
     const ticketIds = [];
     const ticketErrors = [];
+    const ticketMessages = [];
     try {
-      const chunks = expo.chunkPushNotifications(messages);
-      for (const chunk of chunks) {
-        const tickets = await expo.sendPushNotificationsAsync(chunk);
+      {
+        const tickets = await sendAllSafe(expo, messages);
         for (const ticket of tickets) {
           if (ticket.status === 'error') {
             console.warn('[pushGateway] ticket error:', ticket.message);
             ticketErrors.push(ticket.details?.error || ticket.message || 'expo_error');
+            ticketMessages.push(ticket.message || '');
           } else if (ticket.id) {
             ticketIds.push(ticket.id);
           }
@@ -124,7 +125,7 @@ async function send(userId, msg) {
           { $pull: { pushTokens: { token: { $in: messages.map((m) => m.to) } } } }
         );
       }
-      return { sent: false, reason: why };
+      return { sent: false, reason: why, error: ticketMessages[0] || why };
     }
 
     await PushLog.updateOne(
@@ -178,6 +179,10 @@ async function sendPushToUser(userId, payload) {
 async function sendDailyDropPush(drop) {
   if (!drop || !drop._id) return { sent: 0 };
 
+  // Tap opens the drop's content (job, offer, event...) or Home for polls
+  const { resolveTargetAsync } = require('./drops');
+  const target = await resolveTargetAsync(drop.contentRef, drop.type).catch(() => null);
+
   const profiles = await EngagementProfile.find({
     'notifPrefs.dailyDrop': { $ne: false },
   })
@@ -194,8 +199,8 @@ async function sendDailyDropPush(drop) {
         'dailyDrop',
         {},
         {
-          route: 'Home',
-          params: { dayKey: drop.dayKey },
+          route: target?.route || 'Home',
+          params: { ...(target?.params || {}), dayKey: drop.dayKey },
           dropId: drop._id.toString(),
         }
       );

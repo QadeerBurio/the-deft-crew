@@ -64,12 +64,16 @@ function start() {
           .limit(10000)
           .lean();
 
+        // Tap opens the drop's content (job, offer, event...) or Home for polls
+        const { resolveTargetAsync } = require('./drops');
+        const target = await resolveTargetAsync(drop.contentRef, drop.type).catch(() => null);
+
         let sent = 0;
         for (const c of candidates) {
           const r = await pushGateway
             .sendFromCopy(c.user, 'daily_drop', 'dailyDrop', {}, {
-              route: 'Home',
-              params: { dayKey: today },
+              route: target?.route || 'Home',
+              params: { ...(target?.params || {}), dayKey: today },
             })
             .catch(() => ({ sent: false }));
           if (r?.sent) sent++;

@@ -6,7 +6,7 @@ const dropSchema = new mongoose.Schema(
     dayKey: { type: String, required: true, unique: true },
     type: {
       type: String,
-      enum: ['internship', 'brand', 'confession', 'event', 'scholarship', 'poll', 'best_confession'],
+      enum: ['internship', 'brand', 'confession', 'event', 'scholarship', 'listing', 'poll', 'best_confession'],
       required: true,
     },
     title: { type: String, required: true },
@@ -16,6 +16,7 @@ const dropSchema = new mongoose.Schema(
     contentRef: {
       kind: { type: String, default: null },
       id: { type: mongoose.Schema.Types.ObjectId, default: null },
+      label: { type: String, default: '' }, // shown in the admin list
     },
     action: {
       kind: {
