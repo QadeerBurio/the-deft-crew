@@ -53,16 +53,14 @@ async function loadApprovedBrands() {
 }
 
 // GET brands - only APPROVED brands, newest first
-// Optional: ?city=Karachi  (online-only brands are included in every city)
+// Optional: ?city=Karachi  (strict: only brands that are in that city)
 router.get("/", async (req, res) => {
   try {
     let list = await loadApprovedBrands();
 
     const city = normalizeCity(req.query.city || "");
     if (city && city.toLowerCase() !== "all") {
-      list = list.filter(
-        (b) => matchesCity(b.cities, city) || (b.isOnline && !b.isInStore)
-      );
+      list = list.filter((b) => matchesCity(b.cities, city));
     }
 
     res.json(list);
@@ -72,7 +70,7 @@ router.get("/", async (req, res) => {
   }
 });
 
-// GET /api/brands/cities → [{ city, count }], Karachi first
+// GET /api/brands/cities → [{ city, count }], only cities that have brands, most first
 router.get("/cities", async (req, res) => {
   try {
     const list = await loadApprovedBrands();
@@ -80,15 +78,11 @@ router.get("/cities", async (req, res) => {
     for (const b of list) {
       for (const c of b.cities) counts.set(c, (counts.get(c) || 0) + 1);
     }
-    if (!counts.has(DEFAULT_CITY)) counts.set(DEFAULT_CITY, 0);
-
     const cities = [...counts.entries()]
       .map(([city, count]) => ({ city, count }))
-      .sort((a, b) =>
-        a.city === DEFAULT_CITY ? -1 : b.city === DEFAULT_CITY ? 1 : b.count - a.count
-      );
+      .sort((a, b) => b.count - a.count || a.city.localeCompare(b.city));
 
-    res.json({ success: true, default: DEFAULT_CITY, cities });
+    res.json({ success: true, default: "All", total: list.length, cities });
   } catch (err) {
     console.error("Error fetching brand cities:", err);
     res.status(500).json({ success: false, message: "Server error" });

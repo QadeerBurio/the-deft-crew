@@ -230,7 +230,7 @@ const BANK = {
   // OFFERS
   // ══════════════════════════════════════════════
   new_offer: {
-    mood: 'broke',
+    mood: 'excited',
     variants: [
       'new offer from {brand}: {discount}% off. claim in 1 tap.',
       "{brand} just dropped {discount}% off. grab it before it's gone.",
@@ -312,7 +312,8 @@ function fill(key, vars = {}, userId = null) {
     body = body.replace(new RegExp(`\\{${k}\\}`, 'g'), String(v));
   }
 
-  return { title: '', body, mood: entry.mood || 'sorted' };
+  const { featureMood } = require('../../utils/notificationFeatures');
+  return { title: '', body, mood: featureMood(key, entry.mood || 'sorted') };
 }
 
 module.exports = { BANK, fill, pickVariant };

@@ -138,8 +138,10 @@ NotificationSchema.pre('save', function () {
   const meta = this.metadata && typeof this.metadata === 'object' ? { ...this.metadata } : {};
   const c = classify(this);
 
-  if (!this.mood || this.mood === 'sorted') this.mood = c.mood;
   meta.pushType = meta.pushType || c.pushType;
+  const { featureMood } = require('../utils/notificationFeatures');
+  const given = !this.mood || this.mood === 'sorted' ? c.mood : this.mood;
+  this.mood = featureMood(meta.pushType, given);
   meta.route = meta.route || meta.screen || c.route;
   meta.soundKey = meta.soundKey || resolveSoundKey(meta.pushType, this.mood);
   this.metadata = meta;

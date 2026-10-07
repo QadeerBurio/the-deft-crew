@@ -30,7 +30,7 @@ router.put('/save-token', auth, async (req, res) => {
           pushTokens: {
             token,
             platform: ['ios', 'android', 'web'].includes(platform) ? platform : 'unknown',
-            channels: channels === 'snd_v1' ? 'snd_v1' : 'legacy',
+            channels: ['snd_v1', 'snd_v2'].includes(channels) ? channels : 'legacy',
             updatedAt: new Date(),
           },
         },
@@ -244,15 +244,32 @@ router.get('/test-push', auth, async (req, res) => {
 
     const validEntries = entries.filter((e) => Expo.isExpoPushToken(e.token));
     const valid = validEntries.map((e) => e.token);
-    const messages = validEntries.map((e) =>
-      buildMessage(e.token, {
-        title: '🤩 tdc test push',
-        body: 'if you see this outside the app with the tdc sound, push works ✅',
-        data: { type: 'System', mood: 'excited', route: 'NotificationModal', soundKey: resolveSoundKey('System', 'excited') },
-        soundName: resolveSoundKey('System', 'excited'),
-        channelId: channelForToken(e, resolveSoundKey('System', 'excited')),
-        iconUrl: iconUrlForMood('excited'),
-      })
+    const { featureMood, titleWithEmoji } = require('../utils/pushNotification');
+
+    // 4 different features → 4 different emojis + sounds, so you can hear it works
+    const SAMPLES = [
+      { type: 'new_offer', title: 'new offer', body: 'deal sound + 🤩' },
+      { type: 'message', title: 'new message', body: 'message sound + 😜' },
+      { type: 'streak_warning', title: 'streak at risk', body: 'streak sound + 😰' },
+      { type: 'like', title: 'new like', body: 'like sound + 🤩' },
+    ];
+    const buildFor = (sample) =>
+      validEntries.map((e) => {
+        const mood = featureMood(sample.type);
+        const soundKey = resolveSoundKey(sample.type, mood);
+        return buildMessage(e.token, {
+          title: titleWithEmoji(sample.title, mood),
+          body: sample.body,
+          data: { type: sample.type, mood, route: 'NotificationModal', soundKey },
+          soundName: soundKey,
+          channelId: channelForToken(e, soundKey),
+          iconUrl: iconUrlForMood(mood),
+        });
+      });
+    const messages = buildFor(SAMPLES[0]);
+    // the other 3 follow 4s apart (fire and forget)
+    SAMPLES.slice(1).forEach((sample, i) =>
+      setTimeout(() => expo.sendPushNotificationsAsync(buildFor(sample)).catch(() => {}), (i + 1) * 4000)
     );
 
     const tickets = await expo.sendPushNotificationsAsync(messages);
@@ -271,6 +288,7 @@ router.get('/test-push', auth, async (req, res) => {
       };
       return {
         token: valid[i].slice(0, 30) + '…',
+        channels: validEntries[i].channels || 'legacy',
         ticket: t.status,
         receipt: receipt?.status || (t.id ? 'pending' : null),
         error: err || t.message || receipt?.message || null,
@@ -278,7 +296,16 @@ router.get('/test-push', auth, async (req, res) => {
       };
     });
 
-    res.json({ ok: results.every((r) => r.ticket === 'ok' && r.receipt !== 'error'), tokenCount: tokens.length, results });
+    const legacy = validEntries.filter((e) => e.channels !== 'snd_v2').length;
+    res.json({
+      ok: results.every((r) => r.ticket === 'ok' && r.receipt !== 'error'),
+      tokenCount: tokens.length,
+      legacyDevices: legacy,
+      note: legacy
+        ? `${legacy} device(s) are on an old build: they play ONE sound for everything. Install the new build.`
+        : 'all devices on the new build: each notification has its own sound.',
+      results,
+    });
   } catch (err) {
     console.error('[test-push]', err);
     res.status(500).json({ ok: false, problem: 'SEND_FAILED', error: err.message });

@@ -9,14 +9,16 @@ const copy = require('./copy');
 
 const expo = new Expo(process.env.EXPO_ACCESS_TOKEN ? { accessToken: process.env.EXPO_ACCESS_TOKEN } : {});
 
-const { iconUrlForMood, titleWithEmoji, resolveSoundKey, channelForToken, sendAllSafe } = require('../../utils/pushNotification');
+const { iconUrlForMood, titleWithEmoji, resolveSoundKey, channelForToken, sendAllSafe, featureMood } = require('../../utils/pushNotification');
 
 // ── CORE SEND ──
 async function send(userId, msg) {
   const {
-    type, pref = null, title, body, mood = 'sorted', data = {},
+    type, pref = null, title, body, data = {},
     priority = 0, skipCaps = false,
   } = msg;
+  // Emoji / dot / sound follow the feature (new offer = 🤑 + deal sound)
+  const mood = featureMood(type, msg.mood);
 
   try {
     // Admin/system pushes (skipCaps) don't need an engagement profile.
@@ -153,7 +155,7 @@ async function send(userId, msg) {
     );
 
     // Phones on an old app build only have the old channels → generic sound
-    const legacyDevices = messages.filter((m) => !String(m.channelId || '').startsWith('snd_')).length;
+    const legacyDevices = messages.filter((m) => !String(m.channelId || '').startsWith('tdc2_')).length;
     return { sent: true, logId: log._id.toString(), tickets: ticketIds, legacyDevices };
   } catch (err) {
     console.error('[pushGateway] fatal error:', err);

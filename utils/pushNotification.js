@@ -101,7 +101,11 @@ const TYPE_SOUND = {
   reminder: 'tdc_push_reminder',
 };
 
-const resolveSoundKey = (type, mood) => MOOD_SOUND[mood] || TYPE_SOUND[type] || 'tdc_push_default';
+// Feature decides the sound (new offer = deal sound, message = message sound...),
+// mood sound only for generic/unknown types. Same rule in the app + admin.
+const { featureMood, featureSound, FEATURES } = require('./notificationFeatures');
+const resolveSoundKey = (type, mood) =>
+  FEATURES[type] ? featureSound(type, mood) : MOOD_SOUND[mood] || TYPE_SOUND[type] || 'tdc_push_default';
 const channelForSound = (soundKey) => `snd_${soundKey}`;
 
 // Old app builds only have these channels. Sending to a channel that doesn't
@@ -123,10 +127,13 @@ const LEGACY_CHANNEL_FOR_SOUND = {
 
 // Pick the channel per device: new builds get the exact sound channel,
 // old builds get the closest channel they actually have.
-const channelForToken = (entry, soundKey) =>
-  entry?.channels === 'snd_v1'
-    ? channelForSound(soundKey)
-    : LEGACY_CHANNEL_FOR_SOUND[soundKey] || 'engagement';
+// snd_v2 = fresh "tdc2_<sound>" channels (new build). Android locks a
+// channel's sound forever once created, so new IDs guarantee correct sounds.
+const channelForToken = (entry, soundKey) => {
+  if (entry?.channels === 'snd_v2') return `tdc2_${soundKey}`;
+  if (entry?.channels === 'snd_v1') return channelForSound(soundKey);
+  return LEGACY_CHANNEL_FOR_SOUND[soundKey] || 'engagement';
+};
 
 // ═══════════════════════════════════════════════════════════════
 // TYPE → SOUND + CHANNEL
@@ -317,7 +324,8 @@ async function sendMessages(messages, userIdForCleanup = null) {
 }
 
 function buildData(type, extraData) {
-  const mood = VALID_MOODS.has(extraData.mood) || extraData.mood === 'rs' ? extraData.mood : 'sorted';
+  const given = VALID_MOODS.has(extraData.mood) || extraData.mood === 'rs' ? extraData.mood : null;
+  const mood = featureMood(type, given);
   const iconUrl = extraData.iconUrl || iconUrlForMood(mood);
   const soundKey = extraData.soundKey || resolveSoundKey(type, mood);
   const channelId = channelForSound(soundKey);
@@ -410,6 +418,7 @@ module.exports = {
   channelForToken,
   MOOD_EMOJI,
   MOOD_SOUND,
+  featureMood,
   TYPE_SOUND,
   resolveChannel,
   resolveSound,

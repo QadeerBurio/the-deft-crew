@@ -25,7 +25,7 @@ const TYPE_TO_MOOD = {
   alert: 'urgent',
 
   // SkillShare
-  new_offer: 'shook',
+  new_offer: 'excited',
   offer_accepted: 'hype',
   offer_rejected: 'sleepy',
   match_created: 'hype',
@@ -228,7 +228,8 @@ const createNotification = async (
   relatedId = null,
   mood = null
 ) => {
-  const resolvedMood = mood || TYPE_TO_MOOD[type] || 'sorted';
+  const { featureMood } = require('./notificationFeatures');
+  const resolvedMood = featureMood(type, mood || TYPE_TO_MOOD[type] || 'sorted');
   const notification = await persistNotification(recipientId, senderId, type, text, relatedId, resolvedMood);
   if (notification) {
     pushForNotification(notification, {
@@ -264,7 +265,7 @@ const createAndSendNotification = async ({
 
     if (String(recipientId) === String(senderId)) return null;
 
-    const resolvedMood = mood || TYPE_TO_MOOD[type] || 'sorted';
+    const resolvedMood = require("./notificationFeatures").featureMood(type, mood || TYPE_TO_MOOD[type] || "sorted");
 
     // 1. Save the notification (no push yet)
     const notification = await persistNotification(
