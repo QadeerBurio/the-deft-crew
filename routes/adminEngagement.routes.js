@@ -304,10 +304,28 @@ router.get('/drops', async (req, res) => {
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
 
+// Daily Drops go to everyone, so a campus-only confession can never be one
+async function campusConfessionError(payload) {
+  const ref = payload?.contentRef;
+  const isConfessionDrop =
+    ['confession', 'best_confession'].includes(payload?.type) || ref?.kind === 'confession';
+  if (!isConfessionDrop || !ref?.id) return null;
+  try {
+    const Confession = require('../models/Confession');
+    const c = await Confession.findById(ref.id).select('visibility').lean();
+    if (c?.visibility === 'campus') {
+      return 'This confession is campus-only. Pick a public confession for a Daily Drop.';
+    }
+  } catch (e) {}
+  return null;
+}
+
 router.post('/drops', async (req, res) => {
   try {
     const payload = req.body;
     if (!payload.dayKey) return res.status(400).json({ message: 'dayKey required' });
+    const campusErr = await campusConfessionError(payload);
+    if (campusErr) return res.status(400).json({ message: campusErr });
     const existing = await DailyDrop.findOne({ dayKey: payload.dayKey });
     if (existing) {
       const updated = await DailyDrop.findOneAndUpdate({ dayKey: payload.dayKey }, { $set: payload }, { new: true });
@@ -320,6 +338,8 @@ router.post('/drops', async (req, res) => {
 
 router.put('/drops/:dayKey', async (req, res) => {
   try {
+    const campusErr = await campusConfessionError(req.body);
+    if (campusErr) return res.status(400).json({ message: campusErr });
     const drop = await DailyDrop.findOneAndUpdate(
       { dayKey: req.params.dayKey },
       { $set: req.body },

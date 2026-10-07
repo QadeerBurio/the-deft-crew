@@ -1369,6 +1369,21 @@ router.get('/posts/:id', auth, async (req, res) => {
   }
 });
 
+// -------------------- CONFESSION VISIBILITY --------------------
+const isAdminUser = (req) => req.userRole === 'admin';
+const isGuestReq = (req) => !!req.isGuest || req.userId === 'guest-user';
+
+// Can this user see / interact with this confession?
+const canAccessConfession = (req, confession) => {
+  if (!confession) return false;
+  if (confession.visibility !== 'campus') return true;
+  if (isAdminUser(req)) return true;
+  if (isGuestReq(req)) return false;
+  const myUni = req.user?.university?._id?.toString?.() || req.user?.university?.toString?.();
+  const postUni = confession.university?._id?.toString?.() || confession.university?.toString?.();
+  return !!myUni && myUni === postUni;
+};
+
 // -------------------- USER PROFILE --------------------
 // --- Get User's Confessions ---
 router.get('/confessions/my-confessions', auth, async (req, res) => {
@@ -1388,6 +1403,9 @@ router.get('/confessions/likes/:id', auth, async (req, res) => {
   try {
     const confession = await Confession.findById(req.params.id);
     if (!confession) return res.status(404).json({ message: "Confession not found" });
+    if (!canAccessConfession(req, confession)) {
+      return res.status(404).json({ message: "Confession not found" });
+    }
     
     const users = await User.find({ _id: { $in: confession.likedBy } })
       .select('name profileImage');
@@ -1491,6 +1509,9 @@ router.get('/confessions/likes/:id', auth, async (req, res) => {
   try {
     const confession = await Confession.findById(req.params.id);
     if (!confession) return res.status(404).json({ message: "Confession not found" });
+    if (!canAccessConfession(req, confession)) {
+      return res.status(404).json({ message: "Confession not found" });
+    }
     
     const users = await User.find({ _id: { $in: confession.likedBy } })
       .select('name profileImage');
@@ -1507,6 +1528,12 @@ router.put('/confessions/like/:id', auth, async (req, res) => {
   try {
     const confession = await Confession.findById(req.params.id);
     if (!confession) {
+      return res.status(404).json({ error: "Confession not found" });
+    }
+    if (isGuestReq(req)) {
+      return res.status(401).json({ error: "Sign in to like confessions" });
+    }
+    if (!canAccessConfession(req, confession)) {
       return res.status(404).json({ error: "Confession not found" });
     }
 
@@ -1547,8 +1574,15 @@ router.post('/confessions/comment/:id', auth, async (req, res) => {
       return res.status(400).json({ error: "Comment cannot be empty" });
     }
 
+    if (isGuestReq(req)) {
+      return res.status(401).json({ error: "Sign in to comment" });
+    }
+
     const confession = await Confession.findById(req.params.id);
     if (!confession) {
+      return res.status(404).json({ error: "Confession not found" });
+    }
+    if (!canAccessConfession(req, confession)) {
       return res.status(404).json({ error: "Confession not found" });
     }
 
@@ -1565,7 +1599,11 @@ router.post('/confessions/comment/:id', auth, async (req, res) => {
     let validMentions = [];
     if (Array.isArray(mentions) && mentions.length > 0) {
       const uniqueIds = [...new Set(mentions.map(m => m.toString()))];
-      const existingUsers = await User.find({ _id: { $in: uniqueIds } }).select('_id');
+      const userQuery = { _id: { $in: uniqueIds } };
+      // Campus post: only students of that campus can be mentioned
+      // (others would get a notification for a post they can't open)
+      if (confession.visibility === 'campus') userQuery.university = confession.university;
+      const existingUsers = await User.find(userQuery).select('_id');
       validMentions = existingUsers
         .map(u => u._id)
         .filter(id => id.toString() !== req.user._id.toString());
@@ -1653,6 +1691,9 @@ router.delete('/confessions/comment/:postId/:commentId', auth, async (req, res) 
     if (!confession) {
       return res.status(404).json({ error: "Confession not found" });
     }
+    if (!canAccessConfession(req, confession)) {
+      return res.status(404).json({ error: "Confession not found" });
+    }
 
     const comment = confession.comments.find(
       c => c._id.toString() === req.params.commentId
@@ -1716,47 +1757,69 @@ router.delete('/confessions/comment/:postId/:commentId', auth, async (req, res) 
 // FIXED: Get Confessions Feed
 router.get('/confessions/feed', auth, async (req, res) => {
   try {
-    const confessions = await Confession.find({})
+    // scope: 'all' (public from every campus) | 'campus' (everything from my
+    // university). No scope = old app builds: public + my campus's posts.
+    const { scope } = req.query;
+    const myUni = isGuestReq(req) ? null : req.user?.university || null;
+    const currentUserId = isGuestReq(req) ? '' : req.user?._id?.toString?.() || '';
+    let filter;
+
+    if (isAdminUser(req)) {
+      filter = {};
+    } else if (scope === 'campus') {
+      if (!myUni) return res.status(200).json([]); // app shows "add your university"
+      filter = { university: myUni };
+    } else if (scope === 'all') {
+      filter = { visibility: { $ne: 'campus' } };
+    } else {
+      filter = myUni
+        ? { $or: [{ visibility: { $ne: 'campus' } }, { university: myUni }] }
+        : { visibility: { $ne: 'campus' } };
+    }
+
+    const confessions = await Confession.find(filter)
       .sort({ createdAt: -1 })
       .populate('comments.user', 'name profileImage')
+      .populate('university', 'name')
       .lean();
 
     const formattedConfessions = confessions.map(confession => {
-      // ✅ Sanitize comments - hide user identity of OTHER users' comments
+      // Hide user identity of OTHER users' comments
       const sanitizedComments = (confession.comments || []).map(comment => {
         const commentUserId = comment.user?._id?.toString();
-        const currentUserId = req.user._id.toString();
-        const isMyComment = commentUserId === currentUserId;
+        const isMyComment = !!currentUserId && commentUserId === currentUserId;
 
         return {
           _id: comment._id,
           text: comment.text,
           parentComment: comment.parentComment || null,
           createdAt: comment.createdAt,
-          // Only expose user info for own comments
           user: isMyComment && comment.user ? {
             _id: comment.user._id,
             name: comment.user.name,
             profileImage: comment.user.profileImage,
           } : null,
-          // Flag so frontend knows if we can show "Delete"
           isMyComment,
         };
       });
 
       return {
         ...confession,
-        // Remove authorId from response (extra safety)
         authorId: undefined,
+        // same shape as before (id); the name goes in campusName
+        university: confession.university?._id || confession.university || null,
+        campusName: confession.university?.name || null,
+        visibility: confession.visibility || 'public',
         comments: sanitizedComments,
         authorName: "Anonymous",
         authorAvatar: null,
-        likedByCurrentUser: confession.likedBy?.some(id => 
-          id && id.toString() === req.user._id.toString()
-        ) || false
+        likedByCurrentUser: !!currentUserId && (confession.likedBy?.some(id =>
+          id && id.toString() === currentUserId
+        ) || false),
       };
     });
 
+    // Plain array (old app builds check Array.isArray)
     res.status(200).json(formattedConfessions);
   } catch (err) {
     console.error("Confessions Feed Error:", err);
@@ -1768,16 +1831,24 @@ router.get('/confessions/feed', auth, async (req, res) => {
 // FIXED: Create Confession
 router.post('/confessions/create', auth, async (req, res) => {
   try {
-    const { text, image } = req.body;
+    const { text, image, visibility } = req.body;
+    // Old app builds send nothing → public
+    const vis = visibility === 'campus' ? 'campus' : 'public';
 
     if (!text && !image) {
       return res.status(400).json({ error: "Confession cannot be empty." });
+    }
+    if (isGuestReq(req)) {
+      return res.status(401).json({ error: "Sign in to post a confession." });
     }
 
     const currentUser = await User.findById(req.user._id).populate('university');
     
     if (!currentUser) {
       return res.status(404).json({ error: "User not found" });
+    }
+    if (vis === 'campus' && !currentUser.university) {
+      return res.status(400).json({ error: "Add your university in your profile to post to your campus." });
     }
 
     const confession = new Confession({
@@ -1786,6 +1857,7 @@ router.post('/confessions/create', auth, async (req, res) => {
       image: image || "",
       university: currentUser.university?._id || null,
       location: currentUser.university?.name || "Karachi Campus",
+      visibility: vis,
       likes: 0,
       likedBy: [],
       comments: []
@@ -1819,6 +1891,8 @@ router.post('/confessions/create', auth, async (req, res) => {
         image: confession.image,
         university: confession.university,
         location: confession.location,
+        campusName: currentUser.university?.name || null,
+        visibility: confession.visibility,
         likes: confession.likes,
         likedBy: confession.likedBy,
         comments: confession.comments,

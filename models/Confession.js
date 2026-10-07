@@ -25,6 +25,13 @@ const ConfessionSchema = new mongoose.Schema({
     type: String, 
     default: "Karachi Campus"
   },
+  // 'public' = everyone, 'campus' = only students of the same university.
+  // Old documents have no value → treated as public everywhere ($ne: 'campus').
+  visibility: {
+    type: String,
+    enum: ['public', 'campus'],
+    default: 'public',
+  },
   likes: { 
     type: Number, 
     default: 0 
@@ -74,5 +81,6 @@ const ConfessionSchema = new mongoose.Schema({
 ConfessionSchema.index({ createdAt: -1 });
 ConfessionSchema.index({ university: 1, createdAt: -1 });
 ConfessionSchema.index({ authorId: 1 });
+ConfessionSchema.index({ university: 1, visibility: 1, createdAt: -1 });
 
 module.exports = mongoose.model('Confession', ConfessionSchema);
