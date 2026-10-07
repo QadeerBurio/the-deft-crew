@@ -12,6 +12,16 @@ async function react(userId, dayKeyStr, choice) {
   if (!drop) throw new Error('drop_not_found');
   if (drop.status !== 'live') throw new Error('drop_not_live');
 
+  // Options are matched case/space-insensitively so the stored choice
+  // always equals one of the drop's options (counts stay correct)
+  const opts = drop.action?.options || [];
+  if (opts.length) {
+    const want = String(choice).trim().toLowerCase();
+    const match = opts.find((o) => String(o).trim().toLowerCase() === want);
+    if (!match) throw new Error('invalid_choice');
+    choice = match;
+  }
+
   try {
     await DropReaction.create({ drop: drop._id, user: userId, choice });
   } catch (err) {

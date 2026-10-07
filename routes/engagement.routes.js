@@ -1106,13 +1106,19 @@ router.post('/drops/:dayKey/react', auth, requireAuth, async (req, res) => {
       choice
     );
 
-    const engagement = await track(req.userId, 'drop_reacted', {
-      meta: { dayKey: req.params.dayKey, choice },
-      dedupeKey: `drop_react:${req.userId}:${drop._id}`,
-    });
+    // Points / streak tracking must never fail the vote itself
+    let engagement = null;
+    try {
+      engagement = await track(req.userId, 'drop_reacted', {
+        meta: { dayKey: req.params.dayKey, choice },
+        dedupeKey: `drop_react:${req.userId}:${drop._id}`,
+      });
+    } catch (e) {
+      console.error('[drops/react] track failed:', e.message);
+    }
 
     // ✅ Also return the target so the app knows where to navigate
-    const target = await drops.resolveTargetAsync(drop.contentRef, drop.type);
+    const target = await drops.resolveTargetAsync(drop.contentRef, drop.type).catch(() => null);
 
     res.json({
       myChoice,
