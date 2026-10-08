@@ -50,6 +50,77 @@ const otpEmailHtml = (name, otp) => `
     <p>The Deft Crew</p>
   </div>`;
 
+// ==========================================
+// SIGN-UP EMAIL CODE
+// New student accounts must confirm their email with a 6-digit code before
+// they can sign in. Accounts created before this (emailVerified unset) are
+// not affected.
+// ==========================================
+const SIGNUP_PURPOSE = "signup-verify";
+
+const maskEmail = (email = "") => {
+  const [local = "", domain = ""] = String(email).split("@");
+  return `${local.slice(0, 2)}${"*".repeat(Math.max(local.length - 2, 1))}@${domain}`;
+};
+
+const signupEmailHtml = (name, otp) => `
+  <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 20px;">
+    <h2 style="color: #1a1a1a;">Confirm your email</h2>
+    <p>Hi ${name || "there"}, welcome to tdc.</p>
+    <p>Enter this code in the app to finish creating your account:</p>
+    <div style="background: #f9c349; padding: 20px; text-align: center; border-radius: 10px; margin: 20px 0;">
+      <h1 style="color: #1a1a1a; font-size: 36px; letter-spacing: 6px; margin: 0;">${otp}</h1>
+    </div>
+    <p>It expires in <strong>10 minutes</strong>.</p>
+    <p>If you didn't sign up, ignore this email.</p>
+    <p>The Deft Crew</p>
+  </div>`;
+
+// Sends a fresh sign-up code. Returns { sent, retryAfter, error }.
+// force=false respects the 1-per-minute limit.
+async function sendSignupCode(user, { force = false } = {}) {
+  const last = await OtpCode.findOne({ user: user._id, purpose: SIGNUP_PURPOSE })
+    .sort({ createdAt: -1 })
+    .lean();
+  if (!force && last && Date.now() - new Date(last.createdAt).getTime() < OTP_RESEND_MS) {
+    const wait = Math.ceil((OTP_RESEND_MS - (Date.now() - new Date(last.createdAt).getTime())) / 1000);
+    return { sent: false, retryAfter: wait };
+  }
+
+  const otp = crypto.randomInt(100000, 1000000).toString();
+  await OtpCode.deleteMany({ user: user._id, purpose: SIGNUP_PURPOSE });
+  const record = await OtpCode.create({
+    user: user._id,
+    purpose: SIGNUP_PURPOSE,
+    codeHash: hashOtp(otp),
+    expiresAt: new Date(Date.now() + OTP_TTL_MS),
+  });
+
+  if (process.env.NODE_ENV !== "production") {
+    console.log(`🔑 [dev] sign-up code for ${user.email}: ${otp}`);
+  }
+
+  try {
+    await sendMail({
+      to: user.email,
+      subject: "Your tdc sign-up code",
+      html: signupEmailHtml(user.name, otp),
+    });
+    return { sent: true, retryAfter: OTP_RESEND_MS / 1000 };
+  } catch (e) {
+    await OtpCode.deleteOne({ _id: record._id });
+    console.error("[signup] code email failed:", e.message);
+    return { sent: false, retryAfter: 0, error: "mail_failed" };
+  }
+}
+
+const signToken = (user) =>
+  jwt.sign(
+    { id: user._id, role: user.role },
+    process.env.JWT_SECRET || "abdulqadeer11111",
+    { expiresIn: "180d" }
+  );
+
 // Helper function to cleanup uploaded files
 const cleanupFile = async (file) => {
   if (!file) return;
@@ -123,6 +194,24 @@ router.post("/signup", async (req, res) => {
     // 2. Check if user already exists
     const existingUser = await User.findOne({ email });
     if (existingUser) {
+      // Started signing up before but never entered the code: send a new code
+      // and take them to the code screen (account details stay as they were)
+      if (existingUser.emailVerified === false) {
+        let r = { sent: false, retryAfter: 0 };
+        try {
+          r = await sendSignupCode(existingUser);
+        } catch (e) {}
+        return res.status(200).json({
+          success: true,
+          requiresVerification: true,
+          resumed: true,
+          message: "You already started signing up. Enter the code we emailed you.",
+          userId: existingUser._id,
+          email: maskEmail(existingUser.email),
+          emailSent: !!r.sent,
+          retryAfter: r.retryAfter || 0,
+        });
+      }
       return res.status(400).json({ error: "Email already used" });
     }
 
@@ -181,6 +270,8 @@ router.post("/signup", async (req, res) => {
       address,
       instagram,
       status: role === "admin" ? "Verified" : "Not Verified",
+      // students confirm their email with a code before first sign-in
+      ...(role === "student" ? { emailVerified: false } : {}),
       city: city?.trim() || "Karachi",
       referredBy: referrer ? referrer._id : null,
        gender: gender || "",                 // ← ADD
@@ -376,14 +467,29 @@ if (referrer) {
           readBy: [],
         });
 
-        sendMail({
-          to: email,
-          subject: "Welcome to the Crew! 🚀",
-          html: `<p>Welcome <b>${name}</b>! Your account is now active.</p>`,
-        }).catch((err) => console.log("Mail Error:", err.message));
       } catch (nError) {
-        console.error("Notification/Email Error:", nError.message);
+        console.error("Notification Error:", nError.message);
       }
+
+      // Send the 6-digit code; the app opens the code screen next
+      let codeResult = { sent: false };
+      try {
+        codeResult = await sendSignupCode(user, { force: true });
+      } catch (e) {
+        console.error("[signup] code failed:", e.message);
+      }
+
+      return res.status(201).json({
+        success: true,
+        message: codeResult.sent
+          ? `Code sent to ${maskEmail(user.email)}`
+          : "Account created. Tap resend to get your code.",
+        requiresVerification: true,
+        userId: user._id,
+        email: maskEmail(user.email),
+        emailSent: !!codeResult.sent,
+        retryAfter: codeResult.sent ? codeResult.retryAfter : 0,
+      });
     }
 
     // 9. Return success response without password
@@ -415,11 +521,24 @@ router.post("/login", async (req, res) => {
 
     if (!match) return res.status(401).json({ message: "Invalid password" });
 
-    const token = jwt.sign(
-      { id: user._id, role: user.role },
-      process.env.JWT_SECRET || "abdulqadeer11111",
-      { expiresIn: "180d" }
-    );
+    // Signed up but never confirmed the email: send a code, app opens the code screen
+    if (user.emailVerified === false) {
+      let r = { retryAfter: 0 };
+      try {
+        r = await sendSignupCode(user);
+      } catch (e) {
+        console.error("[login] code failed:", e.message);
+      }
+      return res.status(403).json({
+        needsVerification: true,
+        message: "Confirm your email to continue.",
+        userId: user._id,
+        email: maskEmail(user.email),
+        retryAfter: r.retryAfter || 0,
+      });
+    }
+
+    const token = signToken(user);
 
     res.json({
       token,
@@ -427,6 +546,121 @@ router.post("/login", async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ==========================================
+// SIGN-UP: VERIFY CODE → signs the user in
+// body: { userId, otp }
+// ==========================================
+router.post("/signup/verify-otp", async (req, res) => {
+  const userId = String(req.body?.userId || "").trim();
+  const otp = String(req.body?.otp || "").replace(/\D/g, "");
+
+  if (!userId || otp.length !== 6) {
+    return res.status(400).json({ message: "Enter the 6-digit code." });
+  }
+  if (!mongoose.Types.ObjectId.isValid(userId)) {
+    return res.status(400).json({ message: "Invalid request. Please sign up again." });
+  }
+
+  try {
+    const user = await User.findById(userId).populate("university");
+    if (!user) return res.status(404).json({ message: "Account not found." });
+
+    const sendLogin = () => {
+      const userObj = user.toObject();
+      delete userObj.password;
+      return res.json({ success: true, token: signToken(user), user: userObj });
+    };
+
+    // already confirmed (e.g. double tap): just sign in
+    if (user.emailVerified !== false) return sendLogin();
+
+    const record = await OtpCode.findOne({ user: userId, purpose: SIGNUP_PURPOSE }).sort({ createdAt: -1 });
+    if (!record) {
+      return res.status(400).json({ message: "No code found. Tap resend to get a new one." });
+    }
+    if (record.expiresAt.getTime() < Date.now()) {
+      await OtpCode.deleteMany({ user: userId, purpose: SIGNUP_PURPOSE });
+      return res.status(400).json({ message: "Code expired. Tap resend to get a new one." });
+    }
+    if (record.attempts >= OTP_MAX_ATTEMPTS) {
+      await OtpCode.deleteMany({ user: userId, purpose: SIGNUP_PURPOSE });
+      return res.status(429).json({ message: "Too many wrong tries. Tap resend to get a new code." });
+    }
+
+    const ok =
+      record.codeHash.length === hashOtp(otp).length &&
+      crypto.timingSafeEqual(Buffer.from(record.codeHash), Buffer.from(hashOtp(otp)));
+
+    if (!ok) {
+      record.attempts += 1;
+      await record.save();
+      const left = OTP_MAX_ATTEMPTS - record.attempts;
+      return res.status(400).json({
+        message: left > 0 ? `Wrong code. ${left} tries left.` : "Too many wrong tries. Tap resend to get a new code.",
+      });
+    }
+
+    await OtpCode.deleteMany({ user: userId, purpose: SIGNUP_PURPOSE });
+    user.emailVerified = true;
+    await user.save();
+
+    // welcome email now that the address is confirmed
+    sendMail({
+      to: user.email,
+      subject: "Welcome to the Crew! 🚀",
+      html: `<p>Welcome <b>${user.name || "there"}</b>! Your account is now active.</p>`,
+    }).catch((err) => console.log("Mail Error:", err.message));
+
+    return sendLogin();
+  } catch (err) {
+    console.error("❌ Sign-up verify error:", err);
+    return res.status(500).json({ message: "Server error. Please try again." });
+  }
+});
+
+// ==========================================
+// SIGN-UP: RESEND CODE
+// body: { userId } or { email }
+// ==========================================
+router.post("/signup/resend-otp", async (req, res) => {
+  try {
+    const userId = String(req.body?.userId || "").trim();
+    const email = String(req.body?.email || "").trim().toLowerCase();
+
+    let user = null;
+    if (userId && mongoose.Types.ObjectId.isValid(userId)) user = await User.findById(userId);
+    if (!user && email) user = await User.findOne({ email });
+    if (!user) return res.status(404).json({ message: "Account not found. Please sign up again." });
+
+    if (user.emailVerified !== false) {
+      return res.status(400).json({ alreadyVerified: true, message: "Your email is already confirmed. Sign in." });
+    }
+
+    const r = await sendSignupCode(user);
+    if (!r.sent && r.retryAfter) {
+      return res.status(429).json({
+        message: `Please wait ${r.retryAfter}s before asking for a new code.`,
+        retryAfter: r.retryAfter,
+        userId: user._id,
+      });
+    }
+    if (!r.sent) {
+      return res.status(503).json({ message: "We couldn't send the email right now. Please try again in a minute." });
+    }
+
+    return res.json({
+      success: true,
+      message: `New code sent to ${maskEmail(user.email)}`,
+      userId: user._id,
+      email: maskEmail(user.email),
+      retryAfter: r.retryAfter,
+    });
+  } catch (err) {
+    console.error("❌ Sign-up resend error:", err);
+    return res.status(500).json({ message: "Server error. Please try again." });
   }
 });
 
