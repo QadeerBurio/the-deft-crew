@@ -69,7 +69,7 @@ router.post("/", auth, async (req, res) => {
 
     // "near me": map point for the address, after the response (never blocks the save)
     if (branch.isInStore && branch.location) {
-      geocodeInBackground(Branch, branch._id, buildAddress([branch.location, branch.city]));
+      geocodeInBackground(Branch, branch._id, [branch.location], { city: branch.city, brandId: branch.brand });
     }
   } catch (err) {
     console.error("Error creating branch:", err);
@@ -210,7 +210,11 @@ router.put("/:branchId", auth, async (req, res) => {
     // "near me": re-geocode only when the address changed (after the response)
     const addressAfter = branch.isInStore ? buildAddress([branch.location, branch.city]) : "";
     if (addressAfter !== addressBefore) {
-      geocodeInBackground(Branch, branch._id, addressAfter, { clearOnFail: true });
+      geocodeInBackground(Branch, branch._id, branch.isInStore ? [branch.location] : [], {
+        city: branch.city,
+        brandId: branch.brand,
+        clearOnFail: true,
+      });
     }
   } catch (err) {
     console.error("Error updating branch:", err);

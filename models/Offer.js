@@ -41,6 +41,9 @@ const offerSchema = new mongoose.Schema({
     coordinates: { type: [Number], default: undefined }, // [lng, lat]
   },
   geoSource: { type: String, enum: ["geocoded", "manual"] },
+  // how precise the point is (exact = building/plus code, area = neighbourhood/street)
+  geoPrecision: { type: String, enum: ["exact", "area"] },
+  geoCity: { type: String }, // city Google matched (geocoded) or the city given by hand
   geoUpdatedAt: { type: Date },
   redeemInstructions: String,
   isOnline: Boolean,

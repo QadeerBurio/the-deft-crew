@@ -12,7 +12,7 @@ const { uploadOffer } = require("../config/cloudinary");
 const cache = require("../utils/cache");
 const { clearOfferCaches } = require("../utils/cache");
 const { getBrandCitiesMap } = require("../utils/brandCities");
-const { buildAddress, geocodeInBackground } = require("../services/geo/geocoder");
+const { geocodeInBackground } = require("../services/geo/geocoder");
 
 // Offers/claims change all the time, never let a phone or proxy cache them
 router.use((req, res, next) => {
@@ -82,7 +82,8 @@ setImmediate(async () => {
 
     // "near me": map point for the offer address, after the response (never blocks the save)
     if (offer.isInStore && offer.location) {
-      geocodeInBackground(Offer, offer._id, buildAddress([offer.location]));
+      // the brand's city is added to the address and checked against the match
+      geocodeInBackground(Offer, offer._id, [offer.location], { brandId: offer.brand });
     }
   } catch (err) {
     console.error("❌ Error creating offer:", err);
@@ -124,7 +125,7 @@ router.put("/:offerId", auth, uploadOffer.single("image"), async (req, res) => {
 
     // "near me": re-geocode only when the address changed (after the response)
     if ((offer.location || "") !== locationBefore) {
-      geocodeInBackground(Offer, offer._id, offer.isInStore ? buildAddress([offer.location]) : "", { clearOnFail: true });
+      geocodeInBackground(Offer, offer._id, offer.isInStore ? [offer.location] : [], { brandId: offer.brand, clearOnFail: true });
     }
   } catch (err) {
     console.error("❌ Error updating offer:", err);
