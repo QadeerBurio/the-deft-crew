@@ -10,6 +10,7 @@ const Story = require('../models/Story');
 const Report = require('../models/Report');
 const BlockedUser = require('../models/BlockedUser');
 const Notification = require('../models/SocialNotification');
+const mongoose = require('mongoose');
 const createNotification = require('../utils/notificationHelper');
 const { Conversation, Message } = require('../models/Chat');
 // routes/social.routes.js
@@ -571,15 +572,20 @@ router.get('/admin/reports/stats', auth, async (req, res) => {
 router.get('/feed', auth, async (req, res) => {
   try {
     const { category, search, limit = 20, before } = req.query;
-    const userId = req.user._id;
+    // Guests have no _id; use null so nothing below calls toString() on undefined
+    const userId = req.user && req.user._id ? req.user._id : null;
+    const userIdStr = userId ? userId.toString() : '';
 
     // Get blocked users
-    const blockedUsers = await BlockedUser.find({ userId })
-      .select('blockedUserId');
+    const blockedUsers = userId
+      ? await BlockedUser.find({ userId }).select('blockedUserId')
+      : [];
     const blockedUserIds = blockedUsers.map(b => b.blockedUserId ? b.blockedUserId.toString() : '').filter(id => id);
 
     // Get current user's connections
-    const currentUser = await User.findById(userId).select('connections sentRequests receivedRequests');
+    const currentUser = userId
+      ? await User.findById(userId).select('connections sentRequests receivedRequests')
+      : null;
     const userConnections = (currentUser?.connections || []).map(id => id ? id.toString() : '').filter(id => id);
     const userSentRequests = (currentUser?.sentRequests || []).map(id => id ? id.toString() : '').filter(id => id);
 
@@ -647,8 +653,6 @@ router.get('/feed', auth, async (req, res) => {
         } catch (err) {
           authorId = '';
         }
-
-        const userIdStr = userId.toString();
 
         // Determine connection status
         let connectionStatus = 'none';
@@ -2659,18 +2663,32 @@ router.post('/user/disconnect/:targetId', auth, async (req, res) => {
   }
 });
 
-// 5. Get Notifications
+// ?types=like,comment  → only these types (used by Social / SkillShare screens)
+const typesFilter = (req) => {
+  const raw = req.query?.types || req.body?.types;
+  if (!raw) return null;
+  const list = (Array.isArray(raw) ? raw : String(raw).split(','))
+    .map((t) => String(t).trim())
+    .filter(Boolean);
+  return list.length ? { $in: list } : null;
+};
+
+// 5. Get Notifications (latest 100, optional ?types=)
 router.get('/notifications', auth, async (req, res) => {
   try {
-    const notifications = await Notification.find({ 
-      recipient: req.user._id 
-    })
+    const q = { recipient: req.user._id };
+    const types = typesFilter(req);
+    if (types) q.type = types;
+
+    const notifications = await Notification.find(q)
     .populate('sender', 'name profileImage username')
-    .populate('postId', 'content image')
-    .sort({ createdAt: -1 });
+    .populate('postId', 'content')
+    .sort({ createdAt: -1 })
+    .limit(100)
+    .lean();
 
     const transformedNotifications = notifications.map(notification => {
-      const notif = notification.toObject();
+      const notif = { ...notification };
       
       const hasRead = notif.readBy?.some(id => id.toString() === req.user._id.toString());
       notif.isUnread = !hasRead;
@@ -2748,13 +2766,10 @@ router.put('/notifications/read/:id', auth, async (req, res) => {
 // 8. Mark All Notifications as Read
 router.put('/notifications/read-all', auth, async (req, res) => {
   try {
-    await Notification.updateMany(
-      { 
-        recipient: req.user._id, 
-        readBy: { $ne: req.user._id } 
-      },
-      { $addToSet: { readBy: req.user._id } }
-    );
+    const q = { recipient: req.user._id, readBy: { $ne: req.user._id } };
+    const types = typesFilter(req);
+    if (types) q.type = types;
+    await Notification.updateMany(q, { $addToSet: { readBy: req.user._id } });
     res.json({ success: true });
 
   } catch (err) {
@@ -2768,16 +2783,17 @@ router.delete('/notifications/clear-all', auth, async (req, res) => {
   try {
     const userId = req.user._id;
     
-    const notifications = await Notification.find({ 
-      recipient: userId 
-    });
+    const q = { recipient: userId };
+    const types = typesFilter(req);
+    if (types) q.type = types;
+    const notifications = await Notification.find(q);
     
     const pendingRequests = notifications.filter(
       n => n.type === 'request' && n.status === 'pending' && !n.isProcessed
     );
     
     const result = await Notification.deleteMany({ 
-      recipient: userId,
+      ...q,
       _id: { $nin: pendingRequests.map(n => n._id) }
     });
     
@@ -2790,6 +2806,22 @@ router.delete('/notifications/clear-all', auth, async (req, res) => {
   } catch (err) {
     console.error("Clear all error:", err);
     res.status(500).json({ error: "Error clearing notifications" });
+  }
+});
+
+// 9b. Delete one notification (pending connection requests are kept)
+router.delete('/notifications/:id', auth, async (req, res) => {
+  try {
+    const n = await Notification.findOne({ _id: req.params.id, recipient: req.user._id });
+    if (!n) return res.status(404).json({ error: "Notification not found" });
+    if (n.type === 'request' && n.status === 'pending' && !n.isProcessed) {
+      return res.status(400).json({ error: "Accept or decline this request first" });
+    }
+    await n.deleteOne();
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Delete notification error:", err.message);
+    res.status(500).json({ error: "Error deleting notification" });
   }
 });
 

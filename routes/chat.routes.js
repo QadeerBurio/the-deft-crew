@@ -32,8 +32,8 @@ router.get('/match/:matchId', auth, async (req, res) => {
     const listingOwnerId = match.listingOwnerId?._id || match.listingOwnerId;
     const offerorId = match.offerorId?._id || match.offerorId;
 
-    if (listingOwnerId.toString() !== userId.toString() &&
-        offerorId.toString() !== userId.toString()) {
+    if (String(listingOwnerId) !== String(userId) &&
+        String(offerorId) !== String(userId)) {
       return res.status(403).json({ error: 'Unauthorized' });
     }
 
@@ -79,8 +79,9 @@ router.get('/match/:matchId', auth, async (req, res) => {
       }
     );
 
-    const otherParticipant = conversation.participants.find(
-      p => p._id.toString() !== userId.toString()
+    // a deleted account leaves a null participant; skip it instead of crashing
+    const otherParticipant = (conversation.participants || []).find(
+      p => p && p._id && p._id.toString() !== userId.toString()
     );
 
     res.json({

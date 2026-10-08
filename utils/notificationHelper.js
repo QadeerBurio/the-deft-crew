@@ -279,6 +279,19 @@ const createAndSendNotification = async ({
 
     if (!notification) return null;
 
+    // Keep the tap target on the saved notification too, so the in-app
+    // SkillShare / Social lists can open the right screen (not only the push)
+    if ((metadata && Object.keys(metadata).length) || link) {
+      try {
+        notification.metadata = { ...(notification.metadata || {}), ...(metadata || {}) };
+        notification.markModified?.('metadata');
+        if (link) notification.link = link;
+        await notification.save();
+      } catch (e) {
+        console.warn('[createAndSendNotification] metadata save failed:', e.message);
+      }
+    }
+
     // 2. Push to device with the caller's title + navigation metadata
     pushForNotification(notification, {
       title: title || 'notification',
