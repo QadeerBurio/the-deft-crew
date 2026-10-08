@@ -56,6 +56,14 @@ const branchSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    // "near me": map point for this branch's address (optional).
+    // Filled by services/geo/geocoder.js after save, or set by hand (geoSource "manual").
+    geo: {
+      type: { type: String, enum: ["Point"] },
+      coordinates: { type: [Number], default: undefined }, // [lng, lat]
+    },
+    geoSource: { type: String, enum: ["geocoded", "manual"] },
+    geoUpdatedAt: { type: Date },
   },
   { timestamps: true }
 );
@@ -63,5 +71,6 @@ const branchSchema = new mongoose.Schema(
 // Indexes
 branchSchema.index({ brand: 1, isActive: 1 });
 branchSchema.index({ brand: 1, createdAt: -1 });
+branchSchema.index({ geo: "2dsphere" }, { sparse: true });
 
 module.exports = mongoose.model("Branch", branchSchema);

@@ -34,6 +34,14 @@ const offerSchema = new mongoose.Schema({
     ]
   },
   location: String,
+  // "near me": map point for `location` (optional). Filled by services/geo/geocoder.js
+  // after save, or set by hand (geoSource "manual").
+  geo: {
+    type: { type: String, enum: ["Point"] },
+    coordinates: { type: [Number], default: undefined }, // [lng, lat]
+  },
+  geoSource: { type: String, enum: ["geocoded", "manual"] },
+  geoUpdatedAt: { type: Date },
   redeemInstructions: String,
   isOnline: Boolean,
   isInStore: Boolean,
@@ -76,6 +84,7 @@ const offerSchema = new mongoose.Schema({
 // Indexes
 offerSchema.index({ brand: 1, isOnline: 1, isInStore: 1 });
 offerSchema.index({ category: 1 });
+offerSchema.index({ geo: "2dsphere" }, { sparse: true });
 offerSchema.index({ 'claimedBy': 1 });
 offerSchema.index({ 'redemptions.student': 1 });
 offerSchema.index({ "redemptions.promoCodeId": 1 });
