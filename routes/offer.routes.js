@@ -12,6 +12,7 @@ const { uploadOffer } = require("../config/cloudinary");
 const cache = require("../utils/cache");
 const { clearOfferCaches } = require("../utils/cache");
 const { getBrandCitiesMap } = require("../utils/brandCities");
+const { buildAddress, geocodeInBackground } = require("../services/geo/geocoder");
 
 // Offers/claims change all the time, never let a phone or proxy cache them
 router.use((req, res, next) => {
@@ -78,6 +79,11 @@ setImmediate(async () => {
       message: "Offer created successfully. Old offers removed.",
       offer,
     });
+
+    // "near me": map point for the offer address, after the response (never blocks the save)
+    if (offer.isInStore && offer.location) {
+      geocodeInBackground(Offer, offer._id, buildAddress([offer.location]));
+    }
   } catch (err) {
     console.error("❌ Error creating offer:", err);
     res.status(500).json({ message: err.message });
@@ -95,6 +101,7 @@ router.put("/:offerId", auth, uploadOffer.single("image"), async (req, res) => {
       return res.status(403).json({ message: "Unauthorized" });
     }
 
+    const locationBefore = offer.location || "";
     const updateData = {
       title: req.body.title || offer.title,
       description: req.body.description || offer.description,
@@ -114,6 +121,11 @@ router.put("/:offerId", auth, uploadOffer.single("image"), async (req, res) => {
     await clearBrandCaches(req.userId);
 
     res.json({ message: "Offer updated successfully", offer });
+
+    // "near me": re-geocode only when the address changed (after the response)
+    if ((offer.location || "") !== locationBefore) {
+      geocodeInBackground(Offer, offer._id, offer.isInStore ? buildAddress([offer.location]) : "", { clearOnFail: true });
+    }
   } catch (err) {
     console.error("❌ Error updating offer:", err);
     res.status(500).json({ message: err.message });

@@ -4,6 +4,7 @@ const router = express.Router();
 const Branch = require("../models/Branch");
 const User = require("../models/User");
 const auth = require("../middleware/auth.middleware");
+const { buildAddress, geocodeInBackground } = require("../services/geo/geocoder");
 
 // ==========================================
 // CREATE: Add a new branch
@@ -65,6 +66,11 @@ router.post("/", auth, async (req, res) => {
       message: "Branch created successfully",
       branch,
     });
+
+    // "near me": map point for the address, after the response (never blocks the save)
+    if (branch.isInStore && branch.location) {
+      geocodeInBackground(Branch, branch._id, buildAddress([branch.location, branch.city]));
+    }
   } catch (err) {
     console.error("Error creating branch:", err);
     res.status(500).json({ message: err.message });
@@ -151,6 +157,7 @@ router.put("/:branchId", auth, async (req, res) => {
     if (branch.brand.toString() !== req.userId.toString()) {
       return res.status(403).json({ message: "Unauthorized" });
     }
+    const addressBefore = buildAddress([branch.location, branch.city]);
 
     const {
       name,
@@ -199,6 +206,12 @@ router.put("/:branchId", auth, async (req, res) => {
       message: "Branch updated successfully",
       branch,
     });
+
+    // "near me": re-geocode only when the address changed (after the response)
+    const addressAfter = branch.isInStore ? buildAddress([branch.location, branch.city]) : "";
+    if (addressAfter !== addressBefore) {
+      geocodeInBackground(Branch, branch._id, addressAfter, { clearOnFail: true });
+    }
   } catch (err) {
     console.error("Error updating branch:", err);
     res.status(500).json({ message: err.message });
