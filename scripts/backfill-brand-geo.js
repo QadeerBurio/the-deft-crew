@@ -21,6 +21,7 @@ const fs = require("fs");
 const path = require("path");
 const mongoose = require("mongoose");
 const connectDB = require("../config/db");
+const { useServerDns } = require("../config/dns");
 const Branch = require("../models/Branch");
 const Offer = require("../models/Offer");
 const User = require("../models/User");
@@ -73,6 +74,7 @@ async function main() {
     process.exit(1);
   }
 
+  useServerDns(); // same resolvers as server.js, so the mongodb+srv lookup works
   await connectDB();
 
   // Build the 2dsphere indexes if they don't exist yet (no-op when they do). Real run only.

@@ -23,6 +23,7 @@ require("dotenv").config();
 const fs = require("fs");
 const mongoose = require("mongoose");
 const connectDB = require("../config/db");
+const { useServerDns } = require("../config/dns");
 const Branch = require("../models/Branch");
 const Offer = require("../models/Offer");
 const User = require("../models/User");
@@ -103,6 +104,7 @@ async function main() {
     console.error("Refusing to run: MONGO_URI is not set.");
     process.exit(1);
   }
+  useServerDns(); // same resolvers as server.js, so the mongodb+srv lookup works
   await connectDB();
 
   let written = 0;
