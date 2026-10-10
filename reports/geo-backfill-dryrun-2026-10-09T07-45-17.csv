@@ -1,0 +1,11 @@
+type,id,brand,brand_city,address,lat,lng,matched_city,precision,status,reason,note
+branch,6aa475866362ab4608bcaaef,Oceanic Pharma,Karachi,"The Deft Crew-Digital Marketing Agency | Social Media Marketing & Influencer Agency, 4th Floor, Building 48-C Lane 8, Khayaban-e-Ittehad Road, Bukhari Commercial Area Phase 6 Defence Housing Authority, Karachi, 75500, Pakistan",,,,,error,google status REQUEST_DENIED,suspected data-entry error: matches the agency office address
+branch,6aa476cd6362ab4608bcaf16,,sss,"sssss, Pakistan",,,,,error,google status REQUEST_DENIED,
+branch,6aaa1adeb20d41b0f445fff7,Nine Foxes Down,Lahore,"Building C43/24, Downtown, Sector CCB Lake City, Lahore, 54000, Pakistan",,,,,error,google status REQUEST_DENIED,
+branch,6ab39d5ea740e36e134787b4,Rejuve by Aliya Farooq,Karachi,"5D, 1 KDA Main Tipu Sultan Rd, MACHs, Karachi, Pakistan",,,,,error,google status REQUEST_DENIED,
+branch,6ac37971ba99567f3fba8691,Falafel Pakistan,Lahore,"12 Wahdat Road, Qayyum Block Mustafa Town, Lahore., Pakistan",,,,,error,google status REQUEST_DENIED,
+branch,6ac379f0ba99567f3fba88f4,Falafel Pakistan,Lahore,"Poonch Road, Samanabad Town, Lahore,, Pakistan",,,,,error,google status REQUEST_DENIED,
+branch,6ac37a53c7601ac8ceac0a25,Falafel Pakistan,Lahore,"96 Temple Road, Park Lane, Mozang Chungi, Lahore, Pakistan",,,,,error,google status REQUEST_DENIED,
+branch,6ac6709d92b58614ea521633,Acai & Beans,Karachi,"28-C, Lane 4, Zulfiqar Commercial Area, DHA Phase 8, Karachi, Pakistan",,,,,error,google status REQUEST_DENIED,
+offer,69b026afb7a0adc546627913,MS Eatery,Karachi,"Shop no.1, Ocean Shamsi Building, Shaheed-e-Millat Rd, Dehli Mercantile Cooperative Housing Society Karachi 75600, Pakistan",,,,,error,google status REQUEST_DENIED,
+offer,69b02797b7a0adc546627926,Peng (KDA Branch only),,"D25/1, Farooq Rashid Street, Off Miran Mohammad Shah Road Mohammad Ali Society, Muhammad Ali Chs (Machs), Karachi, Pakistan",,,,,error,google status REQUEST_DENIED,
