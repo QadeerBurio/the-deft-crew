@@ -1,4 +1,5 @@
 const express = require("express");
+const mongoose = require("mongoose");
 const multer = require("multer");
 const Offer = require("../models/Offer");
 const User = require("../models/User");
@@ -439,9 +440,16 @@ router.get("/summary", auth, async (req, res) => {
 // STATS: Total student savings
 router.get("/my-total-savings", auth, async (req, res) => {
   try {
+    // Aggregations don't cast: req.userId is a string, redemptions.student an ObjectId.
+    // Not a valid id (e.g. a guest token) → nothing to count.
+    if (!mongoose.Types.ObjectId.isValid(req.userId)) {
+      return res.json({ totalSaved: 0, redemptionCount: 0 });
+    }
+    const uid = new mongoose.Types.ObjectId(req.userId);
+
     const result = await Offer.aggregate([
       { $unwind: "$redemptions" },
-      { $match: { "redemptions.student": req.userId } },
+      { $match: { "redemptions.student": uid } },
       {
         $group: {
           _id: null,
