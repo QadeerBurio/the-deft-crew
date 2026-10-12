@@ -19,13 +19,36 @@ const getUserId = (req) => {
   return req.user?.id || req.user?._id || req.userId || null;
 };
 
-// Admin role check middleware
+// A real signed-in user. The shared auth middleware lets a missing / guest token through
+// as a guest; these routes write data or return personal data, so guests get 401.
+// Both keys: the app reads `error`, the admin web reads `message`.
+const SIGN_IN = 'Please sign in to continue.';
+const requireUser = (req, res, next) => {
+  const userId = getUserId(req);
+  if (req.isGuest || !req.user || !userId || userId === 'guest-user') {
+    return res.status(401).json({ success: false, message: SIGN_IN, error: SIGN_IN });
+  }
+  next();
+};
+
+// Admin role check middleware (no token / guest → 401, signed in but not admin → 403)
 const isAdmin = (req, res, next) => {
+  if (req.isGuest || !req.user) {
+    return res.status(401).json({ success: false, message: SIGN_IN, error: SIGN_IN });
+  }
   const role = req.user?.role || req.userRole;
-  if (!req.user || req.isGuest || role !== 'admin') {
+  if (role !== 'admin') {
     return res.status(403).json({ success: false, message: 'Access denied. Admin role required.' });
   }
   next();
+};
+
+// Creator or admin. An event with no creator (imported / CSV) is admin only.
+const canManageEvent = (req, event) => {
+  const role = req.user?.role || req.userRole;
+  if (role === 'admin') return true;
+  const userId = getUserId(req);
+  return !!(event.creator && userId && event.creator.toString() === String(userId));
 };
 
 // ============================================================
@@ -232,7 +255,7 @@ router.get('/provider/:provider', async (req, res) => {
 // USER CREATION & REGISTRATION
 // ============================================================
 
-router.post('/create', auth, async (req, res) => {
+router.post('/create', auth, requireUser, async (req, res) => {
   try {
     const {
       title,
@@ -295,7 +318,7 @@ router.post('/create', auth, async (req, res) => {
 // ============================================================
 // REGISTER FOR EVENT — awwwards event_rsvp + attaches engagement
 // ============================================================
-router.post('/register', auth, async (req, res) => {
+router.post('/register', auth, requireUser, async (req, res) => {
   try {
     const { eventId, studentName, whatsapp, studentId, email } = req.body;
     const userId = getUserId(req);
@@ -390,7 +413,7 @@ router.post('/register', auth, async (req, res) => {
 // ============================================================
 // CANCEL REGISTRATION
 // ============================================================
-router.delete('/register/:eventId', auth, async (req, res) => {
+router.delete('/register/:eventId', auth, requireUser, async (req, res) => {
   try {
     const { eventId } = req.params;
     const userId = getUserId(req);
@@ -428,7 +451,7 @@ router.delete('/register/:eventId', auth, async (req, res) => {
 // ============================================================
 // GET USER'S CREATED EVENTS
 // ============================================================
-router.get('/my-events', auth, async (req, res) => {
+router.get('/my-events', auth, requireUser, async (req, res) => {
   try {
     const userId = getUserId(req);
     const events = await Event.find({ creator: userId }).sort({ createdAt: -1 });
@@ -442,20 +465,14 @@ router.get('/my-events', auth, async (req, res) => {
 // ============================================================
 // GET REGISTRATIONS FOR AN EVENT
 // ============================================================
-router.get('/registrations/:eventId', auth, async (req, res) => {
+router.get('/registrations/:eventId', auth, requireUser, async (req, res) => {
   try {
-    const userId = getUserId(req);
     const event = await Event.findById(req.params.eventId);
     if (!event) {
       return res.status(404).json({ error: 'Event not found' });
     }
 
-    const role = req.user?.role || req.userRole;
-    if (
-      event.creator &&
-      event.creator.toString() !== userId &&
-      role !== 'admin'
-    ) {
+    if (!canManageEvent(req, event)) {
       return res
         .status(403)
         .json({ error: "You don't have permission to view these registrations" });
@@ -475,7 +492,7 @@ router.get('/registrations/:eventId', auth, async (req, res) => {
 // ============================================================
 // NOTIFICATIONS
 // ============================================================
-router.get('/notifications', auth, async (req, res) => {
+router.get('/notifications', auth, requireUser, async (req, res) => {
   try {
     const userId = getUserId(req);
     const notifications = await EventNotification.find({ creatorId: userId })
@@ -487,7 +504,7 @@ router.get('/notifications', auth, async (req, res) => {
   }
 });
 
-router.get('/notifications/unread/count', auth, async (req, res) => {
+router.get('/notifications/unread/count', auth, requireUser, async (req, res) => {
   try {
     const userId = getUserId(req);
     const count = await EventNotification.countDocuments({
@@ -501,7 +518,7 @@ router.get('/notifications/unread/count', auth, async (req, res) => {
   }
 });
 
-router.put('/notifications/:id/read', auth, async (req, res) => {
+router.put('/notifications/:id/read', auth, requireUser, async (req, res) => {
   try {
     const userId = getUserId(req);
     const notification = await EventNotification.findById(req.params.id);
@@ -523,7 +540,7 @@ router.put('/notifications/:id/read', auth, async (req, res) => {
 // ============================================================
 // MY REGISTRATIONS
 // ============================================================
-router.get('/my-registrations', auth, async (req, res) => {
+router.get('/my-registrations', auth, requireUser, async (req, res) => {
   try {
     const userId = getUserId(req);
     const registrations = await Registration.find({ userId })
@@ -537,7 +554,7 @@ router.get('/my-registrations', auth, async (req, res) => {
 });
 
 // Alias — returns the same data shaped as { event, registration }[]
-router.get('/my-registrations/details', auth, async (req, res) => {
+router.get('/my-registrations/details', auth, requireUser, async (req, res) => {
   try {
     const userId = getUserId(req);
     const registrations = await Registration.find({ userId })
@@ -559,20 +576,76 @@ router.get('/my-registrations/details', auth, async (req, res) => {
 });
 
 // ============================================================
+// GET DISTINCT CATEGORIES (type + categories[] + tags[])
+// Mirrors how cities are derived — used by the mobile client
+// to build the category filter chips dynamically.
+// ============================================================
+router.get('/categories', async (req, res) => {
+  try {
+    const [types, cats, tags] = await Promise.all([
+      Event.distinct('type', { isExpired: false, status: { $ne: 'rejected' } }),
+      Event.distinct('categories', { isExpired: false, status: { $ne: 'rejected' } }),
+      Event.distinct('tags', { isExpired: false, status: { $ne: 'rejected' } }),
+    ]);
+
+    const set = new Set();
+    const push = (v) => {
+      if (!v) return;
+      const s = String(v).trim();
+      if (s && s.toLowerCase() !== 'general') set.add(s);
+    };
+
+    (types || []).forEach(push);
+    (cats  || []).forEach(push);
+    (tags  || []).forEach(push);
+
+    const categories = Array.from(set).sort((a, b) =>
+      a.localeCompare(b, undefined, { sensitivity: 'base' })
+    );
+
+    res.json({ categories });
+  } catch (err) {
+    console.error('Fetch categories error:', err);
+    res.status(500).json({ message: 'Failed to fetch categories' });
+  }
+});
+router.get('/cities', async (req, res) => {
+  try {
+    const cities = await Event.distinct('city', {
+      isExpired: false,
+      status: { $ne: 'rejected' },
+      city: { $ne: '' },
+    });
+    const cleaned = (cities || [])
+      .map((c) => (c || '').toString().trim())
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+    res.json({ cities: cleaned });
+  } catch (err) {
+    console.error('Fetch cities error:', err);
+    res.status(500).json({ message: 'Failed to fetch cities' });
+  }
+});
+
+// Purge expired events (admin). Above DELETE /:id so it is reachable.
+router.delete('/expired', auth, isAdmin, async (req, res) => {
+  try {
+    const count = await eventCleanup.purgeExpiredEvents();
+    res.json({ message: `Purged ${count} expired events.`, count });
+  } catch (err) {
+    res.status(500).json({ message: 'Purge failed' });
+  }
+});
+
+// ============================================================
 // UPDATE & DELETE
 // ============================================================
 const updateEventController = async (req, res) => {
   try {
-    const userId = getUserId(req);
-    const role = req.user?.role || req.userRole;
     const event = await Event.findById(req.params.id);
     if (!event) return res.status(404).json({ message: 'Event not found' });
 
-    if (
-      event.creator &&
-      event.creator.toString() !== userId &&
-      role !== 'admin'
-    ) {
+    if (!canManageEvent(req, event)) {
       return res
         .status(403)
         .json({ message: 'Unauthorized to update this event' });
@@ -600,16 +673,10 @@ const updateEventController = async (req, res) => {
 
 const deleteEventController = async (req, res) => {
   try {
-    const userId = getUserId(req);
-    const role = req.user?.role || req.userRole;
     const event = await Event.findById(req.params.id);
     if (!event) return res.status(404).json({ message: 'Event not found' });
 
-    if (
-      event.creator &&
-      event.creator.toString() !== userId &&
-      role !== 'admin'
-    ) {
+    if (!canManageEvent(req, event)) {
       return res
         .status(403)
         .json({ message: 'Unauthorized to delete this event' });
@@ -626,10 +693,10 @@ const deleteEventController = async (req, res) => {
   }
 };
 
-router.put('/:id', auth, updateEventController);
-router.put('/event/:id', auth, updateEventController);
-router.delete('/:id', auth, deleteEventController);
-router.delete('/event/:id', auth, deleteEventController);
+router.put('/:id', auth, requireUser, updateEventController);
+router.put('/event/:id', auth, requireUser, updateEventController);
+router.delete('/:id', auth, requireUser, deleteEventController);
+router.delete('/event/:id', auth, requireUser, deleteEventController);
 
 // ============================================================
 // SINGLE EVENT DETAILS
@@ -647,7 +714,7 @@ router.get('/:id', async (req, res) => {
 // ============================================================
 // ADMIN & AUTOMATION
 // ============================================================
-router.post('/sync', auth, async (req, res) => {
+router.post('/sync', auth, isAdmin, async (req, res) => {
   try {
     const { provider } = req.body;
     console.log(`⚡ [API] Manual sync triggered for provider: ${provider || 'All'}`);
@@ -659,7 +726,7 @@ router.post('/sync', auth, async (req, res) => {
   }
 });
 
-router.get('/admin/stats', auth, async (req, res) => {
+router.get('/admin/stats', auth, isAdmin, async (req, res) => {
   try {
     const [
       totalEvents,
@@ -707,7 +774,7 @@ router.get('/admin/stats', auth, async (req, res) => {
   }
 });
 
-router.patch('/admin/moderate/:id', auth, async (req, res) => {
+router.patch('/admin/moderate/:id', auth, isAdmin, async (req, res) => {
   try {
     const { status, verified, featured, pinned } = req.body;
     const event = await Event.findById(req.params.id);
@@ -726,7 +793,7 @@ router.patch('/admin/moderate/:id', auth, async (req, res) => {
   }
 });
 
-router.patch('/expire', auth, async (req, res) => {
+router.patch('/expire', auth, isAdmin, async (req, res) => {
   try {
     const count = await eventCleanup.expirePastEvents();
     res.json({
@@ -738,14 +805,6 @@ router.patch('/expire', auth, async (req, res) => {
   }
 });
 
-router.delete('/expired', auth, async (req, res) => {
-  try {
-    const count = await eventCleanup.purgeExpiredEvents();
-    res.json({ message: `Purged ${count} expired events.`, count });
-  } catch (err) {
-    res.status(500).json({ message: 'Purge failed' });
-  }
-});
 
 router.post(
   '/admin/import-csv',
@@ -846,57 +905,6 @@ router.post('/track-external/:eventId', auth, async (req, res) => {
   } catch (err) {
     console.error('Track external event error:', err);
     res.status(500).json({ error: 'Failed to track external event', details: err.message });
-  }
-});
-// ============================================================
-// GET DISTINCT CATEGORIES (type + categories[] + tags[])
-// Mirrors how cities are derived — used by the mobile client
-// to build the category filter chips dynamically.
-// ============================================================
-router.get('/categories', async (req, res) => {
-  try {
-    const [types, cats, tags] = await Promise.all([
-      Event.distinct('type', { isExpired: false, status: { $ne: 'rejected' } }),
-      Event.distinct('categories', { isExpired: false, status: { $ne: 'rejected' } }),
-      Event.distinct('tags', { isExpired: false, status: { $ne: 'rejected' } }),
-    ]);
-
-    const set = new Set();
-    const push = (v) => {
-      if (!v) return;
-      const s = String(v).trim();
-      if (s && s.toLowerCase() !== 'general') set.add(s);
-    };
-
-    (types || []).forEach(push);
-    (cats  || []).forEach(push);
-    (tags  || []).forEach(push);
-
-    const categories = Array.from(set).sort((a, b) =>
-      a.localeCompare(b, undefined, { sensitivity: 'base' })
-    );
-
-    res.json({ categories });
-  } catch (err) {
-    console.error('Fetch categories error:', err);
-    res.status(500).json({ message: 'Failed to fetch categories' });
-  }
-});
-router.get('/cities', async (req, res) => {
-  try {
-    const cities = await Event.distinct('city', {
-      isExpired: false,
-      status: { $ne: 'rejected' },
-      city: { $ne: '' },
-    });
-    const cleaned = (cities || [])
-      .map((c) => (c || '').toString().trim())
-      .filter(Boolean)
-      .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
-    res.json({ cities: cleaned });
-  } catch (err) {
-    console.error('Fetch cities error:', err);
-    res.status(500).json({ message: 'Failed to fetch cities' });
   }
 });
 module.exports = router;
