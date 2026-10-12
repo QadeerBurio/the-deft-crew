@@ -124,6 +124,33 @@ const RegistrationSchema = new mongoose.Schema({
   studentId: { type: String, default: 'Not provided' },
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   userName: { type: String, default: '' },
+
+  // ── Events v2 (optional; old registrations unaffected) ──
+  answers: { type: mongoose.Schema.Types.Mixed, default: undefined }, // the event's extra questions
+  ticket: {
+    type: new mongoose.Schema({
+      tier: { type: String, maxlength: 60 },
+      quantity: { type: Number, min: 1 },
+    }, { _id: false }),
+    default: undefined,
+  },
+  // seats this registration holds in Event.registeredCount (0 for old registrations)
+  seats: { type: Number, default: 0, min: 0 },
+  payment: {
+    status: {
+      type: String,
+      enum: ['not_required', 'pending', 'verified', 'rejected'],
+      default: 'not_required',
+    },
+    method: { type: String, enum: ['easypaisa', 'jazzcash', 'bank'] },
+    transactionId: { type: String, trim: true, maxlength: 40 },
+    receiptUrl: { type: String, maxlength: 500 },
+    amount: { type: Number, default: 0, min: 0 }, // whole PKR, computed by the server
+    submittedAt: { type: Date },
+    reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    reviewedAt: { type: Date },
+    rejectReason: { type: String, maxlength: 300 },
+  },
   createdAt: { type: Date, default: Date.now }
 });
 
@@ -152,6 +179,13 @@ EventSchema.index({ categories: 1 });
 EventSchema.index({ tags: 1 });
 
 RegistrationSchema.index({ eventId: 1, userId: 1 }, { unique: true });
+// one transaction ID can pay for one registration per event. Partial (not sparse): a
+// sparse compound index would still index every row by eventId and clash on "no id".
+RegistrationSchema.index(
+  { eventId: 1, 'payment.transactionId': 1 },
+  { unique: true, partialFilterExpression: { 'payment.transactionId': { $type: 'string' } } }
+);
+RegistrationSchema.index({ 'payment.status': 1, createdAt: -1 });
 EventNotificationSchema.index({ creatorId: 1, createdAt: -1 });
 EventNotificationSchema.index({ creatorId: 1, read: 1 });
 

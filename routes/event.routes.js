@@ -9,12 +9,14 @@ const eventAggregator = require('../services/events/eventAggregator');
 const eventCleanup = require('../services/events/eventCleanup');
 const { importEventsToDatabase } = require('../services/events/csvImporter');
 const { track } = require('../services/engagement');
-const { publicTemplates, getTemplate } = require('../config/eventCategories');
+const { publicTemplates, getTemplate, LEGACY_REGISTRATION } = require('../config/eventCategories');
 const {
   validateEventV2,
   legacyText,
   isPaid,
   isV2Body,
+  checkField,
+  isProjectCloudinaryUrl,
 } = require('../services/events/eventValidation');
 
 // ============================================================
@@ -53,6 +55,72 @@ const isAdmin = (req, res, next) => {
 // 400 with a plain message in both keys (app reads `error`, admin web reads `message`)
 const badRequest = (res, msg, extra = {}) =>
   res.status(400).json({ success: false, message: msg, error: msg, ...extra });
+
+const isObjectId = (v) => /^[a-f0-9]{24}$/i.test(String(v || ''));
+
+// ── registration helpers ─────────────────────────────────────
+const UPDATE_APP = 'update tdc to register for this event';
+const ALREADY_REGISTERED = { error: 'You have already registered for this event', alreadyRegistered: true };
+const TXN_USED = 'This transaction ID has already been used for this event.';
+const conflict = (res, msg, extra = {}) =>
+  res.status(409).json({ success: false, message: msg, error: msg, ...extra });
+
+// transaction IDs as banks / wallets print them: letters, digits, dashes
+const normTxn = (v) => {
+  const t = String(v || '').replace(/\s+/g, '').toUpperCase();
+  return /^[A-Z0-9-]{6,40}$/.test(t) ? t : null;
+};
+
+// Take `qty` seats in ONE atomic update: the capacity (and the tier's remaining
+// tickets) are checked by the same findOneAndUpdate that increments the count, so two
+// students can't both get the last seat. Returns the updated event, or null if full.
+async function reserveSeats(eventId, qty, tierName) {
+  const filter = {
+    _id: eventId,
+    status: 'approved',
+    isExpired: { $ne: true },
+    $or: [
+      { capacity: null },
+      { $expr: { $lte: [{ $add: [{ $ifNull: ['$registeredCount', 0] }, qty] }, '$capacity'] } },
+    ],
+  };
+  const update = { $inc: { registeredCount: qty } };
+  if (tierName) {
+    filter.ticketTiers = { $elemMatch: { name: tierName, remaining: { $gte: qty } } };
+    update.$inc['ticketTiers.$.remaining'] = -qty;
+    update.$inc['ticketTiers.$.sold'] = qty;
+  }
+  return Event.findOneAndUpdate(filter, update, { returnDocument: 'after' });
+}
+
+// Give seats back (cancel, rejected payment, failed save). Never goes below zero.
+async function releaseSeats(eventId, qty, tierName) {
+  if (!qty) return;
+  try {
+    const filter = { _id: eventId, registeredCount: { $gte: qty } };
+    const update = { $inc: { registeredCount: -qty } };
+    if (tierName) {
+      filter.ticketTiers = { $elemMatch: { name: tierName, sold: { $gte: qty } } };
+      update.$inc['ticketTiers.$.remaining'] = qty;
+      update.$inc['ticketTiers.$.sold'] = -qty;
+    }
+    await Event.updateOne(filter, update);
+  } catch (e) {
+    console.warn('[events] seat release failed:', e.message);
+  }
+}
+
+// why reserveSeats said no, in words
+async function fullMessage(eventId, tierName) {
+  const ev = await Event.findById(eventId);
+  if (!ev || ev.status !== 'approved' || ev.isExpired) return 'Registration for this event is closed.';
+  if (tierName) {
+    const t = (ev.ticketTiers || []).find((x) => x.name === tierName);
+    if (t && t.remaining < 1) return `${tierName} tickets are sold out.`;
+    if (t) return `Only ${t.remaining} ${tierName} tickets left.`;
+  }
+  return 'This event is full.';
+}
 
 // Creator or admin. An event with no creator (imported / CSV) is admin only.
 const canManageEvent = (req, event) => {
@@ -341,11 +409,20 @@ router.post('/create', auth, requireUser, async (req, res) => {
 
 // ============================================================
 // REGISTER FOR EVENT — awwwards event_rsvp + attaches engagement
+//
+// Old payload { eventId, studentName, email, whatsapp, studentId } works as today for
+// free events whose form has no required extra fields. Paid events, ticketed events and
+// events with required extra questions need formVersion 2 (new app); older builds get a
+// plain "update tdc to register for this event".
+// v2 payload adds: formVersion: 2, answers, ticket { tier, quantity },
+// payment { method, transactionId, receiptUrl }. The amount is computed here.
 // ============================================================
 router.post('/register', auth, requireUser, async (req, res) => {
+  let held = null; // { eventId, qty, tier } while seats are reserved but not saved
   try {
     const { eventId, studentName, whatsapp, studentId, email } = req.body;
     const userId = getUserId(req);
+    const v2 = Number(req.body.formVersion) === 2;
 
     if (!eventId || !studentName || !whatsapp) {
       return res.status(400).json({ error: 'Missing required fields' });
@@ -353,8 +430,11 @@ router.post('/register', auth, requireUser, async (req, res) => {
     if (!userId) {
       return res.status(401).json({ error: 'Authentication required' });
     }
+    if (!isObjectId(eventId)) {
+      return res.status(404).json({ error: 'Event not found' });
+    }
 
-    const event = await Event.findById(eventId);
+    const event = await Event.findById(eventId).select('+paymentAccounts');
     if (!event) {
       return res.status(404).json({ error: 'Event not found' });
     }
@@ -365,22 +445,137 @@ router.post('/register', auth, requireUser, async (req, res) => {
     });
 
     if (existingRegistration) {
-      return res.status(400).json({
-        error: 'You have already registered for this event',
-        alreadyRegistered: true,
-      });
+      return res.status(400).json(ALREADY_REGISTERED);
     }
 
-    const newReg = new Registration({
-      eventId,
+    if (event.status !== 'approved' || event.isExpired) {
+      return badRequest(res, 'Registration for this event is closed.');
+    }
+    if (event.registrationCloses && new Date(event.registrationCloses) <= new Date()) {
+      return badRequest(res, 'Registration for this event has closed.');
+    }
+
+    const form = event.registrationForm?.length ? event.registrationForm : LEGACY_REGISTRATION;
+    const tiers = event.ticketTiers || [];
+    const paid = isPaid(event.fee, tiers);
+    const extraRequired = form.some((f) => f.required && f.store !== 'base');
+    if (!v2 && (paid || tiers.length || extraRequired)) {
+      return badRequest(res, UPDATE_APP, { updateRequired: true });
+    }
+
+    // today's fields
+    const base = {
       studentName,
       email: email || req.user?.email,
       whatsapp,
       studentId: studentId || 'Not provided',
+    };
+    let answers;
+    let ticket;
+    let qty = 1;
+    let payment = { status: 'not_required', amount: 0 };
+
+    if (v2) {
+      const errors = [];
+      // base fields, with their formats (old payloads are not re-validated)
+      for (const f of form.filter((x) => x.store === 'base')) {
+        const r = checkField(f, req.body[f.key]);
+        if (!r.ok) errors.push(r.error);
+        else if (r.value !== undefined) base[f.key] = r.value;
+      }
+      // the event's questions; nothing else
+      const raw = req.body.answers == null ? {} : req.body.answers;
+      if (typeof raw !== 'object' || Array.isArray(raw)) {
+        errors.push('answers must be an object');
+      } else {
+        const fields = form.filter((x) => x.store === 'answers');
+        const known = new Set(fields.map((x) => x.key));
+        Object.keys(raw).filter((k) => !known.has(k)).forEach((k) => errors.push(`"${k}" is not a question on this form`));
+        answers = {};
+        for (const f of fields) {
+          const r = checkField(f, raw[f.key]);
+          if (!r.ok) errors.push(r.error);
+          else if (r.value !== undefined) answers[f.key] = r.value;
+        }
+        if (!Object.keys(answers).length) answers = undefined;
+      }
+
+      // ticket and amount (never trust an amount from the client)
+      let amount = event.fee?.amount || 0;
+      if (tiers.length) {
+        const t = req.body.ticket || {};
+        const tier = tiers.find((x) => x.name.toLowerCase() === String(t.tier || '').trim().toLowerCase());
+        if (!tier) {
+          errors.push('Choose a ticket');
+        } else {
+          const max = Number(event.details?.maxTicketsPerStudent) || tier.maxPerStudent || 1;
+          const q = Number(t.quantity ?? 1);
+          if (!Number.isInteger(q) || q < 1 || q > max) {
+            errors.push(`You can book 1 to ${max} ${max === 1 ? 'ticket' : 'tickets'}`);
+          } else {
+            qty = q;
+            ticket = { tier: tier.name, quantity: q };
+            amount = (tier.price || 0) * q;
+          }
+        }
+      }
+
+      if (amount > 0) {
+        const p = req.body.payment || {};
+        const methods = (event.paymentAccounts || []).map((a) => a.method);
+        const method = String(p.method || '').toLowerCase();
+        if (!methods.includes(method)) errors.push('Choose how you paid');
+        const txn = normTxn(p.transactionId);
+        if (!txn) errors.push('Enter the transaction ID from your payment (6 to 40 letters or numbers)');
+        if (p.receiptUrl && !isProjectCloudinaryUrl(p.receiptUrl)) errors.push('Upload the receipt from the app');
+        payment = {
+          status: 'pending',
+          method,
+          transactionId: txn || undefined,
+          receiptUrl: p.receiptUrl ? String(p.receiptUrl).trim() : undefined,
+          amount,
+          submittedAt: new Date(),
+        };
+      }
+
+      if (errors.length) return badRequest(res, errors[0], { errors });
+
+      if (payment.transactionId) {
+        const used = await Registration.findOne({ eventId, 'payment.transactionId': payment.transactionId });
+        if (used) return conflict(res, TXN_USED);
+      }
+    }
+
+    // seats: capacity / tier check and count in one atomic update
+    const reserved = await reserveSeats(event._id, qty, ticket?.tier);
+    if (!reserved) {
+      return conflict(res, await fullMessage(event._id, ticket?.tier), { full: true });
+    }
+    held = { eventId: event._id, qty, tier: ticket?.tier };
+
+    const newReg = new Registration({
+      eventId,
+      ...base,
       userId,
       userName: req.user?.name,
+      answers,
+      ticket,
+      seats: qty,
+      payment,
     });
-    await newReg.save();
+    try {
+      await newReg.save();
+    } catch (saveErr) {
+      await releaseSeats(held.eventId, held.qty, held.tier);
+      held = null;
+      if (saveErr?.code === 11000) {
+        // the race the findOne above can't see: same reply as today
+        if (saveErr.keyPattern && saveErr.keyPattern['payment.transactionId']) return conflict(res, TXN_USED);
+        return res.status(400).json(ALREADY_REGISTERED);
+      }
+      throw saveErr;
+    }
+    held = null;
 
     if (event.creator) {
       try {
@@ -390,11 +585,11 @@ router.post('/register', auth, requireUser, async (req, res) => {
           creatorId: event.creator,
           creatorEmail: event.creatorEmail || 'system@tdc.app',
           registrantId: userId,
-          registrantName: studentName,
-          registrantEmail: email || req.user?.email,
-          registrantWhatsapp: whatsapp,
-          registrantStudentId: studentId || 'Not provided',
-          message: `${studentName} registered for your event: ${event.title}`,
+          registrantName: base.studentName,
+          registrantEmail: base.email,
+          registrantWhatsapp: base.whatsapp,
+          registrantStudentId: base.studentId,
+          message: `${base.studentName} registered for your event: ${event.title}`,
           type: 'new_registration',
           read: false,
         });
@@ -420,15 +615,18 @@ router.post('/register', auth, requireUser, async (req, res) => {
       registration: {
         _id: newReg._id,
         eventId: event._id,
-        studentName,
-        email: email || req.user?.email,
-        whatsapp,
-        studentId: studentId || 'Not provided',
+        studentName: base.studentName,
+        email: base.email,
+        whatsapp: base.whatsapp,
+        studentId: base.studentId,
         createdAt: newReg.createdAt,
+        ticket: newReg.ticket || null,
+        payment: { status: payment.status, amount: payment.amount || 0, method: payment.method || null },
       },
       engagement: engagement || undefined,
     });
   } catch (err) {
+    if (held) await releaseSeats(held.eventId, held.qty, held.tier);
     console.error('Registration error:', err);
     res.status(400).json({ error: 'Registration failed', details: err.message });
   }
@@ -455,6 +653,9 @@ router.delete('/register/:eventId', auth, requireUser, async (req, res) => {
       return res.status(404).json({ error: 'Registration not found' });
     }
 
+    // the seats it held go back (0 for old and rejected registrations)
+    await releaseSeats(registration.eventId, registration.seats || 0, registration.ticket?.tier);
+
     try {
       await EventNotification.deleteMany({
         eventId,
@@ -469,6 +670,73 @@ router.delete('/register/:eventId', auth, requireUser, async (req, res) => {
   } catch (err) {
     console.error('Cancel registration error:', err);
     res.status(500).json({ error: 'Failed to cancel registration' });
+  }
+});
+
+// ============================================================
+// RESUBMIT PAYMENT PROOF — the registering student, while pending or rejected
+// { transactionId, receiptUrl, method? }. A rejected registration takes its seats again.
+// ============================================================
+router.patch('/registrations/:id/payment-proof', auth, requireUser, async (req, res) => {
+  let reservedQty = 0;
+  let reg;
+  try {
+    if (!isObjectId(req.params.id)) return res.status(404).json({ message: 'Registration not found', error: 'Registration not found' });
+    reg = await Registration.findById(req.params.id);
+    if (!reg) return res.status(404).json({ message: 'Registration not found', error: 'Registration not found' });
+    if (String(reg.userId) !== String(getUserId(req))) {
+      return res.status(403).json({ message: 'This is not your registration', error: 'This is not your registration' });
+    }
+    const status = reg.payment?.status;
+    if (status !== 'pending' && status !== 'rejected') {
+      return badRequest(res, status === 'verified' ? 'This payment is already verified.' : 'This registration has no payment to update.');
+    }
+
+    const event = await Event.findById(reg.eventId).select('+paymentAccounts');
+    if (!event) return res.status(404).json({ message: 'Event not found', error: 'Event not found' });
+
+    const txn = normTxn(req.body.transactionId);
+    if (!txn) return badRequest(res, 'Enter the transaction ID from your payment (6 to 40 letters or numbers)');
+    if (req.body.receiptUrl && !isProjectCloudinaryUrl(req.body.receiptUrl)) return badRequest(res, 'Upload the receipt from the app');
+    let method = reg.payment.method;
+    if (req.body.method) {
+      method = String(req.body.method).toLowerCase();
+      if (!(event.paymentAccounts || []).some((a) => a.method === method)) return badRequest(res, 'Choose how you paid');
+    }
+    const used = await Registration.findOne({ eventId: reg.eventId, 'payment.transactionId': txn, _id: { $ne: reg._id } });
+    if (used) return conflict(res, TXN_USED);
+
+    // rejected registrations gave their seats back: take them again
+    if (status === 'rejected') {
+      const qty = reg.ticket?.quantity || 1;
+      const ok = await reserveSeats(reg.eventId, qty, reg.ticket?.tier);
+      if (!ok) return conflict(res, await fullMessage(reg.eventId, reg.ticket?.tier), { full: true });
+      reservedQty = qty;
+      reg.seats = qty;
+    }
+
+    reg.payment.status = 'pending';
+    reg.payment.method = method;
+    reg.payment.transactionId = txn;
+    reg.payment.receiptUrl = req.body.receiptUrl ? String(req.body.receiptUrl).trim() : reg.payment.receiptUrl;
+    reg.payment.submittedAt = new Date();
+    reg.payment.reviewedBy = undefined;
+    reg.payment.reviewedAt = undefined;
+    reg.payment.rejectReason = undefined;
+    try {
+      await reg.save();
+    } catch (saveErr) {
+      if (reservedQty) await releaseSeats(reg.eventId, reservedQty, reg.ticket?.tier);
+      reservedQty = 0;
+      if (saveErr?.code === 11000) return conflict(res, TXN_USED);
+      throw saveErr;
+    }
+    reservedQty = 0;
+    res.json({ success: true, message: 'Payment proof sent. We will check it soon.', payment: { status: reg.payment.status, amount: reg.payment.amount, method: reg.payment.method } });
+  } catch (err) {
+    if (reservedQty && reg) await releaseSeats(reg.eventId, reservedQty, reg.ticket?.tier);
+    console.error('Payment proof error:', err);
+    res.status(500).json({ message: 'Could not update the payment', error: 'Could not update the payment' });
   }
 });
 
