@@ -280,6 +280,8 @@ router.get('/push-logs', async (req, res) => {
         mood: l.mood,
         status: l.status,
         receiptStatus: l.receiptStatus,
+        // why it failed, in words (e.g. "InvalidCredentials: no FCM V1 key for this EAS project")
+        receiptError: l.receiptError || null,
         sentAt: l.sentAt,
         deliveredAt: l.deliveredAt,
         openedAt: l.openedAt,

@@ -125,7 +125,7 @@ async function send(userId, msg) {
       const why = ticketErrors[0] || 'expo_rejected';
       await PushLog.updateOne(
         { _id: log._id },
-        { $set: { status: 'failed', receiptError: why } }
+        { $set: { status: 'failed', receiptError: `${why}: ${describePushError(why)}` } }
       );
       // dead tokens were removed one by one in handleTickets (healthy ones stay)
       return { sent: false, reason: why, error: ticketMessages[0] || why };
@@ -251,7 +251,7 @@ async function checkReceipts() {
         errCount++;
         await PushLog.updateOne(
           { _id: log._id },
-          { $set: { receiptStatus: 'error', receiptError: receipt.message || 'unknown' } }
+          { $set: { receiptStatus: 'error', receiptError: `${receipt.details?.error || 'error'}: ${describePushError(receipt.details?.error, receipt.message)}` } }
         );
 
         // the log keeps one ticket for several devices: only remove when it's unambiguous.
