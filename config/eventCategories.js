@@ -8,7 +8,9 @@
 //           email | list | file
 //   store   "event"   → an Event field that already exists (title, city, prize, ...)
 //           "details" → Event.details[key] (category specific)
-//           "base"    → registration: top-level Registration field (studentName, ...)
+//           "base"    → registration: top-level Registration field (studentName, email,
+//                       whatsapp, university, studentId). Never an "extra" question: old
+//                       app builds don't send university and still register.
 //           "answers" → registration: Registration.answers[key]
 //           "ticket"  → registration: Registration.ticket (tier / quantity)
 //   options for select / multiselect. "fromEvent:ticketTiers" = the event's own tier names.
@@ -53,7 +55,7 @@ const BASE_REGISTRATION = [
   f("studentName", "Full name", "text", { required: true, store: "base" }),
   f("email", "University email", "email", { required: true, store: "base" }),
   f("whatsapp", "WhatsApp number", "phone", { required: true, store: "base", helpText: "03XXXXXXXXX" }),
-  f("university", "University", "text", { required: true, store: "answers" }),
+  f("university", "University", "text", { required: true, store: "base" }),
   f("studentId", "Student ID / CNIC", "text", { store: "base" }),
 ];
 

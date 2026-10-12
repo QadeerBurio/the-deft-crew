@@ -58,6 +58,7 @@ const badRequest = (res, msg, extra = {}) =>
   res.status(400).json({ success: false, message: msg, error: msg, ...extra });
 
 const isObjectId = (v) => /^[a-f0-9]{24}$/i.test(String(v || ''));
+const BASE_KEYS = new Set(['studentName', 'email', 'whatsapp', 'university', 'studentId']);
 
 // ── registration helpers ─────────────────────────────────────
 const UPDATE_APP = 'update tdc to register for this event';
@@ -456,10 +457,16 @@ router.post('/register', auth, requireUser, async (req, res) => {
       return badRequest(res, 'Registration for this event has closed.');
     }
 
-    const form = event.registrationForm?.length ? event.registrationForm : LEGACY_REGISTRATION;
+    // base fields are base whatever the saved form says (forms saved before university
+    // became a base field have it under "answers")
+    const form = (event.registrationForm?.length ? event.registrationForm : LEGACY_REGISTRATION).map((f) =>
+      BASE_KEYS.has(f.key) ? { ...(f.toObject ? f.toObject() : f), store: 'base' } : f
+    );
     const tiers = event.ticketTiers || [];
     const paid = isPaid(event.fee, tiers);
-    const extraRequired = form.some((f) => f.required && f.store !== 'base');
+    // old builds need an update for: a price, ticket tiers, or a required extra question.
+    // Base fields (incl. university) and ticket fields never count as extra questions.
+    const extraRequired = form.some((f) => f.required && f.store === 'answers');
     if (!v2 && (paid || tiers.length || extraRequired)) {
       return badRequest(res, UPDATE_APP, { updateRequired: true });
     }
@@ -471,6 +478,9 @@ router.post('/register', auth, requireUser, async (req, res) => {
       whatsapp,
       studentId: studentId || 'Not provided',
     };
+    // university: optional for old payloads (kept if sent), required for formVersion 2
+    const uniRaw = req.body.university ?? req.body.answers?.university;
+    if (!v2 && typeof uniRaw === 'string' && uniRaw.trim()) base.university = uniRaw.trim().slice(0, 200);
     let answers;
     let ticket;
     let qty = 1;
@@ -480,7 +490,7 @@ router.post('/register', auth, requireUser, async (req, res) => {
       const errors = [];
       // base fields, with their formats (old payloads are not re-validated)
       for (const f of form.filter((x) => x.store === 'base')) {
-        const r = checkField(f, req.body[f.key]);
+        const r = checkField(f, f.key === 'university' ? uniRaw : req.body[f.key]);
         if (!r.ok) errors.push(r.error);
         else if (r.value !== undefined) base[f.key] = r.value;
       }
@@ -491,7 +501,8 @@ router.post('/register', auth, requireUser, async (req, res) => {
       } else {
         const fields = form.filter((x) => x.store === 'answers');
         const known = new Set(fields.map((x) => x.key));
-        Object.keys(raw).filter((k) => !known.has(k)).forEach((k) => errors.push(`"${k}" is not a question on this form`));
+        // university may still come inside answers (step 2 clients): it's read above
+        Object.keys(raw).filter((k) => !known.has(k) && k !== 'university').forEach((k) => errors.push(`"${k}" is not a question on this form`));
         answers = {};
         for (const f of fields) {
           const r = checkField(f, raw[f.key]);
@@ -500,6 +511,8 @@ router.post('/register', auth, requireUser, async (req, res) => {
         }
         if (!Object.keys(answers).length) answers = undefined;
       }
+      // a copy in answers too, so admin screens that list answers show it
+      if (base.university) answers = { ...(answers || {}), university: base.university };
 
       // ticket and amount (never trust an amount from the client)
       let amount = event.fee?.amount || 0;
@@ -620,6 +633,7 @@ router.post('/register', auth, requireUser, async (req, res) => {
         email: base.email,
         whatsapp: base.whatsapp,
         studentId: base.studentId,
+        university: base.university || null,
         createdAt: newReg.createdAt,
         ticket: newReg.ticket || null,
         payment: { status: payment.status, amount: payment.amount || 0, method: payment.method || null },
@@ -1195,7 +1209,7 @@ router.get('/admin/registrations.csv', auth, isAdmin, async (req, res) => {
         row.email,
         row.whatsapp,
         row.studentId,
-        answers.university || '',
+        row.university || answers.university || '',
         row.ticket?.tier || '',
         row.ticket?.quantity || row.seats || '',
         row.payment.amount || 0,

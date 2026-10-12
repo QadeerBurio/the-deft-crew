@@ -33,17 +33,21 @@ const PaymentAccountSchema = new mongoose.Schema({
   note: { type: String, default: '', maxlength: 200 },
 }, { _id: false });
 
-// Public JSON: no payment accounts, no tier prices (only GET /:id/payment-info has them)
+// Public JSON: fee, tier prices, seats left and registrationCloses are public; payment
+// accounts never are (only GET /:id/payment-info, signed in). Counts only, no registrant data.
 function hidePaymentData(doc, ret) {
   delete ret.paymentAccounts;
   if (Array.isArray(ret.ticketTiers)) {
     ret.ticketTiers = ret.ticketTiers.map((t) => ({
       name: t.name,
-      quantity: t.quantity,
-      maxPerStudent: t.maxPerStudent,
+      price: t.price || 0,
       remaining: t.remaining,
+      maxPerStudent: t.maxPerStudent,
     }));
   }
+  if (ret.fee) ret.fee = { amount: ret.fee.amount || 0, currency: ret.fee.currency || 'PKR' };
+  ret.seatsLeft = ret.capacity == null ? null : Math.max(0, ret.capacity - (ret.registeredCount || 0));
+  ret.registrationCloses = ret.registrationCloses ?? null;
   return ret;
 }
 
@@ -126,6 +130,7 @@ const RegistrationSchema = new mongoose.Schema({
   userName: { type: String, default: '' },
 
   // ── Events v2 (optional; old registrations unaffected) ──
+  university: { type: String, trim: true, maxlength: 200 }, // base field (required for formVersion 2)
   answers: { type: mongoose.Schema.Types.Mixed, default: undefined }, // the event's extra questions
   ticket: {
     type: new mongoose.Schema({
