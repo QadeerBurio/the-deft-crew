@@ -230,7 +230,7 @@ router.delete('/clear-all', auth, async (req, res) => {
 router.get('/test-push', auth, async (req, res) => {
   try {
     const { Expo } = require('expo-server-sdk');
-    const { buildMessage, iconUrlForMood, resolveSoundKey, channelForToken } = require('../utils/pushNotification');
+    const { buildMessage, iconUrlForMood, resolveSoundKey, channelForToken, sendAllSafe } = require('../utils/pushNotification');
     const expo = new Expo(process.env.EXPO_ACCESS_TOKEN ? { accessToken: process.env.EXPO_ACCESS_TOKEN } : {});
 
     const userId = req.userId || req.user?._id || req.user?.id;
@@ -244,6 +244,9 @@ router.get('/test-push', auth, async (req, res) => {
 
     const validEntries = entries.filter((e) => Expo.isExpoPushToken(e.token));
     const valid = validEntries.map((e) => e.token);
+    if (!valid.length) {
+      return res.json({ ok: false, problem: 'NO_VALID_TOKEN', fix: 'The saved tokens are not Expo push tokens. Open the installed app, log in, allow notifications.' });
+    }
     const { featureMood, titleWithEmoji } = require('../utils/pushNotification');
 
     // 4 different features → 4 different emojis + sounds, so you can hear it works
@@ -269,10 +272,12 @@ router.get('/test-push', auth, async (req, res) => {
     const messages = buildFor(SAMPLES[0]);
     // the other 3 follow 4s apart (fire and forget)
     SAMPLES.slice(1).forEach((sample, i) =>
-      setTimeout(() => expo.sendPushNotificationsAsync(buildFor(sample)).catch(() => {}), (i + 1) * 4000)
+      setTimeout(() => sendAllSafe(expo, buildFor(sample)).catch(() => {}), (i + 1) * 4000)
     );
 
-    const tickets = await expo.sendPushNotificationsAsync(messages);
+    // sendAllSafe: one ticket per message, in order. Splits by Expo project when a user has
+    // tokens from two projects (e.g. old and new EAS project), which Expo rejects in one request.
+    const tickets = await sendAllSafe(expo, messages);
     await new Promise((r) => setTimeout(r, 6000));
     const ids = tickets.filter((t) => t.id).map((t) => t.id);
     const receipts = ids.length ? await expo.getPushNotificationReceiptsAsync(ids) : {};
@@ -285,6 +290,8 @@ router.get('/test-push', auth, async (req, res) => {
         DeviceNotRegistered: 'Token is dead (app uninstalled/reinstalled). Open the app and log in again.',
         MessageTooBig: 'Payload too large.',
         MismatchSenderId: 'google-services.json Firebase project does not match the FCM key uploaded to EAS.',
+        UNAUTHORIZED: 'EXPO_ACCESS_TOKEN is not from the account that owns this EAS project (or push security needs one). Make a token in that account and set it on the server.',
+        PUSH_TOO_MANY_EXPERIENCE_IDS: 'Tokens from several Expo projects could not be split. Log out and in on the new build.',
       };
       return {
         token: valid[i].slice(0, 30) + '…',
