@@ -9,7 +9,13 @@ const eventAggregator = require('../services/events/eventAggregator');
 const eventCleanup = require('../services/events/eventCleanup');
 const { importEventsToDatabase } = require('../services/events/csvImporter');
 const { track } = require('../services/engagement');
-const { publicTemplates } = require('../config/eventCategories');
+const { publicTemplates, getTemplate } = require('../config/eventCategories');
+const {
+  validateEventV2,
+  legacyText,
+  isPaid,
+  isV2Body,
+} = require('../services/events/eventValidation');
 
 // ============================================================
 // HELPERS
@@ -43,6 +49,10 @@ const isAdmin = (req, res, next) => {
   }
   next();
 };
+
+// 400 with a plain message in both keys (app reads `error`, admin web reads `message`)
+const badRequest = (res, msg, extra = {}) =>
+  res.status(400).json({ success: false, message: msg, error: msg, ...extra });
 
 // Creator or admin. An event with no creator (imported / CSV) is admin only.
 const canManageEvent = (req, event) => {
@@ -283,21 +293,33 @@ router.post('/create', auth, requireUser, async (req, res) => {
     const extUrl = externalUrl || registrationUrl || '';
     const userId = getUserId(req);
 
+    // v2 fields (details, registrationForm, fee, ticketTiers, paymentAccounts,
+    // capacity, registrationCloses). A request without them creates the event as today.
+    const v2 = validateEventV2(req.body, null);
+    if (v2.errors.length) return badRequest(res, v2.errors[0], { errors: v2.errors });
+    // v2 create: the category's registration form (unless one was sent).
+    // Legacy create (today's admin web / app): no form → today's 4 fields, so every
+    // app build can still register.
+    if (isV2Body(req.body) && !v2.set.registrationForm) {
+      v2.set.registrationForm = getTemplate(type).registrationFields.map((f) => ({ ...f }));
+    }
+    const legacy = legacyText(req.body, v2.set);
+
     const newEvent = new Event({
       title,
       organizer,
       city: city || 'Karachi',
       type,
       description: description || '',
-      prize: prize || 'TBD',
-      deadline: deadline || 'Limited spots',
+      prize: prize || legacy.prize || 'TBD',
+      deadline: deadline || legacy.deadline || 'Limited spots',
       location: location || 'Online/Venue TBD',
       contact: contact || req.user?.email || 'Not provided',
       image:
         image ||
         'https://images.unsplash.com/photo-1523240715632-d984bb4b970e?w=800',
       date: date || 'TBA',
-      teamSize: teamSize || '1-4 Members',
+      teamSize: teamSize || legacy.teamSize || '1-4 Members',
       registrationUrl: regUrl,
       externalUrl: extUrl,
       creator: userId,
@@ -306,6 +328,7 @@ router.post('/create', auth, requireUser, async (req, res) => {
       source: 'manual',
       isImported: false,
       status: 'approved',
+      ...v2.set,
     });
 
     const event = await newEvent.save();
@@ -651,7 +674,7 @@ router.delete('/expired', auth, isAdmin, async (req, res) => {
 // ============================================================
 const updateEventController = async (req, res) => {
   try {
-    const event = await Event.findById(req.params.id);
+    const event = await Event.findById(req.params.id).select('+paymentAccounts');
     if (!event) return res.status(404).json({ message: 'Event not found' });
 
     if (!canManageEvent(req, event)) {
@@ -659,6 +682,11 @@ const updateEventController = async (req, res) => {
         .status(403)
         .json({ message: 'Unauthorized to update this event' });
     }
+
+    // v2 fields: validated against the merged result (e.g. paid → needs an account)
+    const v2 = validateEventV2(req.body, event);
+    if (v2.errors.length) return badRequest(res, v2.errors[0], { errors: v2.errors });
+    const legacy = legacyText(req.body, v2.set);
 
     const fieldsToUpdate = [
       'title', 'organizer', 'city', 'type', 'description', 'prize',
@@ -670,6 +698,13 @@ const updateEventController = async (req, res) => {
       if (req.body[field] !== undefined) {
         event[field] = req.body[field];
       }
+    });
+    Object.entries(v2.set).forEach(([field, value]) => {
+      event[field] = value;
+    });
+    // keep the old text fields in step for old app builds
+    Object.entries(legacy).forEach(([field, value]) => {
+      if (req.body[field] === undefined) event[field] = value;
     });
 
     const updatedEvent = await event.save();
@@ -706,6 +741,52 @@ router.put('/:id', auth, requireUser, updateEventController);
 router.put('/event/:id', auth, requireUser, updateEventController);
 router.delete('/:id', auth, requireUser, deleteEventController);
 router.delete('/event/:id', auth, requireUser, deleteEventController);
+
+// ============================================================
+// PAYMENT INFO (signed in): fee, tier prices, payment accounts, seats left.
+// Not part of any list / feed response.
+// ============================================================
+router.get('/:id/payment-info', auth, requireUser, async (req, res) => {
+  try {
+    if (!/^[a-f0-9]{24}$/i.test(req.params.id)) {
+      return res.status(404).json({ message: 'Event not found', error: 'Event not found' });
+    }
+    const event = await Event.findById(req.params.id).select('+paymentAccounts');
+    if (!event) return res.status(404).json({ message: 'Event not found', error: 'Event not found' });
+
+    const tiers = (event.ticketTiers || []).map((t) => ({
+      name: t.name,
+      price: t.price || 0,
+      quantity: t.quantity,
+      maxPerStudent: t.maxPerStudent || 1,
+      remaining: t.remaining,
+    }));
+    const capacity = event.capacity ?? null;
+    res.json({
+      eventId: event._id,
+      title: event.title,
+      currency: 'PKR',
+      fee: { amount: event.fee?.amount || 0, currency: 'PKR' },
+      ticketTiers: tiers,
+      paid: isPaid(event.fee, event.ticketTiers),
+      paymentAccounts: (event.paymentAccounts || []).map((a) => ({
+        method: a.method,
+        accountTitle: a.accountTitle,
+        accountNumber: a.accountNumber,
+        bankName: a.bankName,
+        iban: a.iban,
+        note: a.note,
+      })),
+      capacity,
+      registeredCount: event.registeredCount || 0,
+      spotsLeft: capacity == null ? null : Math.max(0, capacity - (event.registeredCount || 0)),
+      registrationCloses: event.registrationCloses || null,
+    });
+  } catch (err) {
+    console.error('Payment info error:', err);
+    res.status(500).json({ message: 'Failed to load payment info', error: 'Failed to load payment info' });
+  }
+});
 
 // ============================================================
 // SINGLE EVENT DETAILS

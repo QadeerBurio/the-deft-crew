@@ -1,5 +1,52 @@
 const mongoose = require('mongoose');
 
+// ── Events v2 sub-documents ─────────────────────────────────────
+const FormFieldSchema = new mongoose.Schema({
+  key: { type: String, required: true, maxlength: 40 },
+  label: { type: String, default: '', maxlength: 80 },
+  type: {
+    type: String,
+    required: true,
+    enum: ['text', 'textarea', 'number', 'select', 'multiselect', 'date', 'time', 'url', 'phone', 'email', 'list', 'file'],
+  },
+  required: { type: Boolean, default: false },
+  options: [{ type: String, maxlength: 60 }],
+  helpText: { type: String, default: '', maxlength: 200 },
+  store: { type: String, enum: ['base', 'answers', 'ticket'], default: 'answers' },
+}, { _id: false });
+
+const TicketTierSchema = new mongoose.Schema({
+  name: { type: String, required: true, trim: true, maxlength: 60 },
+  price: { type: Number, default: 0, min: 0 }, // whole PKR
+  quantity: { type: Number, required: true, min: 1 },
+  maxPerStudent: { type: Number, default: 1, min: 1 },
+  sold: { type: Number, default: 0, min: 0 }, // internal
+  remaining: { type: Number, default: 0, min: 0 }, // quantity - sold; the atomic seat check uses it
+}, { _id: false });
+
+const PaymentAccountSchema = new mongoose.Schema({
+  method: { type: String, required: true, enum: ['easypaisa', 'jazzcash', 'bank'] },
+  accountTitle: { type: String, default: '', maxlength: 80 },
+  accountNumber: { type: String, default: '', maxlength: 40 },
+  bankName: { type: String, default: '', maxlength: 80 },
+  iban: { type: String, default: '', maxlength: 24 },
+  note: { type: String, default: '', maxlength: 200 },
+}, { _id: false });
+
+// Public JSON: no payment accounts, no tier prices (only GET /:id/payment-info has them)
+function hidePaymentData(doc, ret) {
+  delete ret.paymentAccounts;
+  if (Array.isArray(ret.ticketTiers)) {
+    ret.ticketTiers = ret.ticketTiers.map((t) => ({
+      name: t.name,
+      quantity: t.quantity,
+      maxPerStudent: t.maxPerStudent,
+      remaining: t.remaining,
+    }));
+  }
+  return ret;
+}
+
 const EventSchema = new mongoose.Schema({
   title: { type: String, required: true, trim: true },
   organizer: { type: String, required: false, trim: true, default: 'Organizer' },
@@ -46,7 +93,26 @@ city: { type: String, required: false, default: '', trim: true },
   categories: [{ type: String }],
   searchKeywords: [{ type: String }],
 
+  // ── Events v2 (all optional; old documents and old clients are unaffected) ──
+  // values for the category's createFields (config/eventCategories.js)
+  details: { type: mongoose.Schema.Types.Mixed, default: () => ({}) },
+  // the registration form for this event; absent = today's form (old events, old clients)
+  registrationForm: { type: [FormFieldSchema], default: undefined },
+  // whole PKR; 0 = free
+  fee: {
+    amount: { type: Number, default: 0, min: 0 },
+    currency: { type: String, default: 'PKR', enum: ['PKR'] },
+  },
+  ticketTiers: { type: [TicketTierSchema], default: [] },
+  // never in list / feed responses (select: false + toJSON); see GET /:id/payment-info
+  paymentAccounts: { type: [PaymentAccountSchema], default: [], select: false },
+  capacity: { type: Number, default: null, min: 0 }, // null = unlimited
+  registeredCount: { type: Number, default: 0, min: 0 }, // seats taken (ticket quantity)
+  registrationCloses: { type: Date, default: null },
+
   createdAt: { type: Date, default: Date.now }
+}, {
+  toJSON: { transform: hidePaymentData },
 });
 
 // Registration Schema
