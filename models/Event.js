@@ -176,8 +176,26 @@ const EventNotificationSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
+// Manual events (admin web / app) have no provider id. Give each one its own sourceId so the
+// unique (source, sourceId) index never sees two "manual + null" rows. Works with the old
+// sparse index still in the database and with the partial index below.
+EventSchema.pre('validate', function () {
+  if (!this.sourceId && (this.source || 'manual') === 'manual') {
+    this.sourceId = `manual-${this._id}`;
+  }
+});
+
 // Create indexes for performance and aggregation lookup
-EventSchema.index({ source: 1, sourceId: 1 }, { unique: true, sparse: true });
+// Partial (not sparse): only rows with a string sourceId are unique-checked. A sparse
+// compound index still indexed every row with a source, so all manual events with
+// sourceId null collided (E11000 source_1_sourceId_1 { source: "manual", sourceId: null }).
+EventSchema.index(
+  { source: 1, sourceId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { sourceId: { $type: "string" } },
+  }
+);
 EventSchema.index({ status: 1, isExpired: 1, createdAt: -1 });
 EventSchema.index({ city: 1, isExpired: 1 });
 EventSchema.index({ categories: 1 });
