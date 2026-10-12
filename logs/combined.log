@@ -59565,3 +59565,37 @@
 {"level":"info","message":"Fetched 0 items from backend collection \"resumes\"","timestamp":"2026-10-12 18:42:24:4224"}
 {"level":"info","message":"Database synchronization completed successfully. Synced: 102, Failed: 0. Duration: 12001ms","timestamp":"2026-10-12 18:42:24:4224"}
 >>>>>>> origin/fix/event-create-dupkey
+{"level":"info","message":"✅ Chat Service connected successfully to dedicated AI database.","timestamp":"2026-10-12 18:57:29:5729"}
+{"level":"info","message":"Initializing Automatic Knowledge Synchronization Scheduler...","timestamp":"2026-10-12 18:57:29:5729"}
+{"level":"info","message":"Scheduling database sync sweeps every 30 minutes (1800000ms).","timestamp":"2026-10-12 18:57:29:5729"}
+{"level":"info","message":"Executing initial startup database synchronization check...","timestamp":"2026-10-12 18:57:34:5734"}
+{"level":"info","message":"Starting incremental database synchronization engine...","timestamp":"2026-10-12 18:57:34:5734"}
+{"level":"info","message":"Using shared persistent connection for backend sync.","timestamp":"2026-10-12 18:57:34:5734"}
+{"level":"info","message":"Incremental sync reference date: 2026-10-12T13:51:58.964Z","timestamp":"2026-10-12 18:57:34:5734"}
+{"level":"info","message":"Sync running for adapter: [scholarships]","timestamp":"2026-10-12 18:57:34:5734"}
+{"level":"info","message":"Fetched 0 items from backend collection \"exchanges\"","timestamp":"2026-10-12 18:57:35:5735"}
+{"level":"info","message":"Sync running for adapter: [jobs]","timestamp":"2026-10-12 18:57:35:5735"}
+{"level":"info","message":"Fetched 0 items from backend collection \"jobs\"","timestamp":"2026-10-12 18:57:35:5735"}
+{"level":"info","message":"Sync running for adapter: [offers]","timestamp":"2026-10-12 18:57:35:5735"}
+{"level":"info","message":"Fetched 0 items from backend collection \"offers\"","timestamp":"2026-10-12 18:57:35:5735"}
+{"level":"info","message":"Sync running for adapter: [events]","timestamp":"2026-10-12 18:57:35:5735"}
+{"level":"info","message":"Fetched 0 items from backend collection \"events\"","timestamp":"2026-10-12 18:57:35:5735"}
+{"level":"info","message":"Sync running for adapter: [universities]","timestamp":"2026-10-12 18:57:35:5735"}
+{"level":"info","message":"Fetched 80 items from backend collection \"universities\"","timestamp":"2026-10-12 18:57:35:5735"}
+{"level":"info","message":"Sync running for adapter: [packages]","timestamp":"2026-10-12 18:57:43:5743"}
+{"level":"info","message":"Fetched 3 items from backend collection \"packages\"","timestamp":"2026-10-12 18:57:43:5743"}
+{"level":"info","message":"Sync running for adapter: [templates]","timestamp":"2026-10-12 18:57:43:5743"}
+{"level":"info","message":"Fetched 0 items from backend collection \"templates\"","timestamp":"2026-10-12 18:57:44:5744"}
+{"level":"info","message":"Sync running for adapter: [sliders]","timestamp":"2026-10-12 18:57:44:5744"}
+{"level":"info","message":"Fetched 19 items from backend collection \"sliders\"","timestamp":"2026-10-12 18:57:44:5744"}
+{"level":"info","message":"Sync running for adapter: [notes]","timestamp":"2026-10-12 18:57:46:5746"}
+{"level":"info","message":"Fetched 0 items from backend collection \"notes\"","timestamp":"2026-10-12 18:57:46:5746"}
+{"level":"info","message":"Sync running for adapter: [books]","timestamp":"2026-10-12 18:57:46:5746"}
+{"level":"info","message":"Fetched 0 items from backend collection \"books\"","timestamp":"2026-10-12 18:57:46:5746"}
+{"level":"info","message":"Sync running for adapter: [lectures]","timestamp":"2026-10-12 18:57:46:5746"}
+{"level":"info","message":"Fetched 0 items from backend collection \"lectures\"","timestamp":"2026-10-12 18:57:46:5746"}
+{"level":"info","message":"Sync running for adapter: [pastPapers]","timestamp":"2026-10-12 18:57:46:5746"}
+{"level":"info","message":"Fetched 0 items from backend collection \"pastpapers\"","timestamp":"2026-10-12 18:57:46:5746"}
+{"level":"info","message":"Sync running for adapter: [resumes]","timestamp":"2026-10-12 18:57:46:5746"}
+{"level":"info","message":"Fetched 0 items from backend collection \"resumes\"","timestamp":"2026-10-12 18:57:46:5746"}
+{"level":"info","message":"Database synchronization completed successfully. Synced: 102, Failed: 0. Duration: 12018ms","timestamp":"2026-10-12 18:57:46:5746"}
