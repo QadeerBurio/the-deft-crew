@@ -9,7 +9,7 @@ const copy = require('./copy');
 
 const expo = new Expo(process.env.EXPO_ACCESS_TOKEN ? { accessToken: process.env.EXPO_ACCESS_TOKEN } : {});
 
-const { iconUrlForMood, titleWithEmoji, resolveSoundKey, channelForToken, sendAllSafe, featureMood } = require('../../utils/pushNotification');
+const { iconUrlForMood, titleWithEmoji, resolveSoundKey, channelForToken, sendAllSafe, featureMood, handleTickets, safeSoundKey, describePushError } = require('../../utils/pushNotification');
 
 // ── CORE SEND ──
 async function send(userId, msg) {
@@ -49,12 +49,17 @@ async function send(userId, msg) {
     }
 
     const user = await User.findById(userId).select('pushTokens').lean();
-    const entries = (user?.pushTokens || []).filter((t) => t?.token);
+    const seen = new Set();
+    const entries = (user?.pushTokens || []).filter((t) => {
+      if (!t?.token || seen.has(t.token)) return false; // one push per device
+      seen.add(t.token);
+      return true;
+    });
     if (entries.length === 0) return { sent: false, reason: 'no_token' };
 
     // Same emoji image, emoji title and sound as the in-app banner
     const moodImage = iconUrlForMood(mood);
-    const soundKey = resolveSoundKey(type, mood);
+    const soundKey = safeSoundKey(resolveSoundKey(type, mood));
     const fullTitle = titleWithEmoji(title || 'tdc', mood);
 
     const messages = entries
@@ -98,13 +103,14 @@ async function send(userId, msg) {
         const tickets = await sendAllSafe(expo, messages);
         for (const ticket of tickets) {
           if (ticket.status === 'error') {
-            console.warn('[pushGateway] ticket error:', ticket.message);
-            ticketErrors.push(ticket.details?.error || ticket.message || 'expo_error');
-            ticketMessages.push(ticket.message || '');
+            ticketErrors.push(ticket.details?.error || 'SEND_FAILED');
+            ticketMessages.push(describePushError(ticket.details?.error, ticket.message));
           } else if (ticket.id) {
             ticketIds.push(ticket.id);
           }
         }
+        // readable log per failed device; removes ONLY the dead tokens; receipts per device
+        await handleTickets(messages, tickets, userId, '[pushGateway]');
       }
     } catch (err) {
       await PushLog.updateOne(
@@ -121,12 +127,7 @@ async function send(userId, msg) {
         { _id: log._id },
         { $set: { status: 'failed', receiptError: why } }
       );
-      if (ticketErrors.includes('DeviceNotRegistered')) {
-        await User.updateOne(
-          { _id: userId },
-          { $pull: { pushTokens: { token: { $in: messages.map((m) => m.to) } } } }
-        );
-      }
+      // dead tokens were removed one by one in handleTickets (healthy ones stay)
       return { sent: false, reason: why, error: ticketMessages[0] || why };
     }
 
@@ -253,8 +254,10 @@ async function checkReceipts() {
           { $set: { receiptStatus: 'error', receiptError: receipt.message || 'unknown' } }
         );
 
-        if (receipt.details?.error === 'DeviceNotRegistered') {
-          for (const tok of log.tokens || []) deadTokens.add(tok);
+        // the log keeps one ticket for several devices: only remove when it's unambiguous.
+        // (each device's receipt is also checked right after sending, in handleTickets)
+        if (receipt.details?.error === 'DeviceNotRegistered' && (log.tokens || []).length === 1) {
+          deadTokens.add(log.tokens[0]);
         }
       }
     }

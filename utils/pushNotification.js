@@ -108,6 +108,18 @@ const resolveSoundKey = (type, mood) =>
   FEATURES[type] ? featureSound(type, mood) : MOOD_SOUND[mood] || TYPE_SOUND[type] || 'tdc_push_default';
 const channelForSound = (soundKey) => `snd_${soundKey}`;
 
+// The 21 sounds the app creates a channel for (app/src/utils/pushNotifications.js
+// SOUND_CHANNELS + app.json sounds). Anything else would land on a channel the phone
+// doesn't have, so it falls back to the default sound.
+const APP_SOUND_KEYS = new Set([
+  'tdc_mood_sorted', 'tdc_mood_excited', 'tdc_mood_panic', 'tdc_mood_broke', 'tdc_mood_sleepy',
+  'tdc_mood_shook', 'tdc_mood_sus', 'tdc_mood_cheeky', 'tdc_mood_rs',
+  'tdc_push_default', 'tdc_push_deal', 'tdc_push_message', 'tdc_push_internship',
+  'tdc_push_reminder', 'tdc_push_points', 'tdc_push_streak', 'tdc_push_confession',
+  'tdc_push_event', 'tdc_push_level_up', 'tdc_like', 'tdc_nope',
+]);
+const safeSoundKey = (key) => (APP_SOUND_KEYS.has(key) ? key : 'tdc_push_default');
+
 // Old app builds only have these channels. Sending to a channel that doesn't
 // exist on the phone makes Android fall back to the default channel, which is
 // why most pushes played the general sound.
@@ -273,62 +285,93 @@ async function sendAllSafe(client, messages) {
   return tickets;
 }
 
-async function sendMessages(messages, userIdForCleanup = null) {
-  const pairs = []; // { ticket, token }
-  const tickets = await sendAllSafe(expo, messages);
+// Expo ticket / receipt error codes → what it means, in words (Railway log)
+const PUSH_ERROR_REASONS = {
+  DeviceNotRegistered: 'the app was uninstalled or the token is dead → token removed',
+  InvalidCredentials: 'no FCM V1 key for this EAS project (config: eas credentials → Android → FCM V1)',
+  MismatchSenderId: 'google-services.json is from another Firebase project than the FCM key in EAS (config)',
+  MessageTooBig: 'payload over 4 KB → shorten title / body / data',
+  MessageRateExceeded: 'too many pushes to this device right now → skipped, try later',
+  PUSH_TOO_MANY_EXPERIENCE_IDS: 'tokens from several Expo projects in one request → sent per project',
+  UNAUTHORIZED: 'EXPO_ACCESS_TOKEN is missing or from another Expo account (config)',
+  SEND_FAILED: 'Expo did not accept the request (network or Expo outage)',
+};
+const describePushError = (code, message) => PUSH_ERROR_REASONS[code] || message || code || 'unknown error';
+const shortToken = (t) => String(t || '').replace(/^ExponentPushToken\[/, '').replace(/\]$/, '').slice(0, 10) + '…';
+
+// One readable line per failed ticket / receipt, then remove ONLY the dead tokens.
+// tickets[i] belongs to messages[i]. Never throws.
+async function handleTickets(messages, tickets, userId = null, tag = '[push]') {
+  const dead = new Set();
+  const ok = [];
   tickets.forEach((ticket, i) => {
-    pairs.push({ ticket, token: messages[i]?.to });
-    if (ticket.status === 'error') {
-      console.error('[push] ❌ ticket error:', ticket.message, ticket.details || '');
-    } else {
-      console.log('[push] ✅ ticket ok:', ticket.id);
+    const token = messages[i]?.to;
+    if (ticket?.status === 'ok') {
+      if (ticket.id) ok.push({ id: ticket.id, token });
+      return;
     }
+    const code = ticket?.details?.error || 'SEND_FAILED';
+    console.warn(`${tag} ✗ not sent → user ${userId || '?'} device ${shortToken(token)} | ${code}: ${describePushError(code, ticket?.message)}`);
+    if (code === 'DeviceNotRegistered' && token) dead.add(token);
   });
+  await removeDeadTokens([...dead], userId, tag);
+  // receipts arrive a bit later (delivery by FCM / APNs)
+  if (ok.length) {
+    const timer = setTimeout(() => {
+      checkReceiptsFor(ok, userId, tag).catch((e) => console.warn(`${tag} receipt check error:`, e.message));
+    }, 15000);
+    if (timer.unref) timer.unref();
+  }
+  return { ok: ok.length, failed: tickets.length - ok.length, dead: dead.size };
+}
 
-  // Tokens rejected immediately
-  const deadNow = pairs
-    .filter((p) => p.ticket.status === 'error' && p.ticket.details?.error === 'DeviceNotRegistered')
-    .map((p) => p.token);
-
-  // Receipts arrive a bit later; check after 15s
-  const okPairs = pairs.filter((p) => p.ticket.status === 'ok' && p.ticket.id);
-  setTimeout(async () => {
-    const dead = new Set(deadNow);
+async function checkReceiptsFor(okPairs, userId, tag = '[push]') {
+  const dead = new Set();
+  for (const ids of expo.chunkPushNotificationReceiptIds(okPairs.map((p) => p.id))) {
+    let receipts = {};
     try {
-      if (okPairs.length) {
-        const receiptChunks = expo.chunkPushNotificationReceiptIds(okPairs.map((p) => p.ticket.id));
-        for (const ids of receiptChunks) {
-          const receipts = await expo.getPushNotificationReceiptsAsync(ids);
-          for (const [id, receipt] of Object.entries(receipts)) {
-            if (receipt.status !== 'error') continue;
-            console.error('[push] ❌ receipt error:', receipt.message, receipt.details || '');
-            if (receipt.details?.error === 'DeviceNotRegistered') {
-              const pair = okPairs.find((p) => p.ticket.id === id);
-              if (pair?.token) dead.add(pair.token);
-            }
-          }
-        }
-      }
-      if (dead.size) {
-        const tokens = [...dead];
-        const filter = userIdForCleanup ? { _id: userIdForCleanup } : { 'pushTokens.token': { $in: tokens } };
-        await User.updateMany(filter, { $pull: { pushTokens: { token: { $in: tokens } } } });
-        console.log('[push] removed dead tokens:', tokens.length);
-      }
+      receipts = await expo.getPushNotificationReceiptsAsync(ids);
     } catch (err) {
-      console.error('[push] receipt check error:', err.message);
+      console.warn(`${tag} receipts not available:`, err.message);
+      continue;
     }
-  }, 15000);
+    for (const [id, receipt] of Object.entries(receipts)) {
+      if (receipt?.status !== 'error') continue;
+      const pair = okPairs.find((p) => p.id === id);
+      const code = receipt.details?.error || 'SEND_FAILED';
+      console.warn(`${tag} ✗ not delivered → user ${userId || '?'} device ${shortToken(pair?.token)} | ${code}: ${describePushError(code, receipt.message)}`);
+      if (code === 'DeviceNotRegistered' && pair?.token) dead.add(pair.token);
+    }
+  }
+  await removeDeadTokens([...dead], userId, tag);
+}
 
-  return pairs;
+// remove exactly these tokens (from this user if known, else from whoever has them)
+async function removeDeadTokens(tokens, userId, tag = '[push]') {
+  if (!tokens.length) return;
+  try {
+    const filter = userId ? { _id: userId } : { 'pushTokens.token': { $in: tokens } };
+    await User.updateMany(filter, { $pull: { pushTokens: { token: { $in: tokens } } } });
+    console.log(`${tag} removed ${tokens.length} dead token(s)`);
+  } catch (err) {
+    console.warn(`${tag} dead token cleanup failed:`, err.message);
+  }
+}
+
+async function sendMessages(messages, userIdForCleanup = null) {
+  const tickets = await sendAllSafe(expo, messages);
+  await handleTickets(messages, tickets, userIdForCleanup, '[push]');
+  return tickets.map((ticket, i) => ({ ticket, token: messages[i]?.to }));
 }
 
 function buildData(type, extraData) {
   const given = VALID_MOODS.has(extraData.mood) || extraData.mood === 'rs' ? extraData.mood : null;
   const mood = featureMood(type, given);
   const iconUrl = extraData.iconUrl || iconUrlForMood(mood);
-  const soundKey = extraData.soundKey || resolveSoundKey(type, mood);
-  const channelId = channelForSound(soundKey);
+  // a caller's soundKey is used only if the app has a channel for it
+  const soundKey = safeSoundKey(extraData.soundKey || resolveSoundKey(type, mood));
+  // current builds (snd_v2) have the tdc2_<sound> channels; snd_<sound> ones are deleted
+  const channelId = channelForToken({ channels: 'snd_v2' }, soundKey);
   const data = {
     ...extraData,
     type,
@@ -346,8 +389,25 @@ function buildData(type, extraData) {
 // ═══════════════════════════════════════════════════════════════
 // SEND TO USER (all their devices)
 // ═══════════════════════════════════════════════════════════════
+// The "social" switch in the app (likes, comments, mentions). Other types (messages,
+// connection requests, offers on your listing) are direct and always sent.
+const SOCIAL_PREF_TYPES = new Set(['like', 'comment', 'reply', 'mention']);
+async function socialPushOff(userId, type) {
+  if (!SOCIAL_PREF_TYPES.has(type)) return false;
+  try {
+    const EngagementProfile = require('../models/EngagementProfile');
+    const p = await EngagementProfile.findOne({ user: userId }).select('notifPrefs').lean();
+    return p?.notifPrefs?.social === false;
+  } catch {
+    return false;
+  }
+}
+
 const sendToUser = async (userId, title, body, extraData = {}) => {
   try {
+    if (await socialPushOff(userId, extraData.type || 'System')) {
+      return { sent: false, reason: 'pref_off' };
+    }
     const user = await User.findById(userId).select('pushTokens').lean();
     const seen = new Set();
     const entries = (user?.pushTokens || []).filter((e) => {
@@ -365,7 +425,7 @@ const sendToUser = async (userId, title, body, extraData = {}) => {
     const { data, iconUrl, soundKey, mood } = buildData(type, extraData);
     const fullTitle = titleWithEmoji(title, mood);
     const tokens = entries.map((e) => e.token);
-    const channelId = channelForSound(soundKey);
+    const channelId = channelForToken({ channels: 'snd_v2' }, soundKey);
 
     const messages = entries.map((e) =>
       buildMessage(e.token, {
@@ -407,6 +467,11 @@ const sendPushNotification = async (targetToken, title, body, extraData = {}) =>
 
 module.exports = {
   sendAllSafe,
+  handleTickets,
+  describePushError,
+  removeDeadTokens,
+  APP_SOUND_KEYS,
+  safeSoundKey,
   sendPushNotification,
   sendToUser,
   sendMessages,
