@@ -5,6 +5,7 @@ const path = require('path');
 const fs = require('fs');
 const auth = require('../middleware/auth.middleware');
 const { Event, Registration, EventNotification } = require('../models/Event');
+const Notification = require('../models/Notification');
 const eventAggregator = require('../services/events/eventAggregator');
 const eventCleanup = require('../services/events/eventCleanup');
 const { importEventsToDatabase } = require('../services/events/csvImporter');
@@ -741,6 +742,66 @@ router.patch('/registrations/:id/payment-proof', auth, requireUser, async (req, 
 });
 
 // ============================================================
+// ADMIN: VERIFY / REJECT A PAYMENT  { action: "verify" | "reject", reason }
+// Reject gives the seats back; verifying a rejected one takes them again.
+// The student gets a plain in-app notification.
+// ============================================================
+router.patch('/registrations/:id/payment', auth, isAdmin, async (req, res) => {
+  try {
+    const action = String(req.body?.action || '');
+    if (action !== 'verify' && action !== 'reject') return badRequest(res, 'action must be "verify" or "reject"');
+    if (!isObjectId(req.params.id)) return res.status(404).json({ message: 'Registration not found', error: 'Registration not found' });
+    const reg = await Registration.findById(req.params.id);
+    if (!reg) return res.status(404).json({ message: 'Registration not found', error: 'Registration not found' });
+
+    const status = reg.payment?.status || 'not_required';
+    if (status === 'not_required') return badRequest(res, 'This registration has no payment.');
+    if (action === 'verify' && status === 'verified') return badRequest(res, 'Already verified.');
+    if (action === 'reject' && status === 'rejected') return badRequest(res, 'Already rejected.');
+    const reason = String(req.body?.reason || '').trim().slice(0, 300);
+
+    const qty = reg.ticket?.quantity || 1;
+    if (action === 'verify' && status === 'rejected') {
+      const ok = await reserveSeats(reg.eventId, qty, reg.ticket?.tier);
+      if (!ok) return conflict(res, await fullMessage(reg.eventId, reg.ticket?.tier), { full: true });
+      reg.seats = qty;
+    }
+
+    reg.payment.status = action === 'verify' ? 'verified' : 'rejected';
+    reg.payment.reviewedBy = getUserId(req);
+    reg.payment.reviewedAt = new Date();
+    reg.payment.rejectReason = action === 'reject' ? reason || undefined : undefined;
+    const release = action === 'reject' ? reg.seats || 0 : 0;
+    if (action === 'reject') reg.seats = 0;
+    await reg.save();
+    if (release) await releaseSeats(reg.eventId, release, reg.ticket?.tier);
+
+    // plain notification for the student (never blocks the review)
+    try {
+      const event = await Event.findById(reg.eventId).select('title');
+      const title = event?.title || 'your event';
+      await Notification.create({
+        recipient: reg.userId,
+        title: action === 'verify' ? 'payment verified' : 'payment not accepted',
+        description: action === 'verify'
+          ? `your payment for ${title} is verified. you're in.`
+          : `your payment for ${title} wasn't accepted${reason ? `: ${reason}` : '.'} open the event to send the correct transaction id.`,
+        type: 'Payment',
+        mood: action === 'verify' ? 'excited' : 'urgent',
+        metadata: { eventId: String(reg.eventId), registrationId: String(reg._id), paymentStatus: reg.payment.status },
+      });
+    } catch (e) {
+      console.warn('[events] payment notification failed:', e.message);
+    }
+
+    res.json({ success: true, message: action === 'verify' ? 'Payment verified' : 'Payment rejected', registration: adminRow(reg) });
+  } catch (err) {
+    console.error('Payment review error:', err);
+    res.status(500).json({ message: 'Could not update the payment', error: 'Could not update the payment' });
+  }
+});
+
+// ============================================================
 // GET USER'S CREATED EVENTS
 // ============================================================
 router.get('/my-events', auth, requireUser, async (req, res) => {
@@ -1009,6 +1070,152 @@ router.put('/:id', auth, requireUser, updateEventController);
 router.put('/event/:id', auth, requireUser, updateEventController);
 router.delete('/:id', auth, requireUser, deleteEventController);
 router.delete('/event/:id', auth, requireUser, deleteEventController);
+
+// ============================================================
+// ADMIN: REGISTRATIONS (all events) — list, CSV, payment review
+// ============================================================
+const PAYMENT_STATUSES = ['not_required', 'pending', 'verified', 'rejected'];
+const escapeRegex = (v) => String(v).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// filters shared by the list and the CSV: eventId, status (payment), q (search)
+function registrationFilter(query) {
+  const filter = {};
+  if (query.eventId) {
+    if (!isObjectId(query.eventId)) return null;
+    filter.eventId = query.eventId;
+  }
+  if (query.status && query.status !== 'all') {
+    if (!PAYMENT_STATUSES.includes(query.status)) return null;
+    // old registrations have no payment object: they count as not_required
+    filter['payment.status'] = query.status === 'not_required' ? { $in: ['not_required', null] } : query.status;
+  }
+  const q = String(query.q || '').trim().slice(0, 100);
+  if (q) {
+    const re = new RegExp(escapeRegex(q), 'i');
+    filter.$or = [
+      { studentName: re },
+      { email: re },
+      { whatsapp: re },
+      { studentId: re },
+      { 'payment.transactionId': re },
+    ];
+  }
+  return filter;
+}
+
+// one row as the admin web reads it (today's fields + event title + v2 data)
+function adminRow(reg) {
+  const r = typeof reg.toJSON === 'function' ? reg.toJSON() : { ...reg };
+  const ev = reg.eventId && typeof reg.eventId === 'object' && reg.eventId.title !== undefined ? reg.eventId : null;
+  return {
+    ...r,
+    eventId: ev ? ev._id : reg.eventId,
+    eventTitle: ev ? ev.title : '',
+    event: ev ? { _id: ev._id, title: ev.title, type: ev.type, date: ev.date, city: ev.city } : null,
+    payment: { status: 'not_required', amount: 0, ...(r.payment || {}) },
+  };
+}
+
+router.get('/admin/registrations', auth, isAdmin, async (req, res) => {
+  try {
+    const filter = registrationFilter(req.query);
+    if (!filter) return badRequest(res, 'Invalid filter');
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 25));
+    const [rows, total] = await Promise.all([
+      Registration.find(filter)
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .populate('eventId', 'title type date city'),
+      Registration.countDocuments(filter),
+    ]);
+    res.json({
+      registrations: rows.map(adminRow),
+      total,
+      page,
+      limit,
+      pages: Math.max(1, Math.ceil(total / limit)),
+    });
+  } catch (err) {
+    console.error('Admin registrations error:', err);
+    res.status(500).json({ message: 'Failed to load registrations', error: 'Failed to load registrations' });
+  }
+});
+
+// The admin web's "Registrations" tab calls this path and expects a plain array.
+router.get('/all-registrations', auth, isAdmin, async (req, res) => {
+  try {
+    const filter = registrationFilter(req.query);
+    if (!filter) return badRequest(res, 'Invalid filter');
+    const rows = await Registration.find(filter)
+      .sort({ createdAt: -1 })
+      .limit(2000)
+      .populate('eventId', 'title type date city');
+    res.json(rows.map(adminRow));
+  } catch (err) {
+    console.error('All registrations error:', err);
+    res.status(500).json({ message: 'Failed to load registrations', error: 'Failed to load registrations' });
+  }
+});
+
+// CSV cell: neutralise spreadsheet formulas (= + - @, tab, CR) and quote
+function csvCell(v) {
+  let s = v == null ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v);
+  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+  return '"' + s.replace(/"/g, '""') + '"';
+}
+
+router.get('/admin/registrations.csv', auth, isAdmin, async (req, res) => {
+  try {
+    const filter = registrationFilter(req.query);
+    if (!filter) return badRequest(res, 'Invalid filter');
+    const rows = await Registration.find(filter)
+      .sort({ createdAt: -1 })
+      .limit(5000)
+      .populate('eventId', 'title type date city');
+    const header = [
+      'Registered at', 'Event', 'Category', 'Name', 'Email', 'WhatsApp', 'Student ID', 'University',
+      'Ticket', 'Quantity', 'Amount (PKR)', 'Payment status', 'Method', 'Transaction ID', 'Receipt',
+      'Reviewed at', 'Reject reason', 'Answers',
+    ];
+    const lines = [header.map(csvCell).join(',')];
+    for (const reg of rows) {
+      const row = adminRow(reg);
+      const answers = row.answers || {};
+      const other = Object.entries(answers)
+        .filter(([k]) => k !== 'university')
+        .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(' / ') : v}`)
+        .join('; ');
+      lines.push([
+        row.createdAt ? new Date(row.createdAt).toISOString() : '',
+        row.eventTitle,
+        row.event?.type || '',
+        row.studentName,
+        row.email,
+        row.whatsapp,
+        row.studentId,
+        answers.university || '',
+        row.ticket?.tier || '',
+        row.ticket?.quantity || row.seats || '',
+        row.payment.amount || 0,
+        row.payment.status,
+        row.payment.method || '',
+        row.payment.transactionId || '',
+        row.payment.receiptUrl || '',
+        row.payment.reviewedAt ? new Date(row.payment.reviewedAt).toISOString() : '',
+        row.payment.rejectReason || '',
+        other,
+      ].map(csvCell).join(','));
+    }
+    res.set('Content-Type', 'text/csv; charset=utf-8');
+    res.set('Content-Disposition', `attachment; filename="registrations-${new Date().toISOString().slice(0, 10)}.csv"`);
+    res.send('﻿' + lines.join('\r\n'));
+  } catch (err) {
+    console.error('Registrations CSV error:', err);
+    res.status(500).json({ message: 'Failed to export registrations', error: 'Failed to export registrations' });
+  }
+});
 
 // ============================================================
 // PAYMENT INFO (signed in): fee, tier prices, payment accounts, seats left.
