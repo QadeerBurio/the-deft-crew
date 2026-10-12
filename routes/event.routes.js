@@ -9,6 +9,7 @@ const eventAggregator = require('../services/events/eventAggregator');
 const eventCleanup = require('../services/events/eventCleanup');
 const { importEventsToDatabase } = require('../services/events/csvImporter');
 const { track } = require('../services/engagement');
+const { publicTemplates } = require('../config/eventCategories');
 
 // ============================================================
 // HELPERS
@@ -573,6 +574,14 @@ router.get('/my-registrations/details', auth, requireUser, async (req, res) => {
     console.error('Fetch user registrations details error:', err);
     res.status(500).json({ error: 'Failed to fetch your registrations' });
   }
+});
+
+// ============================================================
+// CATEGORY TEMPLATES (public): create fields + registration fields per category
+// ============================================================
+router.get('/category-templates', (req, res) => {
+  res.set('Cache-Control', 'public, max-age=300');
+  res.json(publicTemplates());
 });
 
 // ============================================================
