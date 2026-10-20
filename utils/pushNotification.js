@@ -12,10 +12,8 @@
 
 const { Expo } = require('expo-server-sdk');
 const User = require('../models/User');
-
-const expo = new Expo(
-  process.env.EXPO_ACCESS_TOKEN ? { accessToken: process.env.EXPO_ACCESS_TOKEN } : {}
-);
+// two EAS projects: each project's batch is sent with its own access token
+const { sendByProject, getReceipts, projectOfEntries } = require('./expoProjects');
 
 // Public base URL of this backend. Mood PNGs are served at /assets/dots/<mood>.png
 const PUBLIC_BASE_URL = (
@@ -248,40 +246,28 @@ function buildMessage(token, { title, body, data, soundName, channelId, iconUrl 
 // ═══════════════════════════════════════════════════════════════
 
 // ═══════════════════════════════════════════════════════════════
-// SAFE SEND: Expo rejects a whole request when one user has tokens from
-// different Expo projects (Expo Go + APK) → PUSH_TOO_MANY_EXPERIENCE_IDS.
-// Split by project, else retry one by one. One ticket per message, in order.
+// SAFE SEND (utils/expoProjects.js): phones come from two EAS projects. Each project's
+// batch goes with its own access token; mixed batches are split by project. One ticket
+// per message, in order. Projects learned from Expo are stored on the token entry.
 // ═══════════════════════════════════════════════════════════════
-async function sendChunkSafe(client, chunk) {
-  try {
-    return await client.sendPushNotificationsAsync(chunk);
-  } catch (err) {
-    if (err.code === 'PUSH_TOO_MANY_EXPERIENCE_IDS' && err.details && typeof err.details === 'object') {
-      console.warn('[push] tokens from several Expo projects, sending per project');
-      const byToken = new Map();
-      for (const tokens of Object.values(err.details)) {
-        const group = chunk.filter((m) => tokens.includes(m.to));
-        if (!group.length) continue;
-        const res = await sendChunkSafe(client, group);
-        group.forEach((m, i) => byToken.set(m.to, res[i]));
-      }
-      return chunk.map((m) => byToken.get(m.to) || { status: 'error', message: 'not sent', details: { error: 'PUSH_TOO_MANY_EXPERIENCE_IDS' } });
-    }
-    if (chunk.length > 1) {
-      const out = [];
-      for (const m of chunk) out.push(...(await sendChunkSafe(client, [m])));
-      return out;
-    }
-    console.error('[push] send failed:', err.code || '', err.statusCode || '', err.message);
-    return [{ status: 'error', message: err.message, details: { error: err.code || (err.statusCode === 401 ? 'UNAUTHORIZED' : 'SEND_FAILED') } }];
-  }
+
+// store what Expo told us, so the next send knows the project (never throws)
+function rememberProjects(learned) {
+  const entries = Object.entries(learned || {});
+  if (!entries.length) return;
+  // inside a promise: nothing here can break the send that just happened
+  Promise.resolve()
+    .then(() => Promise.all(entries.map(([token, projectId]) =>
+      User.updateMany({ 'pushTokens.token': token }, { $set: { 'pushTokens.$.projectId': projectId } })
+    )))
+    .then(() => console.log(`[push] learned the project of ${entries.length} device(s)`))
+    .catch((e) => console.warn('[push] could not store learned projects:', e.message));
 }
 
-async function sendAllSafe(client, messages) {
-  const tickets = [];
-  for (const chunk of client.chunkPushNotifications(messages)) {
-    tickets.push(...(await sendChunkSafe(client, chunk)));
-  }
+// (client is ignored: kept so older callers keep working)
+async function sendAllSafe(client, messages, projectOf = {}) {
+  const { tickets, learned } = await sendByProject(messages, projectOf);
+  rememberProjects(learned);
   return tickets;
 }
 
@@ -293,7 +279,7 @@ const PUSH_ERROR_REASONS = {
   MessageTooBig: 'payload over 4 KB → shorten title / body / data',
   MessageRateExceeded: 'too many pushes to this device right now → skipped, try later',
   PUSH_TOO_MANY_EXPERIENCE_IDS: 'tokens from several Expo projects in one request → sent per project',
-  UNAUTHORIZED: 'EXPO_ACCESS_TOKEN is missing or from another Expo account (config)',
+  UNAUTHORIZED: "Expo refused the access token for this phone's EAS project (config: EXPO_ACCESS_TOKEN_<first 8 of the project id> or EXPO_ACCESS_TOKEN from the account that owns it)",
   SEND_FAILED: 'Expo did not accept the request (network or Expo outage)',
 };
 const describePushError = (code, message) => PUSH_ERROR_REASONS[code] || message || code || 'unknown error';
@@ -307,7 +293,8 @@ async function handleTickets(messages, tickets, userId = null, tag = '[push]') {
   tickets.forEach((ticket, i) => {
     const token = messages[i]?.to;
     if (ticket?.status === 'ok') {
-      if (ticket.id) ok.push({ id: ticket.id, token });
+      // the project travels with the ticket: its receipt is asked with that project's token
+      if (ticket.id) ok.push({ id: ticket.id, token, projectId: ticket.projectId });
       return;
     }
     const code = ticket?.details?.error || 'SEND_FAILED';
@@ -327,21 +314,23 @@ async function handleTickets(messages, tickets, userId = null, tag = '[push]') {
 
 async function checkReceiptsFor(okPairs, userId, tag = '[push]') {
   const dead = new Set();
-  for (const ids of expo.chunkPushNotificationReceiptIds(okPairs.map((p) => p.id))) {
-    let receipts = {};
-    try {
-      receipts = await expo.getPushNotificationReceiptsAsync(ids);
-    } catch (err) {
-      console.warn(`${tag} receipts not available:`, err.message);
-      continue;
-    }
-    for (const [id, receipt] of Object.entries(receipts)) {
-      if (receipt?.status !== 'error') continue;
-      const pair = okPairs.find((p) => p.id === id);
-      const code = receipt.details?.error || 'SEND_FAILED';
-      console.warn(`${tag} ✗ not delivered → user ${userId || '?'} device ${shortToken(pair?.token)} | ${code}: ${describePushError(code, receipt.message)}`);
-      if (code === 'DeviceNotRegistered' && pair?.token) dead.add(pair.token);
-    }
+  let receipts = {};
+  try {
+    // receipts from both projects: each ticket asked with its own project's token
+    receipts = await getReceipts(
+      okPairs.map((p) => p.id),
+      Object.fromEntries(okPairs.map((p) => [p.id, p.projectId]))
+    );
+  } catch (err) {
+    console.warn(`${tag} receipts not available:`, err.message);
+    return;
+  }
+  for (const [id, receipt] of Object.entries(receipts)) {
+    if (receipt?.status !== 'error') continue;
+    const pair = okPairs.find((p) => p.id === id);
+    const code = receipt.details?.error || 'SEND_FAILED';
+    console.warn(`${tag} ✗ not delivered → user ${userId || '?'} device ${shortToken(pair?.token)} | ${code}: ${describePushError(code, receipt.message)}`);
+    if (code === 'DeviceNotRegistered' && pair?.token) dead.add(pair.token);
   }
   await removeDeadTokens([...dead], userId, tag);
 }
@@ -358,8 +347,9 @@ async function removeDeadTokens(tokens, userId, tag = '[push]') {
   }
 }
 
-async function sendMessages(messages, userIdForCleanup = null) {
-  const tickets = await sendAllSafe(expo, messages);
+async function sendMessages(messages, userIdForCleanup = null, projectOf = {}) {
+  // each EAS project with its own access token; projects learned here are stored
+  const tickets = await sendAllSafe(null, messages, projectOf);
   await handleTickets(messages, tickets, userIdForCleanup, '[push]');
   return tickets.map((ticket, i) => ({ ticket, token: messages[i]?.to }));
 }
@@ -439,7 +429,7 @@ const sendToUser = async (userId, title, body, extraData = {}) => {
     );
 
     console.log(`[push] → user ${userId}: ${tokens.length} device(s)`, { title, type, channelId });
-    const pairs = await sendMessages(messages, userId);
+    const pairs = await sendMessages(messages, userId, projectOfEntries(entries));
     const ok = pairs.filter((p) => p.ticket.status === 'ok').length;
     return { sent: ok > 0, count: ok };
   } catch (err) {
@@ -460,7 +450,9 @@ const sendPushNotification = async (targetToken, title, body, extraData = {}) =>
     title: titleWithEmoji(title, mood), body, data, soundName: soundKey, channelId, iconUrl,
   });
 
-  const pairs = await sendMessages([message]);
+  // the stored project of this token, if the app sent one
+  const owner = await User.findOne({ 'pushTokens.token': targetToken }, { 'pushTokens.$': 1 }).lean().catch(() => null);
+  const pairs = await sendMessages([message], null, projectOfEntries(owner?.pushTokens));
   const ok = pairs.some((p) => p.ticket.status === 'ok');
   return ok ? { sent: true } : { sent: false, reason: 'send_failed' };
 };

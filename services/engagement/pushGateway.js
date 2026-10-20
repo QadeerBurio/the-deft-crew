@@ -7,7 +7,8 @@ const cfg = require('../../config/engagement.config');
 const { dayKey, weekKey, isQuietHour } = require('../../utils/karachiTime');
 const copy = require('./copy');
 
-const expo = new Expo(process.env.EXPO_ACCESS_TOKEN ? { accessToken: process.env.EXPO_ACCESS_TOKEN } : {});
+// each EAS project is sent with its own access token (utils/expoProjects.js)
+const { getReceipts, projectOfEntries } = require('../../utils/expoProjects');
 
 const { iconUrlForMood, titleWithEmoji, resolveSoundKey, channelForToken, sendAllSafe, featureMood, handleTickets, safeSoundKey, describePushError } = require('../../utils/pushNotification');
 
@@ -100,7 +101,7 @@ async function send(userId, msg) {
     const ticketMessages = [];
     try {
       {
-        const tickets = await sendAllSafe(expo, messages);
+        const tickets = await sendAllSafe(null, messages, projectOfEntries(entries));
         for (const ticket of tickets) {
           if (ticket.status === 'error') {
             ticketErrors.push(ticket.details?.error || 'SEND_FAILED');
@@ -232,7 +233,7 @@ async function checkReceipts() {
     const ticketIds = logs.map((l) => l.ticketId).filter(Boolean);
     if (ticketIds.length === 0) return { checked: 0 };
 
-    const receipts = await expo.getPushNotificationReceiptsAsync(ticketIds);
+    const receipts = await getReceipts(ticketIds);
     let ok = 0;
     let errCount = 0;
     const deadTokens = new Set();
