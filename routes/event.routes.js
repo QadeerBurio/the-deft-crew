@@ -838,6 +838,47 @@ router.patch('/registrations/:id/payment', auth, isAdmin, async (req, res) => {
 const NO_REG = { message: 'Registration not found', error: 'Registration not found' };
 const isAdminReq = (req) => (req.user?.role || req.userRole) === 'admin';
 
+// Public ticket page (the email's "download ticket"): read-only, only ticket fields.
+// Limited per visitor: Railway's proxy adds the visitor's address last in X-Forwarded-For
+// ("trust proxy" is not set, so req.ip would be the proxy for everyone).
+const { rateLimit } = require('express-rate-limit');
+const ticketPageLimit = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 30,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  validate: false,
+  keyGenerator: (req) => String(req.headers['x-forwarded-for'] || '').split(',').pop().trim() || req.ip || 'unknown',
+  handler: (req, res) => res.status(429).type('text/plain').send('too many requests. try again in a minute.'),
+});
+const pageHeaders = (res, nonce) => {
+  res.set('Cache-Control', 'no-store');
+  res.set('X-Robots-Tag', 'noindex, nofollow');
+  res.set('Referrer-Policy', 'no-referrer');
+  res.set('X-Content-Type-Options', 'nosniff');
+  res.set('Content-Security-Policy', `default-src 'none'; style-src 'unsafe-inline'; img-src data:; script-src 'nonce-${nonce}'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`);
+};
+
+router.get('/ticket/:token', ticketPageLimit, async (req, res) => {
+  const nonce = require('crypto').randomBytes(16).toString('base64');
+  pageHeaders(res, nonce);
+  try {
+    const found = await tickets.findByPageToken(req.params.token);
+    // unknown, malformed, or the registration is gone: the same page, no details
+    if (!found) return res.status(404).type('html').send(tickets.ticketNotFoundHtml());
+    const { reg, seat } = found;
+    const event = await Event.findById(reg.eventId).select('title type date location city organizer details');
+    const view = tickets.ticketView(reg, event);
+    // payment rejected / pending again: the ticket is not usable
+    view.revoked = !tickets.hasTicketRight(reg);
+    const s = view.tickets.find((t) => t.code === seat.code) || { ...seat, status: seat.status };
+    res.status(200).type('html').send(tickets.ticketPageHtml(view, s, { nonce }));
+  } catch (err) {
+    console.error('Ticket page error:', err.message);
+    res.status(500).type('text/plain').send('could not open the ticket. try again later.');
+  }
+});
+
 router.get('/registrations/:id/ticket', auth, requireUser, async (req, res) => {
   try {
     if (!isObjectId(req.params.id)) return res.status(404).json(NO_REG);
@@ -905,8 +946,10 @@ router.post('/registrations/:id/tickets/resend', auth, isAdmin, async (req, res)
     const words = { sent: 'sent', no_token: 'no phone signed in', no_email: 'no email on the registration', failed: 'failed', pref_off: 'turned off by the student' };
     const parts = [];
     if (push) parts.push(`push: ${words[result.push] || result.push || 'not sent'}`);
-    if (email) parts.push(`email: ${words[result.email] || result.email || 'not sent'}`);
-    res.json({ success: true, message: parts.join(' · '), result });
+    if (email) parts.push(`email: ${words[result.email] || result.email || 'not sent'}${result.emailError ? ` (${result.emailError})` : ''}`);
+    const fresh = await Registration.findById(reg._id);
+    // links: each seat's ticket page, for the admin to copy
+    res.json({ success: true, message: parts.join(' · '), result, links: result.links || [], registration: fresh ? adminRow(fresh) : undefined });
   } catch (err) {
     console.error('Ticket resend error:', err);
     res.status(500).json({ message: 'Could not send the ticket', error: 'Could not send the ticket' });
@@ -959,7 +1002,13 @@ router.get('/registrations/:eventId', auth, requireUser, async (req, res) => {
       eventId: req.params.eventId,
     }).sort({ createdAt: -1 });
 
-    res.json(registrations);
+    // ticket page links open someone's ticket: only admins get them here
+    if (isAdminReq(req)) return res.json(registrations);
+    res.json(registrations.map((r) => {
+      const o = r.toJSON();
+      if (Array.isArray(o.tickets)) o.tickets = o.tickets.map(({ pageToken, ...t }) => t);
+      return o;
+    }));
   } catch (err) {
     console.error('Fetch registrations error:', err);
     res.status(500).json({ error: 'Failed to fetch registrations' });

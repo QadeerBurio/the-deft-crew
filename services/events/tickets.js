@@ -7,6 +7,7 @@
 //   deliverTickets(reg, opts) in-app record + push (opens the ticket) + email (Resend)
 //   ticketView(reg, event)    what the app / email show (missing fields left out)
 //   backfillTickets(opts)     old verified registrations; dry run unless apply; sends nothing
+//   ticketPageHtml(view, seat) the public ticket page (GET /api/events/ticket/:pageToken)
 
 const crypto = require('crypto');
 const QRCode = require('qrcode');
@@ -22,6 +23,11 @@ const newTicketCode = () => `TDC-${block()}-${block()}`;
 const TICKET_CODE_RE = /^TDC-[2-9A-HJ-NP-Z]{4}-[2-9A-HJ-NP-Z]{4}$/;
 const MAX_SEATS = 50; // per registration (the form already caps it far lower)
 const CODE_TRIES = 5;
+// the ticket page link: 32 random bytes (43 url-safe characters), never the ticket code
+const newPageToken = () => crypto.randomBytes(32).toString('base64url');
+const PAGE_TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;
+const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || 'https://the-deft-crew-production.up.railway.app').replace(/\/$/, '');
+const ticketPageUrl = (pageToken) => `${PUBLIC_BASE_URL}/api/events/ticket/${pageToken}`;
 
 // old registrations have no payment object: they count as not_required (free)
 const paymentStatus = (reg) => reg?.payment?.status || 'not_required';
@@ -29,7 +35,7 @@ const hasTicketRight = (reg) => ['verified', 'not_required'].includes(paymentSta
 const RIGHT_FILTER = { 'payment.status': { $in: ['verified', 'not_required', null] } };
 
 const isCodeClash = (err) =>
-  err?.code === 11000 && /tickets\.code/.test(`${JSON.stringify(err.keyPattern || {})} ${err.message || ''}`);
+  err?.code === 11000 && /tickets\.(code|pageToken)/.test(`${JSON.stringify(err.keyPattern || {})} ${err.message || ''}`);
 
 /**
  * Creates the tickets of one registration, once. The update only matches a registration that
@@ -54,6 +60,7 @@ async function issueTickets(registrationId) {
       tier: reg.ticket?.tier || undefined,
       status: 'valid',
       issuedAt,
+      pageToken: newPageToken(),
     }));
 
     try {
@@ -105,8 +112,11 @@ const real = (v) => {
 };
 const isUrl = (v) => /^https?:\/\/\S+$/i.test(String(v || '').trim());
 
-/** Plain data for the app and the email. Missing fields are left out, never invented. */
-function ticketView(reg, event) {
+/**
+ * Plain data for the app, the email and the ticket page. Missing fields are left out, never
+ * invented. links: true adds each seat's page link (email / admin only, not the app).
+ */
+function ticketView(reg, event, { links = false } = {}) {
   const r = typeof reg.toObject === 'function' ? reg.toObject() : reg;
   const ev = event && typeof event.toObject === 'function' ? event.toObject() : event || {};
   const details = ev.details && typeof ev.details === 'object' ? ev.details : {};
@@ -138,6 +148,7 @@ function ticketView(reg, event) {
       of: t.of || null,
       tier: real(t.tier),
       status: t.status || 'valid',
+      ...(links && t.pageToken ? { pageUrl: ticketPageUrl(t.pageToken) } : {}),
     })),
   };
   // drop missing fields so the app hides them
@@ -190,6 +201,7 @@ function ticketEmailHtml(view) {
           <div style="margin:14px auto;padding:12px;background:#ffffff;display:inline-block;${cancelled ? 'opacity:0.25;' : ''}">${qrTableHtml(t.code)}</div>
           <div style="font-family:Consolas,Menlo,monospace;font-size:20px;font-weight:700;letter-spacing:2px;color:#111111">${esc(t.code)}</div>
           ${cancelled ? '<div style="margin-top:8px;color:#B42318;font-weight:700">cancelled</div>' : ''}
+          ${!cancelled && t.pageUrl ? `<div style="margin-top:16px"><a href="${esc(t.pageUrl)}" style="display:inline-block;background:#111111;color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;padding:12px 22px;border-radius:12px">download ticket</a></div>` : ''}
         </td></tr>
       </table>`;
   }).join('');
@@ -216,7 +228,7 @@ function ticketEmailHtml(view) {
         </table>
       </td></tr>
       <tr><td>${cards}</td></tr>
-      <tr><td style="padding:8px 4px;color:#6B675E;font-size:12px">this ticket is also in the tdc app: events → mine → my ticket. the qr holds the ticket code only.</td></tr>
+      <tr><td style="padding:8px 4px;color:#6B675E;font-size:12px">this ticket is also in the tdc app: events → mine → download ticket. "download ticket" opens a page you can save as pdf or print. don't forward this email: the link opens your ticket. the qr holds the ticket code only.</td></tr>
     </table>
   </td></tr></table></body></html>`;
 }
@@ -248,12 +260,15 @@ const pushData = (view) => ({
  *   email: true   → ticket email (the existing mailer: Resend on Railway)
  */
 async function deliverTickets(registrationId, { record = false, push = true, email = true } = {}) {
-  const out = { push: null, email: null };
+  const out = { push: null, email: null, emailError: null, links: [] };
   try {
+    // tickets issued before page links existed get theirs now
+    await ensurePageTokens(registrationId);
     const reg = await Registration.findById(registrationId);
     if (!reg || !reg.tickets?.length || !hasTicketRight(reg)) return { ...out, skipped: 'no_ticket' };
     const event = await Event.findById(reg.eventId).select('title type date location city organizer details');
-    const view = ticketView(reg, event);
+    const view = ticketView(reg, event, { links: true });
+    out.links = view.tickets.filter((t) => t.pageUrl).map((t) => ({ code: t.code, status: t.status, url: t.pageUrl }));
     const valid = view.tickets.filter((t) => t.status === 'valid');
     if (!valid.length) return { ...out, skipped: 'all_cancelled' };
     const delivery = {};
@@ -283,8 +298,10 @@ async function deliverTickets(registrationId, { record = false, push = true, ema
     }
 
     if (email) {
+      delivery['ticketDelivery.emailTriedAt'] = new Date();
       if (!reg.email) {
         out.email = 'no_email';
+        delivery['ticketDelivery.emailStatus'] = 'no_email';
       } else {
         try {
           await sendMail({
@@ -293,12 +310,17 @@ async function deliverTickets(registrationId, { record = false, push = true, ema
             html: ticketEmailHtml(view),
           });
           out.email = 'sent';
+          delivery['ticketDelivery.emailStatus'] = 'sent';
           delivery['ticketDelivery.emailedAt'] = new Date();
           delivery['ticketDelivery.emailError'] = undefined;
         } catch (e) {
+          // never blocks the ticket: stored for the admin (who can re-send) and logged in words
+          const reason = describeMailError(e);
           out.email = 'failed';
-          delivery['ticketDelivery.emailError'] = String(e.message || 'failed').slice(0, 300);
-          console.warn('[tickets] email failed:', e.message);
+          out.emailError = reason;
+          delivery['ticketDelivery.emailStatus'] = 'failed';
+          delivery['ticketDelivery.emailError'] = reason;
+          console.warn(`[tickets] ticket email not sent → registration ${reg._id}: ${reason}`);
         }
       }
     }
@@ -318,6 +340,148 @@ async function deliverTickets(registrationId, { record = false, push = true, ema
   }
   return out;
 }
+
+// The mail error in words for the log and the admin (no keys, no raw provider dumps)
+function describeMailError(err) {
+  const m = String(err?.message || '');
+  if (/No email provider configured/i.test(m)) return 'email is not set up on the server (no RESEND_API_KEY)';
+  if (/EMAIL_FROM is not set/i.test(m)) return 'the From address is not set on the server (EMAIL_FROM)';
+  if (/domain.*(not verified|verify)|not verified/i.test(m)) return 'the From domain is not verified with the mail service';
+  if (/\b(401|403)\b|api key|unauthori[sz]ed|forbidden/i.test(m)) return 'the mail service refused the API key';
+  if (/\b429\b|rate limit|too many/i.test(m)) return 'the mail service is limiting sends right now; re-send later';
+  if (/\b422\b|invalid.*(to|email|address)/i.test(m)) return 'the email address was refused by the mail service';
+  if (/timeout|ETIMEDOUT|ECONNRESET|ENOTFOUND|EAI_AGAIN|socket hang up/i.test(m)) return 'the mail service did not answer in time';
+  return `the mail service did not accept the email${m ? ` (${m.replace(/\s+/g, ' ').slice(0, 160)})` : ''}`;
+}
+
+/**
+ * Every ticket of a registration gets its page token (tickets issued before page links
+ * existed). One update per seat, only where the token is still missing: never overwrites a
+ * token or a ticket's status. Returns how many were added.
+ */
+async function ensurePageTokens(registrationId) {
+  const reg = await Registration.findById(registrationId);
+  if (!reg?.tickets?.length) return 0;
+  let added = 0;
+  for (let i = 0; i < reg.tickets.length; i++) {
+    const t = reg.tickets[i];
+    if (t.pageToken) continue;
+    for (let attempt = 0; attempt < CODE_TRIES; attempt++) {
+      try {
+        const r = await Registration.updateOne(
+          { _id: reg._id, [`tickets.${i}.code`]: t.code, [`tickets.${i}.pageToken`]: { $exists: false } },
+          { $set: { [`tickets.${i}.pageToken`]: newPageToken() } }
+        );
+        if (r?.modifiedCount) added++;
+        break;
+      } catch (err) {
+        if (!isCodeClash(err)) throw err;
+      }
+    }
+  }
+  return added;
+}
+
+/** The registration and seat behind a ticket page token, or null. */
+async function findByPageToken(pageToken) {
+  if (!PAGE_TOKEN_RE.test(String(pageToken || ''))) return null;
+  const reg = await Registration.findOne({ 'tickets.pageToken': pageToken });
+  const seat = reg?.tickets?.find((t) => t.pageToken === pageToken);
+  return reg && seat ? { reg, seat } : null;
+}
+
+// QR as inline SVG (one square per dark module; prints sharp, no image request)
+function qrSvg(text) {
+  const { modules } = QRCode.create(text, { errorCorrectionLevel: 'M' });
+  const n = modules.size;
+  let d = '';
+  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) if (modules.get(y, x)) d += `M${x} ${y}h1v1h-1z`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${n} ${n}" shape-rendering="crispEdges"><rect width="${n}" height="${n}" fill="#ffffff"/><path fill="#111111" d="${d}"/></svg>`;
+}
+
+// ── the public ticket page (print / save as pdf) ──────────────
+// Only ticket fields: no email, phone, receipt, transaction id or payment accounts.
+function ticketPageHtml(view, seat, { nonce = '' } = {}) {
+  const ev = view.event || {};
+  const off = seat.status !== 'valid' || view.revoked;
+  const stateLine = seat.status === 'used' ? 'this ticket was already used' : 'this ticket was cancelled';
+  const seatLabel = seat.of > 1 ? `seat ${seat.seat} of ${seat.of}` : 'admit one';
+  const rows = [
+    ['date', ev.date],
+    ['time', ev.time],
+    [ev.venue ? 'venue' : 'city', [ev.venue, ev.city].filter(Boolean).join(', ')],
+    ['online', ev.onlineLink],
+    ['name', view.attendee],
+    ['ticket', [seat.tier || view.tier, seatLabel].filter(Boolean).join(' · ').toLowerCase()],
+    [view.paymentStatus === 'paid' ? 'paid' : 'price', view.paymentStatus === 'paid' ? `${formatPkr(view.amountPaid)} · paid` : 'free'],
+  ].filter(([, v]) => v);
+  const qr = off ? '' : qrSvg(seat.code);
+  const title = ev.title ? String(ev.title).toLowerCase() : 'your ticket';
+
+  return `<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow"><meta name="referrer" content="no-referrer">
+<title>${esc(off ? 'ticket cancelled' : `ticket · ${title}`)}</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;background:#FAF8F3;color:#111111;font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .wrap{max-width:440px;margin:0 auto;padding:24px 16px 40px}
+  .card{background:#fff;border:1px solid #ECE7DB;border-radius:22px;overflow:hidden;break-inside:avoid;page-break-inside:avoid}
+  .top{background:#111111;color:#fff;padding:22px}
+  .row1{display:flex;justify-content:space-between;align-items:center;gap:12px}
+  .logo{background:#F9C349;color:#111111;font-weight:800;font-size:17px;padding:5px 11px;border-radius:10px}
+  .cat{color:#F9C349;font-size:13px;font-weight:600}
+  h1{font-size:25px;line-height:1.2;margin:16px 0 0;font-weight:800;overflow-wrap:anywhere}
+  h1 span{color:#F9C349}
+  .pill{display:inline-block;margin-top:12px;font-size:12px;font-weight:700;border-radius:999px;padding:3px 10px;background:#E3F3E8;color:#1E6B3A}
+  .pill.free{background:#FFF1CC;color:#111111}
+  .perf{border-top:2px dashed #ECE7DB;margin:0 18px}
+  .body{padding:18px 22px 24px}
+  dl{display:grid;grid-template-columns:72px 1fr;gap:8px 12px;margin:0;font-size:14px}
+  dt{color:#6B675E}
+  dd{margin:0;font-weight:600;overflow-wrap:anywhere}
+  .qr{width:200px;height:200px;margin:22px auto 0;padding:12px;border:1px solid #ECE7DB;border-radius:16px;background:#fff}
+  .qr svg{width:100%;height:100%;display:block}
+  .code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:22px;font-weight:700;letter-spacing:3px;text-align:center;margin-top:14px}
+  .off{margin-top:18px;text-align:center;color:#B42318;font-weight:800;font-size:18px}
+  .note{color:#6B675E;font-size:12.5px;text-align:center;margin-top:16px}
+  .btn{display:block;width:100%;margin-top:18px;background:#111111;color:#fff;border:0;border-radius:14px;padding:15px;font-size:16px;font-weight:700;cursor:pointer}
+  .btn:focus-visible{outline:3px solid #F9C349;outline-offset:2px}
+  @page{size:A5 portrait;margin:12mm}
+  @media print{
+    body{background:#fff}
+    .wrap{padding:0;max-width:none}
+    .btn,.note.screen{display:none}
+    .card{border-color:#ccc}
+  }
+</style></head>
+<body><main class="wrap">
+  <article class="card" aria-label="ticket">
+    <div class="top">
+      <div class="row1"><span class="logo">tdc.</span>${ev.category ? `<span class="cat">${esc(String(ev.category).toLowerCase())}</span>` : ''}</div>
+      <h1>${esc(title)}<span>.</span></h1>
+      ${off ? '' : `<span class="pill ${view.paymentStatus === 'paid' ? '' : 'free'}">${view.paymentStatus === 'paid' ? 'paid' : 'free'}</span>`}
+    </div>
+    <div class="perf" aria-hidden="true"></div>
+    <div class="body">
+      ${off
+        ? `<p class="off" role="status">${esc(stateLine)}</p><p class="note">it won't get you in. open the tdc app for your current tickets.</p>`
+        : `<dl>${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl>
+      <div class="qr" role="img" aria-label="qr code for ${esc(seat.code)}">${qr}</div>
+      <div class="code">${esc(seat.code)}</div>
+      <p class="note">show this qr or the code at the door.</p>`}
+    </div>
+  </article>
+  ${off ? '' : `<button class="btn" id="print" type="button">download / print</button>
+  <p class="note screen">choose "save as pdf" in the print dialog to keep a copy.</p>
+  <script nonce="${esc(nonce)}">document.getElementById('print').addEventListener('click',function(){window.print()});</script>`}
+</main></body></html>`;
+}
+
+const ticketNotFoundHtml = () => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>ticket not found</title>
+<style>body{margin:0;background:#FAF8F3;color:#111;font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}main{max-width:440px;margin:0 auto;padding:64px 16px;text-align:center}b{background:#F9C349;padding:5px 11px;border-radius:10px}</style></head>
+<body><main><b>tdc.</b><h1 style="font-size:22px;margin-top:24px">ticket not found.</h1><p style="color:#6B675E">check the link in your email, or open the tdc app.</p></main></body></html>`;
 
 /** Issue (if due) and send the first time. For the review / register routes. Never throws. */
 async function issueAndDeliver(registrationId) {
@@ -341,12 +505,29 @@ async function issueAndDeliver(registrationId) {
  */
 async function backfillTickets({ apply = false, includeFree = false, limit = 5000 } = {}) {
   const noTickets = { 'tickets.0': { $exists: false } };
-  const [verified, free] = await Promise.all([
+  // tickets issued before page links existed
+  const noLink = { 'tickets.0': { $exists: true }, tickets: { $elemMatch: { pageToken: { $exists: false } } } };
+  const [verified, free, withoutLink] = await Promise.all([
     Registration.countDocuments({ ...noTickets, 'payment.status': 'verified' }),
     Registration.countDocuments({ ...noTickets, 'payment.status': { $in: ['not_required', null] } }),
+    Registration.countDocuments(noLink),
   ]);
-  const report = { dryRun: !apply, includeFree: !!includeFree, verified, free, wouldIssue: verified + (includeFree ? free : 0), issued: 0, failed: 0 };
+  const report = {
+    dryRun: !apply, includeFree: !!includeFree, verified, free, wouldIssue: verified + (includeFree ? free : 0), issued: 0, failed: 0,
+    registrationsWithoutLink: withoutLink, linksAdded: 0,
+  };
   if (!apply) return report;
+
+  // page links for existing tickets (sends nothing)
+  const linkRows = await Registration.find(noLink).select('_id').limit(limit);
+  for (const row of linkRows) {
+    try {
+      report.linksAdded += await ensurePageTokens(row._id);
+    } catch (e) {
+      report.failed++;
+      console.warn('[tickets] link backfill failed for', String(row._id), e.message);
+    }
+  }
 
   const statuses = includeFree ? ['verified', 'not_required', null] : ['verified'];
   const rows = await Registration.find({ ...noTickets, 'payment.status': { $in: statuses } }).select('_id').limit(limit);
@@ -374,4 +555,11 @@ module.exports = {
   deliverTickets,
   issueAndDeliver,
   backfillTickets,
+  ensurePageTokens,
+  findByPageToken,
+  ticketPageHtml,
+  ticketNotFoundHtml,
+  ticketPageUrl,
+  describeMailError,
+  PAGE_TOKEN_RE,
 };

@@ -171,6 +171,8 @@ const RegistrationSchema = new mongoose.Schema({
       // admin = cancelled by hand; payment_rejected = comes back if the payment is verified again
       cancelReason: { type: String, enum: ['admin', 'payment_rejected'] },
       usedAt: { type: Date },
+      // the public ticket page: GET /api/events/ticket/:pageToken (long random, not the code)
+      pageToken: { type: String },
     }, { _id: false })],
     default: undefined,
   },
@@ -179,6 +181,8 @@ const RegistrationSchema = new mongoose.Schema({
     notifiedAt: { type: Date },
     emailedAt: { type: Date },
     emailError: { type: String, maxlength: 300 },
+    emailStatus: { type: String, enum: ['sent', 'failed', 'no_email'] }, // the last attempt
+    emailTriedAt: { type: Date },
   },
   createdAt: { type: Date, default: Date.now }
 });
@@ -237,6 +241,11 @@ RegistrationSchema.index({ 'payment.status': 1, createdAt: -1 });
 RegistrationSchema.index(
   { 'tickets.code': 1 },
   { unique: true, partialFilterExpression: { 'tickets.code': { $type: 'string' } } }
+);
+// the ticket page link: unique, and only tickets that have one are indexed
+RegistrationSchema.index(
+  { 'tickets.pageToken': 1 },
+  { unique: true, partialFilterExpression: { 'tickets.pageToken': { $type: 'string' } } }
 );
 EventNotificationSchema.index({ creatorId: 1, createdAt: -1 });
 EventNotificationSchema.index({ creatorId: 1, read: 1 });
