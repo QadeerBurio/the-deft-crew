@@ -16,6 +16,14 @@ router.put('/save-token', auth, async (req, res) => {
     }
     const { token, platform, channels } = req.body;
     if (!token) return res.status(400).json({ message: 'Push token required' });
+    // the EAS project the app was built under (new builds send it; old builds don't, and
+    // then a project learned earlier for this token is kept)
+    const { isProjectId } = require('../utils/expoProjects');
+    let projectId = isProjectId(req.body.projectId) ? String(req.body.projectId).toLowerCase() : null;
+    if (!projectId) {
+      const prev = await User.findOne({ 'pushTokens.token': token }, { 'pushTokens.$': 1 }).lean();
+      projectId = isProjectId(prev?.pushTokens?.[0]?.projectId) ? prev.pushTokens[0].projectId : null;
+    }
 
     await User.updateMany(
       { 'pushTokens.token': token },
@@ -31,6 +39,7 @@ router.put('/save-token', auth, async (req, res) => {
             token,
             platform: ['ios', 'android', 'web'].includes(platform) ? platform : 'unknown',
             channels: ['snd_v1', 'snd_v2'].includes(channels) ? channels : 'legacy',
+            ...(projectId ? { projectId } : {}),
             updatedAt: new Date(),
           },
         },
@@ -230,8 +239,9 @@ router.delete('/clear-all', auth, async (req, res) => {
 router.get('/test-push', auth, async (req, res) => {
   try {
     const { Expo } = require('expo-server-sdk');
-    const { buildMessage, iconUrlForMood, resolveSoundKey, channelForToken } = require('../utils/pushNotification');
-    const expo = new Expo(process.env.EXPO_ACCESS_TOKEN ? { accessToken: process.env.EXPO_ACCESS_TOKEN } : {});
+    const { buildMessage, iconUrlForMood, resolveSoundKey, channelForToken, sendAllSafe } = require('../utils/pushNotification');
+    // each EAS project with its own access token
+    const { getReceipts, projectOfEntries } = require('../utils/expoProjects');
 
     const userId = req.userId || req.user?._id || req.user?.id;
     const user = await User.findById(userId).select('pushTokens').lean();
@@ -268,14 +278,15 @@ router.get('/test-push', auth, async (req, res) => {
       });
     const messages = buildFor(SAMPLES[0]);
     // the other 3 follow 4s apart (fire and forget)
+    const projectOf = projectOfEntries(validEntries);
     SAMPLES.slice(1).forEach((sample, i) =>
-      setTimeout(() => expo.sendPushNotificationsAsync(buildFor(sample)).catch(() => {}), (i + 1) * 4000)
+      setTimeout(() => sendAllSafe(null, buildFor(sample), projectOf).catch(() => {}), (i + 1) * 4000)
     );
 
-    const tickets = await expo.sendPushNotificationsAsync(messages);
+    const tickets = await sendAllSafe(null, messages, projectOf);
     await new Promise((r) => setTimeout(r, 6000));
     const ids = tickets.filter((t) => t.id).map((t) => t.id);
-    const receipts = ids.length ? await expo.getPushNotificationReceiptsAsync(ids) : {};
+    const receipts = ids.length ? await getReceipts(ids, Object.fromEntries(tickets.filter((t) => t.id).map((t) => [t.id, t.projectId]))) : {};
 
     const results = tickets.map((t, i) => {
       const receipt = t.id ? receipts[t.id] : null;
@@ -285,10 +296,12 @@ router.get('/test-push', auth, async (req, res) => {
         DeviceNotRegistered: 'Token is dead (app uninstalled/reinstalled). Open the app and log in again.',
         MessageTooBig: 'Payload too large.',
         MismatchSenderId: 'google-services.json Firebase project does not match the FCM key uploaded to EAS.',
+        UNAUTHORIZED: `Expo refused the access token for this phone's project. Set EXPO_ACCESS_TOKEN_${String(t.projectId || '').slice(0, 8).toUpperCase() || '<PROJECT>'} on Railway (a token of the account that owns the project).`,
       };
       return {
         token: valid[i].slice(0, 30) + '…',
         channels: validEntries[i].channels || 'legacy',
+        project: t.projectId ? String(t.projectId).slice(0, 8) : 'unknown',
         ticket: t.status,
         receipt: receipt?.status || (t.id ? 'pending' : null),
         error: err || t.message || receipt?.message || null,

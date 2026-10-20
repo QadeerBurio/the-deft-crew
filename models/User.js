@@ -284,6 +284,8 @@ academicLevel: {
         // Which Android notification channels this app build created:
         // 'snd_v1' = one channel per sound (new builds), 'legacy' = old builds
         channels: { type: String, default: 'legacy' },
+        // EAS project the app was built under (sent by the app, or learned from Expo)
+        projectId: { type: String },
         updatedAt: { type: Date, default: Date.now },
       },
     ],
