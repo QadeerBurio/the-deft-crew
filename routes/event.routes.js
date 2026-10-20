@@ -19,6 +19,7 @@ const {
   checkField,
   isProjectCloudinaryUrl,
 } = require('../services/events/eventValidation');
+const tickets = require('../services/events/tickets');
 
 // ============================================================
 // HELPERS
@@ -591,6 +592,10 @@ router.post('/register', auth, requireUser, async (req, res) => {
     }
     held = null;
 
+    // free event: the ticket is issued now (once) and sent in the background. The reply
+    // stays exactly as before (old builds); the app reads tickets from my-registrations.
+    if (payment.status === 'not_required') await tickets.issueAndDeliver(newReg._id);
+
     if (event.creator) {
       try {
         const notification = new EventNotification({
@@ -787,14 +792,21 @@ router.patch('/registrations/:id/payment', auth, isAdmin, async (req, res) => {
     reg.payment.rejectReason = action === 'reject' ? reason || undefined : undefined;
     const release = action === 'reject' ? reg.seats || 0 : 0;
     if (action === 'reject') reg.seats = 0;
+    // reject cancels the tickets; verifying again brings the same tickets back
+    tickets.applyPaymentToTickets(reg, action);
     await reg.save();
     if (release) await releaseSeats(reg.eventId, release, reg.ticket?.tier);
 
+    // first verify: the tickets are issued (once) and their "ticket is ready" notification
+    // replaces the plain one below
+    let issued = false;
+    if (action === 'verify') issued = (await tickets.issueAndDeliver(reg._id)).issued;
+
     // plain notification for the student (never blocks the review)
     try {
-      const event = await Event.findById(reg.eventId).select('title');
+      const event = issued ? null : await Event.findById(reg.eventId).select('title');
       const title = event?.title || 'your event';
-      await Notification.create({
+      if (!issued) await Notification.create({
         recipient: reg.userId,
         title: action === 'verify' ? 'payment verified' : 'payment not accepted',
         description: action === 'verify'
@@ -808,10 +820,108 @@ router.patch('/registrations/:id/payment', auth, isAdmin, async (req, res) => {
       console.warn('[events] payment notification failed:', e.message);
     }
 
-    res.json({ success: true, message: action === 'verify' ? 'Payment verified' : 'Payment rejected', registration: adminRow(reg) });
+    const fresh = issued ? (await Registration.findById(reg._id)) || reg : reg;
+    res.json({ success: true, message: action === 'verify' ? 'Payment verified' : 'Payment rejected', registration: adminRow(fresh) });
   } catch (err) {
     console.error('Payment review error:', err);
     res.status(500).json({ message: 'Could not update the payment', error: 'Could not update the payment' });
+  }
+});
+
+// ============================================================
+// TICKETS
+// GET  /registrations/:id/ticket               owner or admin
+// PATCH /registrations/:id/tickets/:code        admin { action: "cancel" | "restore" }
+// POST /registrations/:id/tickets/resend        admin { email, push } (no new in-app record)
+// POST /admin/tickets/backfill                  admin { apply, includeFree } (sends nothing)
+// ============================================================
+const NO_REG = { message: 'Registration not found', error: 'Registration not found' };
+const isAdminReq = (req) => (req.user?.role || req.userRole) === 'admin';
+
+router.get('/registrations/:id/ticket', auth, requireUser, async (req, res) => {
+  try {
+    if (!isObjectId(req.params.id)) return res.status(404).json(NO_REG);
+    const reg = await Registration.findById(req.params.id);
+    // someone else's registration: same answer as a missing one (ids are not confirmed)
+    if (!reg || (String(reg.userId) !== String(getUserId(req)) && !isAdminReq(req))) return res.status(404).json(NO_REG);
+    const status = reg.payment?.status || 'not_required';
+    if (!tickets.hasTicketRight(reg) || !reg.tickets?.length) {
+      const msg = status === 'pending' ? 'your ticket comes when the payment is verified.'
+        : status === 'rejected' ? "the payment wasn't accepted, so there is no ticket."
+          : 'no ticket for this registration yet.';
+      return res.status(404).json({ message: msg, error: msg, noTicket: true, paymentStatus: status });
+    }
+    const event = await Event.findById(reg.eventId).select('title type date location city organizer details');
+    res.set('Cache-Control', 'no-store');
+    res.json({ success: true, ticket: tickets.ticketView(reg, event) });
+  } catch (err) {
+    console.error('Ticket error:', err);
+    res.status(500).json({ message: 'Could not load the ticket', error: 'Could not load the ticket' });
+  }
+});
+
+router.patch('/registrations/:id/tickets/:code', auth, isAdmin, async (req, res) => {
+  try {
+    const action = String(req.body?.action || '');
+    if (action !== 'cancel' && action !== 'restore') return badRequest(res, 'action must be "cancel" or "restore"');
+    if (!isObjectId(req.params.id)) return res.status(404).json(NO_REG);
+    const reg = await Registration.findById(req.params.id);
+    if (!reg) return res.status(404).json(NO_REG);
+    const code = String(req.params.code || '').trim().toUpperCase();
+    const t = (reg.tickets || []).find((x) => x.code === code);
+    if (!t) return res.status(404).json({ message: 'Ticket not found', error: 'Ticket not found' });
+    if (action === 'cancel') {
+      if (t.status === 'cancelled') return badRequest(res, 'This ticket is already cancelled.');
+      t.status = 'cancelled';
+      t.cancelReason = 'admin';
+      t.cancelledAt = new Date();
+    } else {
+      if (t.status !== 'cancelled') return badRequest(res, 'This ticket is not cancelled.');
+      if (!tickets.hasTicketRight(reg)) return badRequest(res, 'Verify the payment first.');
+      t.status = 'valid';
+      t.cancelReason = undefined;
+      t.cancelledAt = undefined;
+    }
+    reg.markModified('tickets');
+    await reg.save();
+    res.json({ success: true, message: action === 'cancel' ? 'Ticket cancelled' : 'Ticket restored', registration: adminRow(reg) });
+  } catch (err) {
+    console.error('Ticket update error:', err);
+    res.status(500).json({ message: 'Could not update the ticket', error: 'Could not update the ticket' });
+  }
+});
+
+router.post('/registrations/:id/tickets/resend', auth, isAdmin, async (req, res) => {
+  try {
+    if (!isObjectId(req.params.id)) return res.status(404).json(NO_REG);
+    const reg = await Registration.findById(req.params.id);
+    if (!reg) return res.status(404).json(NO_REG);
+    if (!tickets.hasTicketRight(reg) || !reg.tickets?.length) return badRequest(res, 'This registration has no ticket.');
+    if (!reg.tickets.some((t) => t.status === 'valid')) return badRequest(res, 'All tickets of this registration are cancelled.');
+    const email = req.body?.email !== false;
+    const push = req.body?.push !== false;
+    if (!email && !push) return badRequest(res, 'Choose email, push or both.');
+    const result = await tickets.deliverTickets(reg._id, { record: false, email, push });
+    const words = { sent: 'sent', no_token: 'no phone signed in', no_email: 'no email on the registration', failed: 'failed', pref_off: 'turned off by the student' };
+    const parts = [];
+    if (push) parts.push(`push: ${words[result.push] || result.push || 'not sent'}`);
+    if (email) parts.push(`email: ${words[result.email] || result.email || 'not sent'}`);
+    res.json({ success: true, message: parts.join(' · '), result });
+  } catch (err) {
+    console.error('Ticket resend error:', err);
+    res.status(500).json({ message: 'Could not send the ticket', error: 'Could not send the ticket' });
+  }
+});
+
+router.post('/admin/tickets/backfill', auth, isAdmin, async (req, res) => {
+  try {
+    const apply = req.body?.apply === true;
+    const includeFree = req.body?.includeFree === true;
+    const report = await tickets.backfillTickets({ apply, includeFree });
+    res.json({ success: true, ...report });
+  } catch (err) {
+    console.error('Ticket backfill error:', err);
+    res.status(500).json({ message: 'Backfill failed', error: 'Backfill failed' });
   }
 });
 
@@ -1112,6 +1222,7 @@ function registrationFilter(query) {
       { whatsapp: re },
       { studentId: re },
       { 'payment.transactionId': re },
+      { 'tickets.code': re }, // check-in: find a registration by its ticket code
     ];
   }
   return filter;
@@ -1191,7 +1302,7 @@ router.get('/admin/registrations.csv', auth, isAdmin, async (req, res) => {
     const header = [
       'Registered at', 'Event', 'Category', 'Name', 'Email', 'WhatsApp', 'Student ID', 'University',
       'Ticket', 'Quantity', 'Amount (PKR)', 'Payment status', 'Method', 'Transaction ID', 'Receipt',
-      'Reviewed at', 'Reject reason', 'Answers',
+      'Reviewed at', 'Reject reason', 'Answers', 'Ticket codes', 'Ticket status',
     ];
     const lines = [header.map(csvCell).join(',')];
     for (const reg of rows) {
@@ -1220,6 +1331,8 @@ router.get('/admin/registrations.csv', auth, isAdmin, async (req, res) => {
         row.payment.reviewedAt ? new Date(row.payment.reviewedAt).toISOString() : '',
         row.payment.rejectReason || '',
         other,
+        (row.tickets || []).map((t) => t.code).join(' / '),
+        (row.tickets || []).map((t) => t.status).join(' / '),
       ].map(csvCell).join(','));
     }
     res.set('Content-Type', 'text/csv; charset=utf-8');

@@ -156,6 +156,30 @@ const RegistrationSchema = new mongoose.Schema({
     reviewedAt: { type: Date },
     rejectReason: { type: String, maxlength: 300 },
   },
+  // ── Tickets (server-generated only; services/events/tickets.js) ──
+  // One per seat. Issued once: when the payment is verified, or at registration for a free
+  // event. Absent on old registrations until the admin backfill runs.
+  tickets: {
+    type: [new mongoose.Schema({
+      code: { type: String, required: true }, // TDC-XXXX-XXXX, unique across all registrations
+      seat: { type: Number, min: 1 }, // n of `of`
+      of: { type: Number, min: 1 },
+      tier: { type: String, maxlength: 60 },
+      status: { type: String, enum: ['valid', 'cancelled', 'used'], default: 'valid' },
+      issuedAt: { type: Date },
+      cancelledAt: { type: Date },
+      // admin = cancelled by hand; payment_rejected = comes back if the payment is verified again
+      cancelReason: { type: String, enum: ['admin', 'payment_rejected'] },
+      usedAt: { type: Date },
+    }, { _id: false })],
+    default: undefined,
+  },
+  ticketsIssuedAt: { type: Date },
+  ticketDelivery: {
+    notifiedAt: { type: Date },
+    emailedAt: { type: Date },
+    emailError: { type: String, maxlength: 300 },
+  },
   createdAt: { type: Date, default: Date.now }
 });
 
@@ -209,6 +233,11 @@ RegistrationSchema.index(
   { unique: true, partialFilterExpression: { 'payment.transactionId': { $type: 'string' } } }
 );
 RegistrationSchema.index({ 'payment.status': 1, createdAt: -1 });
+// every ticket code exists once. Partial: registrations without tickets are not indexed.
+RegistrationSchema.index(
+  { 'tickets.code': 1 },
+  { unique: true, partialFilterExpression: { 'tickets.code': { $type: 'string' } } }
+);
 EventNotificationSchema.index({ creatorId: 1, createdAt: -1 });
 EventNotificationSchema.index({ creatorId: 1, read: 1 });
 
