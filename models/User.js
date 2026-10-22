@@ -23,6 +23,7 @@ const userSchema = new mongoose.Schema(
     password: {
       type: String,
       required: [true, "Password is required"],
+      select: false, // hidden by default; .select("+password") where needed (login, change-password)
     },
     role: {
       type: String,
@@ -77,9 +78,9 @@ const userSchema = new mongoose.Schema(
 
     // --- KYC / DOCUMENTATION ---
     profileImage: { type: String, default: "" },
-    idCardFront: { type: String, default: "" },
-    idCardBack: { type: String, default: "" },
-    livePicture: { type: String, default: "" },
+    idCardFront: { type: String, default: "", select: false },
+    idCardBack: { type: String, default: "", select: false },
+    livePicture: { type: String, default: "", select: false },
 
     // --- BRAND/EMPLOYEE LOGO ---
     logo: {
@@ -113,14 +114,17 @@ const userSchema = new mongoose.Schema(
     webhookSecret: {
       type: String,
       default: "",
+      select: false,
     },
     wooConsumerKey: {
       type: String,
       default: "",
+      select: false,
     },
     wooConsumerSecret: {
       type: String,
       default: "",
+      select: false,
     },
     shopifyStoreUrl: {
       type: String,
@@ -129,14 +133,17 @@ const userSchema = new mongoose.Schema(
     shopifyAccessToken: {
       type: String,
       default: "",
+      select: false,
     },
     shopifyClientId: {
       type: String,
       default: "",
+      select: false,
     },
     shopifyClientSecret: {
       type: String,
       default: "",
+      select: false,
     },
     shopifyTokenExpiresAt: {
       type: Date,
@@ -144,6 +151,7 @@ const userSchema = new mongoose.Schema(
     shopifyWebhookSecret: {
       type: String,
       default: "",
+      select: false,
     },
 
     address: {
@@ -277,7 +285,9 @@ academicLevel: {
       lastSyncedAt: { type: Date },
     },
         // --- PUSH NOTIFICATIONS (multi-device) ---
-    pushTokens: [
+    pushTokens: {
+      select: false, // read only by the push code, which selects it by name
+      type: [
       {
         token: { type: String, required: true },
         platform: { type: String, enum: ['ios', 'android', 'web', 'unknown'], default: 'unknown' },
@@ -288,7 +298,8 @@ academicLevel: {
         projectId: { type: String },
         updatedAt: { type: Date, default: Date.now },
       },
-    ],
+      ],
+    },
 
     // --- LIFETIME RESUME CREATION TRACKER ---
     resumeCreationCount: {
@@ -301,6 +312,31 @@ academicLevel: {
     timestamps: true,
   },
 );
+
+// --- SECRETS NEVER LEAVE THE SERVER ---
+// The fields above marked select: false are not loaded unless a query asks for them. If one
+// was selected on purpose (login, webhooks, Woo), this strips it from every JSON response.
+const HIDDEN_FIELDS = [
+  "password",
+  "webhookSecret",
+  "wooConsumerKey",
+  "wooConsumerSecret",
+  "shopifyAccessToken",
+  "shopifyClientId",
+  "shopifyClientSecret",
+  "shopifyWebhookSecret",
+  "pushTokens",
+  "idCardFront",
+  "idCardBack",
+  "livePicture",
+];
+userSchema.set("toJSON", {
+  transform(doc, ret) {
+    for (const f of HIDDEN_FIELDS) delete ret[f];
+    return ret;
+  },
+});
+userSchema.statics.HIDDEN_FIELDS = HIDDEN_FIELDS;
 
 // --- INDEXES ---
 userSchema.index({ role: 1, status: 1 });
