@@ -256,12 +256,16 @@ router.get("/:brandId/offers", auth, async (req, res) => {
 // ==========================================
 // GET BRAND DETAILS (with auth check)
 // ==========================================
+// What anyone may see about a brand (the app's brand page): no contact details, settings or keys.
+const BRAND_PUBLIC_FIELDS =
+  "name brandName logo category address city location isOnline isInStore websiteUrl platform brandApprovalStatus createdAt";
+
 router.get("/:brandId", auth, async (req, res) => {
   try {
     const brand = await User.findOne({ 
       _id: req.params.brandId,
       role: "brand"
-    }).select("-password -__v");
+    }).select(BRAND_PUBLIC_FIELDS);
     
     if (!brand) {
       return res.status(404).json({ 

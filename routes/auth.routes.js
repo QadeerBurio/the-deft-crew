@@ -160,6 +160,13 @@ const authMiddleware = (req, res, next) => {
   }
 };
 
+// Admin check against the database (the role in a token can be out of date).
+async function isAdminUser(userId) {
+  if (!mongoose.Types.ObjectId.isValid(String(userId))) return false;
+  const u = await User.findById(userId).select("role").lean();
+  return u?.role === "admin";
+}
+
 // ==========================================
 // SIGNUP ROUTE - FIXED
 // ==========================================
@@ -995,6 +1002,9 @@ router.post("/reset-password", async (req, res) => {
 // ==========================================
 router.post("/approve-user/:id", authMiddleware, async (req, res) => {
   try {
+    if (!(await isAdminUser(req.userId))) {
+      return res.status(403).json({ message: "Admin access required" });
+    }
     const user = await User.findByIdAndUpdate(
       req.params.id,
       { status: "Verified" },
@@ -1011,6 +1021,9 @@ router.post("/approve-user/:id", authMiddleware, async (req, res) => {
 // ==========================================
 router.patch("/verify-user/:targetUserId", authMiddleware, async (req, res) => {
   try {
+    if (!(await isAdminUser(req.userId))) {
+      return res.status(403).json({ message: "Admin access required" });
+    }
     const updatedUser = await User.findByIdAndUpdate(
       req.params.targetUserId,
       { isVerified: true },
@@ -1154,6 +1167,10 @@ router.get("/:id", authMiddleware, async (req, res) => {
         message: "Invalid User ID format or route not found.",
       });
     }
+    // A user's own account, or any account for an admin (the app only loads its own user here)
+    if (String(req.userId) !== id && !(await isAdminUser(req.userId))) {
+      return res.status(403).json({ message: "You can only view your own account." });
+    }
 
     const user = await User.findById(id)
       .select("-password")
@@ -1268,6 +1285,9 @@ router.get("/student/:id", authMiddleware, async (req, res) => {
     
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({ message: "Invalid User ID format" });
+    }
+    if (String(req.userId) !== id && !(await isAdminUser(req.userId))) {
+      return res.status(403).json({ message: "You can only view your own account." });
     }
 
     const user = await User.findById(id)

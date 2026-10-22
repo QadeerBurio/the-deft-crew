@@ -276,7 +276,7 @@ router.get("/approved", async (req, res) => {
       role: "brand",
       brandApprovalStatus: "approved"
     })
-    .select("name email brandName logo category address isOnline isInStore phone")
+    .select("name brandName logo category address isOnline isInStore") // public list: no email or phone
     .sort({ createdAt: -1 });
 
     res.json({
