@@ -513,7 +513,8 @@ router.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    const user = await User.findOne({ email }).populate("university");
+    // password is hidden by default; login needs it for the bcrypt check (the response strips it)
+    const user = await User.findOne({ email }).select("+password").populate("university");
 
     if (!user) return res.status(404).json({ message: "User not found" });
 
@@ -1339,8 +1340,8 @@ router.post("/change-password", authMiddleware, async (req, res) => {
       });
     }
     
-    // Find user
-    const user = await User.findById(req.userId);
+    // Find user (with the password hash, hidden by default, for the compare)
+    const user = await User.findById(req.userId).select("+password");
     if (!user) {
       return res.status(404).json({ 
         success: false, 
@@ -1441,7 +1442,7 @@ router.post("/admin-login-as-brand", authMiddleware, async (req, res) => {
     const brand = await User.findOne({ 
       _id: brandId, 
       role: 'brand' 
-    }).select('+password');
+    });
     
     if (!brand) {
       return res.status(404).json({ 

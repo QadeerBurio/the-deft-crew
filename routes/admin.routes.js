@@ -88,11 +88,9 @@ router.get("/users/:role", auth, isAdmin, async (req, res) => {
       return res.status(400).json({ message: "Invalid role specified" });
     }
 
-    // For admin users, include password
     const users = await User.find({ role })
       .populate("university", "name")
       .populate("referredBy", "name email")
-      .select("+password") // THIS IS KEY - include password field
       .sort({ createdAt: -1 });
 
     res.json(users);
@@ -107,8 +105,7 @@ router.get("/users/details/:id", auth, isAdmin, async (req, res) => {
   try {
     const user = await User.findById(req.params.id)
       .populate("university", "name location")
-      .populate("referredBy", "name email role")
-      .select("+password"); // Include password
+      .populate("referredBy", "name email role");
 
     if (!user) {
       return res.status(404).json({ message: "User not found" });
