@@ -34,7 +34,7 @@ const OTP_MAX_ATTEMPTS = 5;          // wrong tries before code is burned
 const hashOtp = (otp) =>
   crypto
     .createHash("sha256")
-    .update(`${otp}:${process.env.JWT_SECRET || "abdulqadeer11111"}`)
+    .update(`${otp}:${process.env.JWT_SECRET}`)
     .digest("hex");
 
 const otpEmailHtml = (name, otp) => `
@@ -117,7 +117,7 @@ async function sendSignupCode(user, { force = false } = {}) {
 const signToken = (user) =>
   jwt.sign(
     { id: user._id, role: user.role },
-    process.env.JWT_SECRET || "abdulqadeer11111",
+    process.env.JWT_SECRET,
     { expiresIn: "180d" }
   );
 
@@ -149,7 +149,7 @@ const authMiddleware = (req, res, next) => {
       return res.status(401).json({ message: "No token provided" });
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || "abdulqadeer11111");
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
     req.userId = decoded.id;
     req.userRole = decoded.role;
 
@@ -159,6 +159,13 @@ const authMiddleware = (req, res, next) => {
     return res.status(401).json({ message: "Invalid token" });
   }
 };
+
+// Admin check against the database (the role in a token can be out of date).
+async function isAdminUser(userId) {
+  if (!mongoose.Types.ObjectId.isValid(String(userId))) return false;
+  const u = await User.findById(userId).select("role").lean();
+  return u?.role === "admin";
+}
 
 // ==========================================
 // SIGNUP ROUTE - FIXED
@@ -513,7 +520,8 @@ router.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    const user = await User.findOne({ email }).populate("university");
+    // password is hidden by default; login needs it for the bcrypt check (the response strips it)
+    const user = await User.findOne({ email }).select("+password").populate("university");
 
     if (!user) return res.status(404).json({ message: "User not found" });
 
@@ -933,7 +941,7 @@ router.post("/verify-otp", async (req, res) => {
 
     const resetToken = jwt.sign(
       { id: userId, purpose: "password-reset" },
-      process.env.JWT_SECRET || "abdulqadeer11111",
+      process.env.JWT_SECRET,
       { expiresIn: "15m" }
     );
 
@@ -959,7 +967,7 @@ router.post("/reset-password", async (req, res) => {
 
   let decoded;
   try {
-    decoded = jwt.verify(resetToken, process.env.JWT_SECRET || "abdulqadeer11111");
+    decoded = jwt.verify(resetToken, process.env.JWT_SECRET);
   } catch (err) {
     return res.status(400).json({ message: "Session expired. Please request a new code." });
   }
@@ -994,6 +1002,9 @@ router.post("/reset-password", async (req, res) => {
 // ==========================================
 router.post("/approve-user/:id", authMiddleware, async (req, res) => {
   try {
+    if (!(await isAdminUser(req.userId))) {
+      return res.status(403).json({ message: "Admin access required" });
+    }
     const user = await User.findByIdAndUpdate(
       req.params.id,
       { status: "Verified" },
@@ -1010,6 +1021,9 @@ router.post("/approve-user/:id", authMiddleware, async (req, res) => {
 // ==========================================
 router.patch("/verify-user/:targetUserId", authMiddleware, async (req, res) => {
   try {
+    if (!(await isAdminUser(req.userId))) {
+      return res.status(403).json({ message: "Admin access required" });
+    }
     const updatedUser = await User.findByIdAndUpdate(
       req.params.targetUserId,
       { isVerified: true },
@@ -1153,6 +1167,10 @@ router.get("/:id", authMiddleware, async (req, res) => {
         message: "Invalid User ID format or route not found.",
       });
     }
+    // A user's own account, or any account for an admin (the app only loads its own user here)
+    if (String(req.userId) !== id && !(await isAdminUser(req.userId))) {
+      return res.status(403).json({ message: "You can only view your own account." });
+    }
 
     const user = await User.findById(id)
       .select("-password")
@@ -1268,6 +1286,9 @@ router.get("/student/:id", authMiddleware, async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({ message: "Invalid User ID format" });
     }
+    if (String(req.userId) !== id && !(await isAdminUser(req.userId))) {
+      return res.status(403).json({ message: "You can only view your own account." });
+    }
 
     const user = await User.findById(id)
       .populate('university')
@@ -1339,8 +1360,8 @@ router.post("/change-password", authMiddleware, async (req, res) => {
       });
     }
     
-    // Find user
-    const user = await User.findById(req.userId);
+    // Find user (with the password hash, hidden by default, for the compare)
+    const user = await User.findById(req.userId).select("+password");
     if (!user) {
       return res.status(404).json({ 
         success: false, 
@@ -1441,7 +1462,7 @@ router.post("/admin-login-as-brand", authMiddleware, async (req, res) => {
     const brand = await User.findOne({ 
       _id: brandId, 
       role: 'brand' 
-    }).select('+password');
+    });
     
     if (!brand) {
       return res.status(404).json({ 
@@ -1461,7 +1482,7 @@ router.post("/admin-login-as-brand", authMiddleware, async (req, res) => {
     // Generate token for the brand
     const token = jwt.sign(
       { id: brand._id, role: brand.role },
-      process.env.JWT_SECRET || "abdulqadeer11111",
+      process.env.JWT_SECRET,
       { expiresIn: "7d" }
     );
     

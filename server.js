@@ -1,6 +1,12 @@
 const express = require("express");
 const cors = require("cors");
 require("dotenv").config();
+
+// Tokens are signed and checked with JWT_SECRET. There is no fallback: refuse to start without it.
+if (!process.env.JWT_SECRET) {
+  console.error("FATAL: JWT_SECRET is not set. Add it to the environment (Railway variables) and restart.");
+  process.exit(1);
+}
 const crypto = require("crypto");
 const http = require("http");
 const { Server } = require("socket.io");

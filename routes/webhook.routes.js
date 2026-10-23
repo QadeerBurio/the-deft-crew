@@ -93,7 +93,7 @@ router.post("/confirm", async (req, res) => {
         });
 
         // STEP 2: Get the brand
-        const brand = await User.findById(promoCodeDoc.brand);
+        const brand = await User.findById(promoCodeDoc.brand).select("+webhookSecret");
         if (!brand) {
             console.log('❌ Brand not found:', promoCodeDoc.brand);
             return res.status(404).json({
@@ -290,10 +290,10 @@ router.post("/shopify/confirm", async (req, res) => {
     }
 
     // STEP 2: Find the brand
-    let brand = await User.findById(promoCodeDoc.brand);
+    let brand = await User.findById(promoCodeDoc.brand).select("+shopifyWebhookSecret");
     if (!brand && shopDomain) {
       const cleanDomain = shopDomain.replace(/^https?:\/\//, "").replace(/\/$/, "");
-      brand = await User.findOne({ shopifyStoreUrl: { $regex: new RegExp(cleanDomain, "i") } });
+      brand = await User.findOne({ shopifyStoreUrl: { $regex: new RegExp(cleanDomain, "i") } }).select("+shopifyWebhookSecret");
     }
 
     // STEP 3: Validate Webhook Signature

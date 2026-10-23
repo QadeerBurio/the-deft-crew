@@ -250,7 +250,7 @@ router.post("/generate", auth, async (req, res) => {
     });
 
     // ------- EXTERNAL PROVIDERS -------
-    const brandUser = await User.findById(offer.brand._id).lean();
+    const brandUser = await User.findById(offer.brand._id).select("+wooConsumerKey +wooConsumerSecret").lean();
 
     // Shopify: tell Remix to create the discount
     if (brandUser?.shopifyStoreUrl) {

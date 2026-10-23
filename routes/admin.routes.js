@@ -88,11 +88,9 @@ router.get("/users/:role", auth, isAdmin, async (req, res) => {
       return res.status(400).json({ message: "Invalid role specified" });
     }
 
-    // For admin users, include password
     const users = await User.find({ role })
       .populate("university", "name")
       .populate("referredBy", "name email")
-      .select("+password") // THIS IS KEY - include password field
       .sort({ createdAt: -1 });
 
     res.json(users);
@@ -107,8 +105,7 @@ router.get("/users/details/:id", auth, isAdmin, async (req, res) => {
   try {
     const user = await User.findById(req.params.id)
       .populate("university", "name location")
-      .populate("referredBy", "name email role")
-      .select("+password"); // Include password
+      .populate("referredBy", "name email role");
 
     if (!user) {
       return res.status(404).json({ message: "User not found" });
@@ -121,31 +118,13 @@ router.get("/users/details/:id", auth, isAdmin, async (req, res) => {
   }
 });
 
-// Add a dedicated endpoint to get user password
-// In admin.routes.js - Update the password endpoint
-router.get("/users/password/:id", auth, isAdmin, async (req, res) => {
-  try {
-    const user = await User.findById(req.params.id)
-      .select("+password name email role");
-    
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
-    
-    // Return the hashed password (this is what's stored)
-    res.json({ 
-      success: true,
-      password: user.password || 'No password set',
-      name: user.name,
-      email: user.email
-    });
-  } catch (err) {
-    console.error("Error fetching password:", err);
-    res.status(500).json({ 
-      success: false,
-      error: err.message 
-    });
-  }
+// Passwords are stored as bcrypt hashes and are never sent to anyone.
+// Admins use POST /users/reset-password/:id instead.
+router.get("/users/password/:id", auth, isAdmin, (req, res) => {
+  res.status(410).json({
+    success: false,
+    message: "Passwords are not available. Use reset password instead.",
+  });
 });
 
 // // ✅ Get single user details (with full profile)
