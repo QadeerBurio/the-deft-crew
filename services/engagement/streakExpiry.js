@@ -24,6 +24,7 @@
 // the streaks preference and quiet hours. Each job runs once a day (JobLock).
 
 const EngagementProfile = require('../../models/EngagementProfile');
+const JobLock = require('../../models/JobLock');
 const { dayKey, yesterday } = require('../../utils/karachiTime');
 const pushGateway = require('./pushGateway');
 
@@ -132,6 +133,21 @@ async function sendStreakExpiryWarnings(today = dayKey()) {
 }
 
 /**
+ * The 20:00 warning, at most once a day whoever triggers it (the scheduler or
+ * POST /streak/expiry-warnings/send). Both take the same JobLock id the
+ * scheduler always used, so a second call the same day sends nothing.
+ */
+async function sendStreakExpiryWarningsOnce(today = dayKey()) {
+  try {
+    await JobLock.create({ _id: `streak_warning:${today}`, lockedAt: new Date(), owner: process.env.HOSTNAME || 'local' });
+  } catch (err) {
+    if (err.code === 11000) return { sent: 0, skipped: 0, errors: [], total: 0, alreadySent: true };
+    throw err;
+  }
+  return sendStreakExpiryWarnings(today);
+}
+
+/**
  * Profiles whose streak broke at today's rollover and who have not acted
  * since (applyAction clears brokenAt when they start again).
  */
@@ -202,6 +218,7 @@ module.exports = {
   filterInExamMode,
   isAtRisk,
   sendStreakExpiryWarnings,
+  sendStreakExpiryWarningsOnce,
   findLapsedProfiles,
   sendStreakLapsedReminders,
   findFrozenProfiles,
