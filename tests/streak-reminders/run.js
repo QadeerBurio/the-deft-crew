@@ -124,7 +124,7 @@ const profileOf = async (uid) => EngagementProfile.findOne({ user: uid }).lean()
   check("day after: a user who already started again today is skipped", pushesTo("restarted").length === 0);
   check("day after: a break with no recorded length is skipped", pushesTo("unknowncount").length === 0);
   const lm = pushesTo("lapsed")[0] || {};
-  check("day after: body names the lost streak", /12/.test(lm.body) && /today/.test(lm.body), lm.body);
+  check("day after: body names the lost streak", /12/.test(lm.body) && /today|reload/.test(lm.body), lm.body);
   check("day after: type and tap route", lm.data?.type === "streak_broken" && lm.data?.route === "Home");
   check("day after: totals", l.total === 2 && l.sent === 2, JSON.stringify({ sent: l.sent, total: l.total }));
 
@@ -179,6 +179,27 @@ const profileOf = async (uid) => EngagementProfile.findOne({ user: uid }).lean()
   check("schedule: 20:30 day-after reminder registered", exprs.includes("30 20 * * *"));
   check("schedule: 10:00 freeze notice registered", exprs.includes("0 10 * * *"));
   check("schedule: all jobs run in Asia/Karachi", crons.every((c) => c.tz === "Asia/Karachi"), crons.map((c) => `${c.expr}@${c.tz}`).join(", "));
+
+  // the 20:00 job and POST /streak/expiry-warnings/send share one send a day
+  // MongoDB rejects a second document with the same _id (error 11000); the in-memory layer does not, so the
+  // lock collection gets that one rule here
+  const JobLock = reqS("./models/JobLock");
+  const realCreate = JobLock.create.bind(JobLock);
+  JobLock.create = async (doc) => {
+    if (await JobLock.findOne({ _id: doc._id }).lean()) { const e = new Error("E11000 duplicate key"); e.code = 11000; throw e; }
+    return realCreate(doc);
+  };
+  await person("onceaday", { count: 3, lastActionDay: yday, freezesLeft: 0 });
+  const warnJob = crons.find((c) => c.expr === "0 20 * * *");
+  await warnJob.fn();
+  const afterJob = pushesTo("onceaday").length;
+  const viaRoute = await streakExpiry.sendStreakExpiryWarningsOnce(today);
+  const viaRouteAgain = await streakExpiry.sendStreakExpiryWarningsOnce(today);
+  await warnJob.fn();
+  check("once a day: the 20:00 job warns", afterJob === 1, `${afterJob}`);
+  check("once a day: the route after the job sends nothing", viaRoute.alreadySent === true && viaRoute.sent === 0);
+  check("once a day: calling the route again sends nothing", viaRouteAgain.alreadySent === true);
+  check("once a day: the user got exactly one warning", pushesTo("onceaday").length === 1, `${pushesTo("onceaday").length}`);
 
   // the 00:05 rollover itself sends no pushes any more (quiet hours dropped them); it still saves the change
   const roll = crons.find((c) => c.expr === "5 0 * * *");

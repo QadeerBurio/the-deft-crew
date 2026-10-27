@@ -116,9 +116,10 @@ function start() {
   cron.schedule(
     '0 20 * * *',
     async () => {
-      if (!(await lock('streak_warning', dayKey()))) return;
       try {
-        const r = await streakExpiry.sendStreakExpiryWarnings(dayKey());
+        // takes the streak_warning lock itself, shared with the admin/cron route
+        const r = await streakExpiry.sendStreakExpiryWarningsOnce(dayKey());
+        if (r.alreadySent) return;
         console.log(`[scheduler] streak_warning done: sent=${r.sent}/${r.total}`);
       } catch (err) {
         console.error('[scheduler] streak_warning failed:', err.message);

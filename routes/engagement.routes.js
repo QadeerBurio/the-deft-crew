@@ -1037,7 +1037,8 @@ router.post('/streak/expiry-warnings/send', async (req, res) => {
     }
 
     const streakExpiry = require('../services/engagement/streakExpiry');
-    const result = await streakExpiry.sendStreakExpiryWarnings();
+    // once a day, shared with the 20:00 job: a second call the same day sends nothing
+    const result = await streakExpiry.sendStreakExpiryWarningsOnce();
     res.json({ ok: true, ...result });
   } catch (err) {
     console.error('[streak/expiry-warnings/send]', err);

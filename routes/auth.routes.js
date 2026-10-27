@@ -173,6 +173,8 @@ async function isAdminUser(userId) {
 // ==========================================
 // SIGNUP ROUTE - FIXED
 // ==========================================
+const SIGNUP_ROLES = ["student", "brand", "traveler", "employee"];
+
 router.post("/signup", async (req, res) => {
   try {
     const {
@@ -196,6 +198,11 @@ router.post("/signup", async (req, res) => {
     // 1. Validate required fields
     if (!email || !password || !role) {
       return res.status(400).json({ error: "Missing required fields" });
+    }
+    // Public signup only creates these roles. Admin accounts are made by an admin
+    // (POST /api/admin/users/create), never by signing up.
+    if (!SIGNUP_ROLES.includes(role)) {
+      return res.status(400).json({ error: "Invalid role" });
     }
 
     // 2. Check if user already exists
@@ -252,8 +259,6 @@ router.post("/signup", async (req, res) => {
         return res.status(400).json({ error: "Employee name required" });
       }
       name = fullName;
-    } else if (role === "admin") {
-      name = fullName || "Admin";
     }
 
     // 5. Handle Referrer lookup
@@ -276,7 +281,7 @@ router.post("/signup", async (req, res) => {
       university: universityId,
       address,
       instagram,
-      status: role === "admin" ? "Verified" : "Not Verified",
+      status: "Not Verified",
       // students confirm their email with a code before first sign-in
       ...(role === "student" ? { emailVerified: false } : {}),
       city: city?.trim() || "Karachi",
