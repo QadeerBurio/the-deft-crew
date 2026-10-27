@@ -17,6 +17,9 @@ async function send(userId, msg) {
   const {
     type, pref = null, title, body, data = {},
     priority = 0, skipCaps = false,
+    // essential: a reminder the user asked for (streak about to expire / just broke). It skips the
+    // daily and weekly marketing caps and does not use them up, but keeps the pref and quiet hours.
+    essential = false,
   } = msg;
   // Emoji / dot / sound follow the feature (new offer = 🤑 + deal sound)
   const mood = featureMood(type, msg.mood);
@@ -38,12 +41,12 @@ async function send(userId, msg) {
     const today = dayKey();
     const thisWeek = weekKey();
 
-    if (!skipCaps && profile.push?.lastPushDay === today) {
+    if (!skipCaps && !essential && profile.push?.lastPushDay === today) {
       return { sent: false, reason: 'daily_cap' };
     }
 
     const weeklyCap = cfg.push.weeklyCap(cfg.STAGE);
-    if (!skipCaps) {
+    if (!skipCaps && !essential) {
       const sentThisWeek =
         profile.push?.weekKey === thisWeek ? profile.push.sentThisWeek || 0 : 0;
       if (sentThisWeek >= weeklyCap) return { sent: false, reason: 'weekly_cap' };
@@ -143,17 +146,19 @@ async function send(userId, msg) {
       }
     );
 
-    const sentIncrement = skipCaps ? 0 : 1;
+    const sentIncrement = skipCaps || essential ? 0 : 1;
     await EngagementProfile.updateOne(
       { user: userId },
-      {
-        $set: {
-          'push.lastPushDay': today,
-          'push.lastPushAt': new Date(),
-          'push.weekKey': thisWeek,
-        },
-        ...(sentIncrement ? { $inc: { 'push.sentThisWeek': sentIncrement } } : {}),
-      }
+      essential
+        ? { $set: { 'push.lastPushAt': new Date() } } // reminders leave the caps for other pushes
+        : {
+            $set: {
+              'push.lastPushDay': today,
+              'push.lastPushAt': new Date(),
+              'push.weekKey': thisWeek,
+            },
+            ...(sentIncrement ? { $inc: { 'push.sentThisWeek': sentIncrement } } : {}),
+          }
     );
 
     // Phones on an old app build only have the old channels → generic sound
@@ -166,9 +171,10 @@ async function send(userId, msg) {
 }
 
 // ── COPY-BANK + USER-ID-AWARE VARIANT ──
-async function sendFromCopy(userId, type, pref, vars, data) {
-  const { body, mood } = copy.fill(type, vars, userId);
-  return send(userId, { type, pref, body, mood, data });
+// opts.copyKey picks another copy bank for the line while the push keeps its type
+async function sendFromCopy(userId, type, pref, vars, data, opts = {}) {
+  const { body, mood } = copy.fill(opts.copyKey || type, vars, userId);
+  return send(userId, { type, pref, body, mood, data, essential: !!opts.essential });
 }
 
 // ── ADMIN / SYSTEM PUSH (bypass caps) ──
