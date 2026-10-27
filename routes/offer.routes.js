@@ -307,6 +307,7 @@ router.post('/redeem-payment', auth, async (req, res) => {
       savedAmount: computedSaved,
       redeemedAt: new Date(),
     });
+    const redemptionId = offer.redemptions[offer.redemptions.length - 1]?._id;
 
     const totalRedemptions = offer.redemptions.filter(
       (r) => r.student.toString() === userId
@@ -352,6 +353,12 @@ router.post('/redeem-payment', auth, async (req, res) => {
       description: `you saved rs ${computedSaved} at ${offer.title}.`,
       type: 'System',
       icon: 'checkmark-circle',
+      // push data: lets the student's app report this redemption once (ids only)
+      metadata: {
+        pushType: 'redemption',
+        redemptionId: redemptionId ? String(redemptionId) : undefined,
+        offerId: String(offer._id),
+      },
     }).catch(() => {});
 
     return res.json({
@@ -467,6 +474,45 @@ router.get("/my-total-savings", auth, async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ message: err.message });
+  }
+});
+
+// The signed-in user's OWN recorded redemptions (brand scan or promo code), newest first.
+// Only { redemptionId, offerId, redeemedAt }: no bill, saving, offer details or user data.
+// ?since=<ISO date> narrows it; never more than 30 days back. Used by the app to report
+// tdc_discount_redeemed to Meta (with the student's consent, checked on the phone).
+const MY_REDEMPTIONS_MAX_DAYS = 30;
+const MY_REDEMPTIONS_LIMIT = 100;
+router.get("/my-redemptions", auth, async (req, res) => {
+  try {
+    // auth lets guests through (no header, "guest-token-2024"); this route needs a real account
+    if (req.isGuest || !mongoose.Types.ObjectId.isValid(req.userId)) {
+      return res.status(401).json({ message: "Sign in to see your redemptions" });
+    }
+    const uid = String(req.userId);
+
+    const floor = new Date(Date.now() - MY_REDEMPTIONS_MAX_DAYS * 24 * 60 * 60 * 1000);
+    const since = req.query.since ? new Date(String(req.query.since)) : null;
+    const from = since && !Number.isNaN(since.getTime()) && since > floor ? since : floor;
+
+    const offers = await Offer.find({ "redemptions.student": req.userId })
+      .select("_id redemptions._id redemptions.student redemptions.redeemedAt")
+      .lean();
+
+    const redemptions = [];
+    for (const offer of offers) {
+      for (const r of offer.redemptions || []) {
+        if (!r?._id || String(r.student) !== uid) continue; // someone else's redemption of the same offer
+        const at = new Date(r.redeemedAt);
+        if (Number.isNaN(at.getTime()) || at < from) continue;
+        redemptions.push({ redemptionId: String(r._id), offerId: String(offer._id), redeemedAt: at.toISOString() });
+      }
+    }
+    redemptions.sort((a, b) => (a.redeemedAt < b.redeemedAt ? 1 : -1));
+    res.json({ redemptions: redemptions.slice(0, MY_REDEMPTIONS_LIMIT) });
+  } catch (err) {
+    console.error("Error in my-redemptions:", err.message);
+    res.status(500).json({ message: "Could not load redemptions" });
   }
 });
 
