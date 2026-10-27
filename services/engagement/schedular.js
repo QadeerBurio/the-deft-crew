@@ -11,6 +11,7 @@ const DailyDrop = require('../../models/DailyDrop');
 const streakSvc = require('./streak');
 const pushGateway = require('./pushGateway');
 const popups = require('./popups');
+const streakExpiry = require('./streakExpiry');
 
 // ─────────────────────────────────────────────────────────────
 // JobLock helper — prevents concurrent runs across scaled instances
@@ -90,43 +91,56 @@ function start() {
   );
 
   // ═════════════════════════════════════════════════════════════
-  // 20:00 PKT — STREAK AT-RISK WARNING
-  // Warn users whose streak will break in < 4 hours
+  // 10:00 PKT — A FREEZE SAVED YOUR STREAK LAST NIGHT
+  // Users whose streak a freeze kept at today's 00:05 rollover
+  // ═════════════════════════════════════════════════════════════
+  cron.schedule(
+    '0 10 * * *',
+    async () => {
+      if (!(await lock('freeze_used', dayKey()))) return;
+      try {
+        const r = await streakExpiry.sendFreezeUsedNotices(dayKey());
+        console.log(`[scheduler] freeze_used done: sent=${r.sent}/${r.total}`);
+      } catch (err) {
+        console.error('[scheduler] freeze_used failed:', err.message);
+      }
+    },
+    { timezone: cfg.TZ }
+  );
+
+  // ═════════════════════════════════════════════════════════════
+  // 20:00 PKT — STREAK EXPIRES TONIGHT
+  // Warn users whose streak breaks at midnight unless they act today
+  // (services/engagement/streakExpiry.js: exam mode excluded, essential push)
   // ═════════════════════════════════════════════════════════════
   cron.schedule(
     '0 20 * * *',
     async () => {
       if (!(await lock('streak_warning', dayKey()))) return;
       try {
-        const today = dayKey();
-        const atRisk = await EngagementProfile.find({
-          'streak.count': { $gte: 2 },
-          'streak.lastActionDay': { $ne: today, $ne: null },
-          'notifPrefs.streaks': { $ne: false },
-        })
-          .select('user streak')
-          .limit(10000)
-          .lean();
-
-        let sent = 0;
-        for (const p of atRisk) {
-          const r = await pushGateway
-            .sendFromCopy(
-              p.user,
-              'streak_warning',
-              'streaks',
-              { count: p.streak.count },
-              { route: 'Home', params: {} }
-            )
-            .catch(() => ({ sent: false }));
-          if (r?.sent) sent++;
-        }
-
-        console.log(
-          `[scheduler] streak_warning done: sent=${sent}/${atRisk.length}`
-        );
+        const r = await streakExpiry.sendStreakExpiryWarnings(dayKey());
+        console.log(`[scheduler] streak_warning done: sent=${r.sent}/${r.total}`);
       } catch (err) {
         console.error('[scheduler] streak_warning failed:', err.message);
+      }
+    },
+    { timezone: cfg.TZ }
+  );
+
+  // ═════════════════════════════════════════════════════════════
+  // 20:30 PKT — STREAK ENDED LAST NIGHT (the day after it expired)
+  // Users whose streak broke at today's 00:05 rollover and who have not
+  // started again today
+  // ═════════════════════════════════════════════════════════════
+  cron.schedule(
+    '30 20 * * *',
+    async () => {
+      if (!(await lock('streak_lapsed', dayKey()))) return;
+      try {
+        const r = await streakExpiry.sendStreakLapsedReminders(dayKey());
+        console.log(`[scheduler] streak_lapsed done: sent=${r.sent}/${r.total}`);
+      } catch (err) {
+        console.error('[scheduler] streak_lapsed failed:', err.message);
       }
     },
     { timezone: cfg.TZ }
@@ -171,20 +185,8 @@ function start() {
           // ─────────────────────────────────────────────
           if (result.action === 'froze') {
             froze++;
-            try {
-              await pushGateway.sendFromCopy(
-                profile.user,
-                'freeze_used',
-                'streaks',
-                { count: prevCount },
-                { route: 'Home', params: {} }
-              );
-              console.log(
-                `[scheduler] freeze_used push → user=${profile.user} count=${prevCount}`
-              );
-            } catch (e) {
-              console.error('[scheduler] freeze_used push failed:', e.message);
-            }
+            // The "we saved your streak" push goes out at 10:00 (freeze_used
+            // below): 00:05 is inside quiet hours, so a push here was always dropped.
           }
 
           // ─────────────────────────────────────────────
@@ -192,31 +194,9 @@ function start() {
           // ─────────────────────────────────────────────
           else if (result.action === 'broke') {
             broke++;
-            try {
-              // ✅ Send the push using the streak_broken copy bank
-              await pushGateway.sendFromCopy(
-                profile.user,
-                'streak_broken',
-                'streaks',
-                { count: prevCount },
-                {
-                  route: 'Home',
-                  params: {
-                    brokenStreak: prevCount,
-                    brokenBest: prevBest,
-                    restorable: true,
-                  },
-                }
-              );
-              console.log(
-                `[scheduler] streak_broken push → user=${profile.user} count=${prevCount}`
-              );
-            } catch (e) {
-              console.error(
-                '[scheduler] streak_broken push failed:',
-                e.message
-              );
-            }
+            // The push for a broken streak goes out at 20:30 the same day
+            // (streak_lapsed above): 00:05 is inside quiet hours, so a push
+            // here was always dropped. The in-app popup stays.
 
             // ✅ Also enqueue an in-app popup (celebration queue)
             try {
@@ -290,7 +270,7 @@ function start() {
     { timezone: cfg.TZ }
   );
 
-  console.log('⏰ [engagement] scheduler started — 4 jobs registered');
+  console.log('⏰ [engagement] scheduler started — 6 jobs registered');
 }
 
 module.exports = { start };

@@ -64,6 +64,7 @@ function applyAction(streak = {}, today = dayKey()) {
   // Clear broken markers — streak is revived
   next.brokenAt = null;
   next.restorableUntil = null;
+  next.brokenCount = 0;
 
   // Milestone detection (only if never hit before)
   let milestone = null;
@@ -113,6 +114,7 @@ function rollover(profile, today = dayKey()) {
       ...s,
       freezesLeft: s.freezesLeft - 1,
       lastActionDay: yesterdayKey,
+      frozenAt: new Date(),
     };
     return { action: 'froze', previousCount: count };
   }
@@ -127,6 +129,7 @@ function rollover(profile, today = dayKey()) {
     lastActionDay: null,
     brokenAt: now,
     restorableUntil,
+    brokenCount: count,
   };
 
   return { action: 'broke', previousCount: count };

@@ -42,6 +42,10 @@ const profileSchema = new mongoose.Schema(
       examModeUses: [{ semesterKey: String, startedDay: String }],
       brokenAt: { type: Date, default: null },
       restorableUntil: { type: Date, default: null },
+      // the streak length when it last broke (for the next-evening reminder)
+      brokenCount: { type: Number, default: 0 },
+      // when a freeze last saved the streak (for the 10:00 notice that morning)
+      frozenAt: { type: Date, default: null },
       milestonesHit: { type: [Number], default: [] },
     },
 

@@ -29,29 +29,39 @@ const BANK = {
   // ══════════════════════════════════════════════
   // STREAK AT RISK — icon: urgent · no emoji · deadpan
   // ══════════════════════════════════════════════
+  // sent at 20:00 PKT: about four hours before the streak ends at midnight
   streak_warning: {
     mood: 'panic',
     variants: [
-      'you do this every night. 15 mins left.',
-      "12 days. don't be the guy who breaks it on a tuesday.",
-      "your streak is flatlining. cpr's free, just open the app.",
-      'bhai your streak is literally about to die. 15 mins left.',
-      "streak on the edge rn. don't be that guy.",
-      "your {count}-day streak said 'don't leave me hanging' — 20 mins left",
-      'last call. streak dies at midnight. you know what to do.',
-      '{count} days of pure grind about to flatline. 15 min countdown.',
-      "we've seen this movie before. you always open at 11:58. cutting it close again?",
+      'your {count}-day streak ends at midnight. one tap keeps it.',
+      '{count} days on the line. open tdc before 12.',
+      'your {count}-day streak dies at midnight. you know what to do.',
+      'bhai your {count}-day streak is on the edge. it ends at midnight.',
+      "don't let {count} days go at 12. open the app.",
+      "your {count}-day streak said 'don't leave me hanging'. midnight is the deadline.",
     ],
   },
 
+  // the same push for a 1-day streak ("your 1-day streak" reads oddly)
+  streak_warning_one: {
+    mood: 'panic',
+    variants: ['your streak ends at midnight. one tap keeps it.'],
+  },
+
+  // sent at 20:30 PKT the day after the streak ended (it broke at the 00:05 rollover)
   streak_broken: {
     mood: 'sleepy',
     variants: [
-      'your {count} day streak broke. come back stronger.',
-      '{count} days gone. new start tomorrow.',
-      'streak reset. no drama, just reload.',
-      'you missed a day. the grind continues.',
+      'your {count}-day streak ended last night. start a new one today.',
+      '{count} days gone. a new streak starts with one tap today.',
+      'your {count}-day streak reset last night. no drama, just reload.',
+      'you missed a day and {count} days went with it. the grind continues today.',
     ],
+  },
+
+  streak_broken_one: {
+    mood: 'sleepy',
+    variants: ['your streak ended last night. start a new one today.'],
   },
 
   // ══════════════════════════════════════════════
