@@ -135,9 +135,27 @@ function rollover(profile, today = dayKey()) {
   return { action: 'broke', previousCount: count };
 }
 
+/**
+ * Returns true if the streak will break at midnight unless the user acts today.
+ * Symmetric with rollover(): the exact conditions under which rollover() will
+ * return 'broke' or 'froze' (i.e. user missed a day and got saved/reset).
+ */
+function isAtRisk(streak, today = dayKey()) {
+  if (!streak) return false;
+  const count = streak.count || 0;
+  const last = streak.lastActionDay || null;
+  if (count <= 0 || !last) return false;
+  if (last === today) return false; // already safe
+  if (last !== yesterday(today)) return false; // already broken
+  // Exam mode protects the streak
+  if (streak.examModeUntil && streak.examModeUntil >= today) return false;
+  return true;
+}
+
 module.exports = {
   applyAction,
   healthOf,
   rollover,
+   isAtRisk,   // ← add
   MILESTONES,
 };

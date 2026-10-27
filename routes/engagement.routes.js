@@ -976,6 +976,74 @@ router.post('/push-permission', auth, requireAuth, async (req, res) => {
   res.status(204).end();
 });
 
+
+// ============================================================
+// STREAK EXPIRY WARNING
+// ============================================================
+
+// ────────────────────────────────────────────────────────────
+// GET /api/engagement/streak/at-risk
+// Lightweight check for the current user — used by the home
+// screen to show a "⚠️ Streak expires tonight" banner.
+// ────────────────────────────────────────────────────────────
+router.get('/streak/at-risk', auth, requireAuth, async (req, res) => {
+  try {
+    const streakExpiry = require('../services/engagement/streakExpiry');
+    const status = await streakExpiry.isAtRisk(req.userId);
+    res.json(status);
+  } catch (err) {
+    console.error('[streak/at-risk]', err);
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ────────────────────────────────────────────────────────────
+// POST /api/engagement/streak/expiry-warnings/send
+// Cron endpoint — sends "streak expires tonight" pushes.
+// Auth: either X-Cron-Key header matching CRON_SECRET,
+//       or an authenticated admin user.
+// Schedule: daily at 21:00 Asia/Karachi.
+// ────────────────────────────────────────────────────────────
+router.post('/streak/expiry-warnings/send', async (req, res) => {
+  try {
+    const cronKey = req.headers['x-cron-key'] || req.body?.cronKey;
+    const expected = process.env.CRON_SECRET;
+
+    let authorized = false;
+
+    if (expected && cronKey === expected) {
+      authorized = true;
+    } else {
+      // Fallback: require authenticated admin
+      try {
+        await new Promise((resolve, reject) => {
+          auth(req, res, (err) => (err ? reject(err) : resolve()));
+        });
+        if (req.isGuest) {
+          return res.status(401).json({ message: 'unauthorized' });
+        }
+        const me = await User.findById(req.userId).select('role').lean();
+        if (me?.role !== 'admin') {
+          return res.status(403).json({ message: 'admin or cron key required' });
+        }
+        authorized = true;
+      } catch (e) {
+        return res.status(401).json({ message: 'unauthorized' });
+      }
+    }
+
+    if (!authorized) {
+      return res.status(401).json({ message: 'unauthorized' });
+    }
+
+    const streakExpiry = require('../services/engagement/streakExpiry');
+    const result = await streakExpiry.sendStreakExpiryWarnings();
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error('[streak/expiry-warnings/send]', err);
+    res.status(500).json({ message: err.message });
+  }
+});
 // ============================================================
 // STREAK — exam mode
 // ============================================================
