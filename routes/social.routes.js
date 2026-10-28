@@ -584,7 +584,7 @@ router.get('/feed', auth, async (req, res) => {
 
     // Get current user's connections
     const currentUser = userId
-      ? await User.findById(userId).select('connections sentRequests receivedRequests')
+      ? await User.findById(userId).select('connections sentRequests receivedRequests').lean()
       : null;
     const userConnections = (currentUser?.connections || []).map(id => id ? id.toString() : '').filter(id => id);
     const userSentRequests = (currentUser?.sentRequests || []).map(id => id ? id.toString() : '').filter(id => id);
@@ -618,10 +618,11 @@ router.get('/feed', auth, async (req, res) => {
       query.createdAt = { $lt: new Date(before) };
     }
 
+    // Authors: display fields only (never their connections or requests)
     let posts = await Post.find(query)
       .populate({
         path: 'author',
-        select: 'name profileImage university connections sentRequests receivedRequests',
+        select: 'name profileImage university',
         populate: { path: 'university', select: 'name' }
       })
       .populate({
@@ -629,7 +630,16 @@ router.get('/feed', auth, async (req, res) => {
         select: 'name profileImage'
       })
       .sort({ createdAt: -1 })
-      .limit(parseInt(limit));
+      .limit(parseInt(limit))
+      .lean();
+
+    // Authors who have a pending request from me ("received" status), in one small query
+    // instead of loading every author's receivedRequests array
+    const authorIds = [...new Set(posts.map((p) => p?.author?._id?.toString()).filter(Boolean))];
+    const requestedAuthors = userId && authorIds.length
+      ? await User.find({ _id: { $in: authorIds }, receivedRequests: userId }).select('_id').lean()
+      : [];
+    const requestedAuthorIds = new Set(requestedAuthors.map((u) => u._id.toString()));
 
     // ========== FIX: Filter out posts with null/undefined author ==========
     const validPosts = posts.filter(post => {
@@ -662,17 +672,8 @@ router.get('/feed', auth, async (req, res) => {
           connectionStatus = 'connected';
         } else if (userSentRequests.includes(authorId)) {
           connectionStatus = 'pending';
-        } else if (author.receivedRequests && Array.isArray(author.receivedRequests)) {
-          const hasReceived = author.receivedRequests.some(id => {
-            try {
-              return id && id.toString() === userIdStr;
-            } catch (err) {
-              return false;
-            }
-          });
-          if (hasReceived) {
-            connectionStatus = 'received';
-          }
+        } else if (requestedAuthorIds.has(authorId)) {
+          connectionStatus = 'received';
         }
 
         // SAFE: Build author object with null checks
@@ -703,6 +704,17 @@ router.get('/feed', auth, async (req, res) => {
           hasViewed = false;
         }
         postObj.hasViewed = hasViewed;
+
+        // Other students' ids: viewers and poll voters are never sent (the app reads
+        // hasViewed only); favorites only says whether I saved it. likes stays a list:
+        // old builds count it with likes.length.
+        delete postObj.viewedBy;
+        postObj.favorites = userIdStr && (post.favorites || []).some((id) => id && id.toString() === userIdStr)
+          ? [userIdStr]
+          : [];
+        if (Array.isArray(postObj.poll)) {
+          postObj.poll = postObj.poll.map(({ votedBy, ...option }) => option);
+        }
 
         // SAFE: Process likes - handle null/undefined
         try {
@@ -1820,6 +1832,7 @@ router.get('/confessions/feed', auth, async (req, res) => {
       return {
         ...confession,
         authorId: undefined,
+        likedBy: undefined, // other students' ids; the app reads likedByCurrentUser
         // same shape as before (id); the name goes in campusName
         university: confession.university?._id || confession.university || null,
         campusName: confession.university?.name || null,
