@@ -1781,11 +1781,21 @@ router.get('/confessions/feed', auth, async (req, res) => {
         : { visibility: { $ne: 'campus' } };
     }
 
-    const confessions = await Confession.find(filter)
+    // Optional paging (new builds): ?limit=1..50 and ?before=<createdAt of the last one>.
+    // Without them the whole feed, as old builds expect.
+    const limit = Math.min(50, parseInt(req.query.limit, 10) || 0);
+    const before = req.query.before ? new Date(String(req.query.before)) : null;
+    if (before && !Number.isNaN(before.getTime())) {
+      filter = { $and: [filter, { createdAt: { $lt: before } }] };
+    }
+
+    let query = Confession.find(filter)
       .sort({ createdAt: -1 })
       .populate('comments.user', 'name profileImage')
       .populate('university', 'name')
       .lean();
+    if (limit > 0) query = query.limit(limit);
+    const confessions = await query;
 
     const formattedConfessions = confessions.map(confession => {
       // Hide user identity of OTHER users' comments
