@@ -372,6 +372,19 @@ const check = (name, ok, detail = "") => { if (ok) pass++; else fail++; quiet.lo
     for (const v of ["abc", "0", "-3", "2.5", ""]) { process.env.SOCIAL_PUSH_DAILY_MAX = v; if (sp.dailyMax() !== 10) check(`invalid "${v}" falls back to 10`, false, sp.dailyMax()); }
     check("invalid values (abc, 0, -3, 2.5, empty) fall back to 10", true);
     delete process.env.SOCIAL_PUSH_DAILY_MAX;
+
+    // ═════ 8. confession without a university ═════
+    quiet.log("── 8. confession by a student without a university: 400, nothing saved, no push");
+    resetGroups(); clockNow = min(noon, 200);
+    const confBefore = fake.STORE.get("confessions").length;
+    for (const visibility of ["public", "campus", undefined]) {
+      r = await request("POST", "/api/social/confessions/create", { token: T("noUni"), body: { text: "hello", ...(visibility ? { visibility } : {}) } });
+      check(`visibility ${visibility || "(old app: none)"}: 400 "add your university in your profile to post confessions"`, r.status === 400 && r.json?.error === "add your university in your profile to post confessions", `${r.status} ${r.text}`);
+    }
+    await tick(80);
+    check("nothing saved and no push", fake.STORE.get("confessions").length === confBefore && expo.requests.length === 0);
+    r = await request("POST", "/api/social/confessions/create", { token: T("sara"), body: { text: "with a university" } });
+    check("a student with a university still posts (201)", r.status === 201);
   } catch (e) {
     fail++; quiet.log("FAIL  (stopped)", e?.stack || e);
   }

@@ -1882,8 +1882,10 @@ router.post('/confessions/create', auth, async (req, res) => {
     if (!currentUser) {
       return res.status(404).json({ error: "User not found" });
     }
-    if (vis === 'campus' && !currentUser.university) {
-      return res.status(400).json({ error: "Add your university in your profile to post to your campus." });
+    // every confession belongs to a university (the schema requires it): without one the save
+    // failed with a 500. Now a clear 400, for public and campus posts alike.
+    if (!currentUser.university) {
+      return res.status(400).json({ error: "add your university in your profile to post confessions" });
     }
 
     const confession = new Confession({
