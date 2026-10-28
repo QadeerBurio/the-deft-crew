@@ -42,6 +42,8 @@ app.use(express.json({
   }
 }));
 app.use(express.urlencoded({ extended: true, limit: "5mb" }));
+// [perf] time + size of the most used GET routes (middleware/perfLog.js)
+app.use(require("./middleware/perfLog")());
 
 // Static files
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
