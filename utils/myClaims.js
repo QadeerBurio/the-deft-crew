@@ -35,4 +35,18 @@ function withMyClaim(offer, mine, userId) {
   return { ...rest, claimedBy: userId && mine.has(String(rest._id)) ? [String(userId)] : [] };
 }
 
-module.exports = { optionalUserId, myClaimedOfferIds, withMyClaim };
+// A full offer as a student (or guest) may see it: claimedBy keeps its length (old builds and the
+// admin web show "claimed by N" from claimedBy.length) but every other student's id is null, so
+// only my own id is left; redemptions are only mine; promoCodesGenerated is dropped.
+// Old builds already skip null entries when looking for their own id.
+function offerForStudent(offer, userId) {
+  const me = validId(userId);
+  const { claimedBy, redemptions, promoCodesGenerated, ...rest } = offer || {};
+  return {
+    ...rest,
+    claimedBy: (claimedBy || []).map((id) => (me && id && String(id) === me ? me : null)),
+    redemptions: me ? (redemptions || []).filter((r) => r?.student && String(r.student) === me) : [],
+  };
+}
+
+module.exports = { optionalUserId, myClaimedOfferIds, withMyClaim, offerForStudent };

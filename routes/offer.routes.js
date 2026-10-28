@@ -13,7 +13,7 @@ const { uploadOffer } = require("../config/cloudinary");
 const cache = require("../utils/cache");
 const { clearOfferCaches } = require("../utils/cache");
 const { getBrandCitiesMap } = require("../utils/brandCities");
-const { myClaimedOfferIds, withMyClaim } = require("../utils/myClaims");
+const { myClaimedOfferIds, withMyClaim, offerForStudent } = require("../utils/myClaims");
 const { geocodeInBackground } = require("../services/geo/geocoder");
 
 // Offers/claims change all the time, never let a phone or proxy cache them
@@ -380,14 +380,19 @@ router.post('/redeem-payment', auth, async (req, res) => {
 });
 
 // GET: View specific brand's offers
+// A brand's offers. Admins and the brand itself get every claim and redemption (dashboards);
+// students and guests get only their own (utils/myClaims offerForStudent), like /claimed.
 router.get("/brand/:brandId", auth, async (req, res) => {
   try {
     const cacheKey = `offers:brand:${req.params.brandId}`;
-    
+    const seesAll = req.userRole === "admin" || (req.userRole === "brand" && String(req.userId) === String(req.params.brandId));
+    const send = (offers) =>
+      res.json(seesAll ? offers : offers.map((o) => offerForStudent(o, req.isGuest ? null : req.userId)));
+
     if (!wantsFresh(req)) {
       const cached = await cache.get(cacheKey);
       if (cached) {
-        return res.json(JSON.parse(cached));
+        return send(JSON.parse(cached));
       }
     }
 
@@ -398,7 +403,7 @@ router.get("/brand/:brandId", auth, async (req, res) => {
 
     await cache.set(cacheKey, JSON.stringify(offers || []), CACHE_TTL);
 
-    res.json(offers || []);
+    send(offers || []);
   } catch (err) {
     res.json([]);
   }
