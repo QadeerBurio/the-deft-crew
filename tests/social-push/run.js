@@ -13,7 +13,7 @@ const SERVER = path.resolve(process.argv[2] || path.join(__dirname, "..", ".."))
 const reqS = Module.createRequire(path.join(SERVER, "server.js"));
 process.env.JWT_SECRET = "test-only";
 process.env.DISABLE_NOTIFICATION_PUSH = "true";
-for (const k of ["MONGO_URI", "MONGODB_URI", "REDIS_URL", "SOCIAL_PUSH_POSTS", "SOCIAL_PUSH_CONFESSIONS", "SOCIAL_PUSH_SKILLSHARE", "SOCIAL_PUSH_DAILY_MAX", "EXPO_ACCESS_TOKEN"]) delete process.env[k];
+for (const k of ["MONGO_URI", "MONGODB_URI", "REDIS_URL", "SOCIAL_PUSH_POSTS", "SOCIAL_PUSH_CONFESSIONS", "SOCIAL_PUSH_SKILLSHARE", "SOCIAL_PUSH_DAILY_MAX", "SOCIAL_PUSH_GROUP_MINUTES", "SOCIAL_PUSH_QUIET_HOURS", "EXPO_ACCESS_TOKEN"]) delete process.env[k];
 
 // ---------- fake Expo: records every request ----------
 const expo = { requests: [], delayMs: 0, dead: new Set() };
@@ -179,6 +179,7 @@ const check = (name, ok, detail = "") => { if (ok) pass++; else fail++; quiet.lo
 
     resetGroups();
     for (const k of ["SOCIAL_PUSH_POSTS", "SOCIAL_PUSH_CONFESSIONS", "SOCIAL_PUSH_SKILLSHARE"]) process.env[k] = "true";
+    process.env.SOCIAL_PUSH_GROUP_MINUTES = "5"; // sections 3-4: a 5-minute grouping window
     const noon = at("2026-10-28T07:00:00Z"); // 12:00 Karachi
     await sp.enqueue("post", { id: seedPost("ali"), authorId: ids.ali, authorName: "Ali Khan", text: "first" }, { now: noon });
     check("the first post sends at once", expo.requests.length === 1 && titles()[0].includes("Ali posted on campus"), titles().join(" | "));
@@ -267,6 +268,7 @@ const check = (name, ok, detail = "") => { if (ok) pass++; else fail++; quiet.lo
 
     // ═════ 5. the create routes ═════
     quiet.log("── 5. create routes: background push, never slower, privacy end to end");
+    delete process.env.SOCIAL_PUSH_GROUP_MINUTES; // the default: no window
     for (const k of ["SOCIAL_PUSH_POSTS", "SOCIAL_PUSH_CONFESSIONS", "SOCIAL_PUSH_SKILLSHARE"]) process.env[k] = "true";
     let clockNow = noon;
     sp._test.setClock(() => clockNow);
@@ -357,14 +359,15 @@ const check = (name, ok, detail = "") => { if (ok) pass++; else fail++; quiet.lo
     expo.requests.length = 0;
     await pushOf(0, at("2026-10-29T05:00:00Z"));
     check("the next Karachi day Sara gets pushes again", saraGot() === 1);
-    // a combined push counts once
-    resetGroups(); resetDaily();
+    // a combined push counts once (with a 5-minute window)
+    resetGroups(); resetDaily(); process.env.SOCIAL_PUSH_GROUP_MINUTES = "5";
     const day3 = at("2026-10-30T05:00:00Z");
     await sp.enqueue("post", { id: seedPost("ali"), authorId: ids.ali, authorName: "Ali", text: "a" }, { now: day3 });
     for (let i = 1; i <= 3; i++) await sp.enqueue("post", { id: seedPost("ali"), authorId: ids.ali, authorName: "Ali", text: `b${i}` }, { now: min(day3, i) });
     await sp.flushDue({ now: min(day3, 5) });
     const saraDoc = fake.STORE.get("socialpushdailies").find((d) => String(d.user) === String(ids.sara));
     check("1 single + 1 combined (\"3 new posts\") count as 2", expo.requests.length === 2 && saraDoc?.count === 2, `${expo.requests.length} ${saraDoc?.count}`);
+    delete process.env.SOCIAL_PUSH_GROUP_MINUTES;
     // configurable
     resetGroups(); resetDaily(); process.env.SOCIAL_PUSH_DAILY_MAX = "2";
     for (let i = 0; i < 4; i++) await pushOf(i, min(at("2026-10-31T05:00:00Z"), i * 6));
@@ -404,6 +407,44 @@ const check = (name, ok, detail = "") => { if (ok) pass++; else fail++; quiet.lo
     check("guest token: 401", r.status === 401);
     r = await request("POST", "/api/listings", { token: T("sara"), body: { ...LISTING_BODY, title: "" } });
     check("validation still answers 400", r.status === 400, r.text);
+
+    // ═════ 10. SOCIAL_PUSH_GROUP_MINUTES ═════
+    quiet.log("── 10. grouping window: 0 (default) = one push per item at once; N = grouped");
+    delete process.env.SOCIAL_PUSH_GROUP_MINUTES;
+    const sec = (d, s) => new Date(d.getTime() + s * 1000);
+    const day10 = at("2026-11-02T07:00:00Z"); // 12:00 Karachi
+    resetGroups(); resetDaily();
+    check("unset: no window", sp.groupMs() === 0);
+    for (let i = 0; i < 3; i++) await sp.enqueue("post", { id: seedPost("ali"), authorId: ids.ali, authorName: "Ali", text: `post ${i}` }, { now: sec(day10, i * 5) });
+    check("window 0: 3 posts in 10 seconds = 3 pushes, each its own (\"Ali posted on campus\" + its text)", expo.requests.length === 3 && expo.requests.every((q, i) => q[0].title.includes("Ali posted on campus") && q[0].body === `post ${i}`), titles().join(" | "));
+    check("window 0: nothing left waiting", !fake.STORE.get("socialpushgroups").some((g) => g.status === "open"));
+    resetGroups();
+    await Promise.all([0, 1, 2].map((i) => sp.enqueue("listing", { id: seedListing("ali"), authorId: ids.ali, title: `same moment ${i}` }, { now: day10 })));
+    check("window 0: 3 listings saved at the same moment = 3 separate pushes, never combined", expo.requests.length === 3 && expo.requests.every((q) => !/new skillshare listings/.test(q[0].title)), titles().join(" | "));
+    resetGroups();
+    r = await request("POST", "/api/social/create-post", { token: T("sara"), body: { content: "route one" } });
+    const r2 = await request("POST", "/api/social/create-post", { token: T("sara"), body: { content: "route two" } });
+    await waitFor(() => expo.requests.length === 2);
+    check("window 0 through the real route: two posts right after each other = two pushes", r.status === 201 && r2.status === 201 && expo.requests.length === 2, `${expo.requests.length}`);
+    // N > 0: grouped
+    resetGroups(); resetDaily(); process.env.SOCIAL_PUSH_GROUP_MINUTES = "5";
+    const day10b = at("2026-11-03T07:00:00Z");
+    for (let i = 0; i < 3; i++) await sp.enqueue("post", { id: seedPost("ali"), authorId: ids.ali, authorName: "Ali", text: `g ${i}` }, { now: sec(day10b, i * 5) });
+    check("window 5: 3 posts in 10 seconds = 1 push now, the other 2 wait", expo.requests.length === 1);
+    await sp.flushDue({ now: min(day10b, 5) });
+    check("window 5: the 2 go together after 5 minutes (\"2 new posts on campus\")", expo.requests.length === 2 && titles()[1].includes("2 new posts on campus"), titles().join(" | "));
+    process.env.SOCIAL_PUSH_GROUP_MINUTES = "1";
+    resetGroups();
+    const day10c = at("2026-11-04T07:00:00Z");
+    await sp.enqueue("post", { id: seedPost("ali"), authorId: ids.ali, authorName: "Ali", text: "a" }, { now: day10c });
+    await sp.enqueue("post", { id: seedPost("ali"), authorId: ids.ali, authorName: "Ali", text: "b" }, { now: sec(day10c, 20) });
+    await sp.flushDue({ now: sec(day10c, 59) });
+    const before = expo.requests.length;
+    await sp.flushDue({ now: sec(day10c, 60) });
+    check("window 1: the second waits exactly 1 minute", before === 1 && expo.requests.length === 2);
+    for (const v of ["abc", "-2", "", "0"]) { process.env.SOCIAL_PUSH_GROUP_MINUTES = v; if (sp.groupMs() !== 0) check(`"${v}" means no window`, false, sp.groupMs()); }
+    check("0, negative, empty or not a number: no window", true);
+    delete process.env.SOCIAL_PUSH_GROUP_MINUTES;
   } catch (e) {
     fail++; quiet.log("FAIL  (stopped)", e?.stack || e);
   }

@@ -189,12 +189,18 @@ async function countSent(userIds, day) {
   }
 }
 
-// ── Grouping, flood guard, quiet hours ──
-// At most one push per kind (and per university for confessions) every 5 minutes; items in
-// that window are combined ("4 new posts on campus"). 23:00–09:00 Karachi nothing is sent:
-// those items go out together at 09:00. The create request only adds the item (in the
-// background); a timer sends groups that are due.
-const FLOOD_MS = 5 * 60 * 1000;
+// ── Grouping, quiet hours ──
+// By default every item sends its own push right away. With a window (SOCIAL_PUSH_GROUP_MINUTES)
+// at most one push per kind (and per university for confessions) per window; items in it are
+// combined ("4 new posts on campus"). 23:00–09:00 Karachi nothing is sent: those items go out
+// together at 09:00. The create request only adds the item (in the background); a timer sends
+// groups that are due.
+// Grouping window: SOCIAL_PUSH_GROUP_MINUTES (default 0). 0 = every item sends its own push right
+// after the save; N > 0 = at most one push per kind (and university) every N minutes, combined.
+function groupMs() {
+  const n = Number(process.env.SOCIAL_PUSH_GROUP_MINUTES);
+  return Number.isFinite(n) && n > 0 ? n * 60 * 1000 : 0;
+}
 const QUIET = { quietStart: 23, quietEnd: 9 };
 const PKT_MS = 5 * 60 * 60 * 1000;
 let clock = () => new Date(); // tests set a fixed time (_test.setClock)
@@ -213,7 +219,7 @@ async function nextSlot(kind, scope, now) {
     .select("sentAt")
     .lean();
   let at = now;
-  if (last?.sentAt) at = new Date(Math.max(now.getTime(), new Date(last.sentAt).getTime() + FLOOD_MS));
+  if (last?.sentAt) at = new Date(Math.max(now.getTime(), new Date(last.sentAt).getTime() + groupMs()));
   if (isQuietHour(at, QUIET)) at = quietEnd(at);
   return at;
 }
@@ -241,6 +247,15 @@ async function enqueue(kind, item, { now = clock() } = {}) {
   if (!stored.id || !stored.authorId) return { queued: false, reason: "bad_item" };
 
   const sendAfter = await nextSlot(kind, scope, now);
+
+  // No window (the default), not waiting for the morning: this item gets its own push now, in a
+  // group of its own, so two items saved at the same moment are never combined
+  if (groupMs() === 0 && sendAfter <= now) {
+    const own = await SocialPushGroup.create({ kind, scope, items: [stored], sendAfter: now, createdAt: now });
+    await flush(own._id, { now });
+    return { queued: true, groupId: own._id, sendAfter: now };
+  }
+
   const group = await SocialPushGroup.findOneAndUpdate(
     { kind, scope, status: "open" },
     { $push: { items: stored }, $setOnInsert: { sendAfter, createdAt: now } },
@@ -333,4 +348,4 @@ function startScheduler(everyMs = 60 * 1000) {
 
 const _test = { setClock: (fn) => { clock = fn || (() => new Date()); } };
 
-module.exports = { _test, KINDS, isOn, dailyMax, buildContent, findRecipients, sendToStudents, snippet, enqueue, flush, flushDue, startScheduler, quietEnd, FLOOD_MS };
+module.exports = { _test, KINDS, isOn, dailyMax, buildContent, findRecipients, sendToStudents, snippet, enqueue, flush, flushDue, startScheduler, quietEnd, groupMs };
