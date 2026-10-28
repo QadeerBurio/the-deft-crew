@@ -39,19 +39,26 @@ router.post('/upload', auth, (req, res) => {
 });
 
 // 1. POST /api/listings - Create a new listing
+// What a student may set on a new listing. The owner always comes from the token (the app also
+// sends ownerId: ignored); status, positionsFilled, _id and timestamps belong to the server.
+const LISTING_FIELDS = [
+  'type', 'title', 'description',
+  'skillOffered', 'skillWanted', 'skillNeeded',
+  'price', 'duration', 'syllabus', 'attachments',
+  'budget', 'positionsAvailable',
+];
+
 router.post('/', auth, async (req, res) => {
   try {
-    const userId = getUserId(req);
-    const ownerId = userId || req.body.ownerId;
-    
-    if (!ownerId) {
-      return res.status(400).json({ error: 'User ID is required' });
+    const ownerId = getUserId(req);
+    if (req.isGuest || !ownerId) {
+      return res.status(401).json({ error: 'Sign in to create a listing' });
     }
 
-    const listingData = {
-      ...req.body,
-      ownerId: ownerId
-    };
+    const listingData = { ownerId };
+    for (const k of LISTING_FIELDS) {
+      if (req.body[k] !== undefined) listingData[k] = req.body[k];
+    }
 
     const listing = new Listing(listingData);
     await listing.validate();

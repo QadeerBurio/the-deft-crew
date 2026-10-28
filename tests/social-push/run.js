@@ -385,6 +385,25 @@ const check = (name, ok, detail = "") => { if (ok) pass++; else fail++; quiet.lo
     check("nothing saved and no push", fake.STORE.get("confessions").length === confBefore && expo.requests.length === 0);
     r = await request("POST", "/api/social/confessions/create", { token: T("sara"), body: { text: "with a university" } });
     check("a student with a university still posts (201)", r.status === 201);
+
+    // ═════ 9. POST /listings: only student fields ═════
+    quiet.log("── 9. POST /listings accepts only what a student may set");
+    resetGroups(); clockNow = min(noon, 300);
+    const sneaky = { ...LISTING_BODY, title: "status test", status: "closed", positionsFilled: 99, ownerId: String(ids.omar), _id: String(oid()), createdAt: "2001-01-01T00:00:00Z", isFeatured: true };
+    r = await request("POST", "/api/listings", { token: T("sara"), body: sneaky });
+    const saved = fake.STORE.get("listings").find((l) => l.title === "status test");
+    check("201, and the status sent by the client is ignored (open)", r.status === 201 && saved?.status === "open", `${r.status} ${saved?.status}`);
+    check("positionsFilled, _id, createdAt and unknown fields from the body are ignored", saved && saved.positionsFilled !== 99 && String(saved._id) !== sneaky._id && new Date(saved.createdAt).getFullYear() !== 2001 && !("isFeatured" in saved), JSON.stringify({ pf: saved?.positionsFilled, c: saved?.createdAt }));
+    check("the owner comes from the token, not the body (Sara, not Omar)", saved && String(saved.ownerId) === String(ids.sara));
+    check("every field the app sends is kept", saved && saved.type === "paid" && saved.price === 1000 && saved.duration === "4 weeks" && saved.skillOffered?.skillName === "Python" && saved.description === "4 weeks of basics");
+    await tick(80);
+    check("and it is pushed as an open listing", expo.requests.length === 1 && expo.requests[0][0].title.includes("status test"));
+    r = await request("POST", "/api/listings", { body: LISTING_BODY });
+    check("no account (guest): 401", r.status === 401, `${r.status} ${r.text}`);
+    r = await request("POST", "/api/listings", { token: "guest-token-2024", body: LISTING_BODY });
+    check("guest token: 401", r.status === 401);
+    r = await request("POST", "/api/listings", { token: T("sara"), body: { ...LISTING_BODY, title: "" } });
+    check("validation still answers 400", r.status === 400, r.text);
   } catch (e) {
     fail++; quiet.log("FAIL  (stopped)", e?.stack || e);
   }
