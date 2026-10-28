@@ -219,8 +219,12 @@ router.get("/claimed", auth, async (req, res) => {
         return r.student?.toString() === req.userId && redeemDate.getTime() === today.getTime();
       }) || [];
       
+      // Only my own claim and redemptions; never other students' ids, bills or promo codes
+      const { claimedBy, redemptions, promoCodesGenerated, ...offerFields } = offer;
       return {
-        ...offer,
+        ...offerFields,
+        claimedBy: [String(req.userId)],
+        redemptions: (redemptions || []).filter((r) => r.student?.toString() === String(req.userId)),
         redemptionsToday: todayRedemptions.length,
         maxRedemptionsPerDay: 2,
         canRedeem: todayRedemptions.length < 2,
