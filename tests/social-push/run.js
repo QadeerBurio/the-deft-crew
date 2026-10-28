@@ -177,6 +177,7 @@ const check = (name, ok, detail = "") => { if (ok) pass++; else fail++; quiet.lo
     const seedListing = (author, status = "open") => { const id = oid(); fake.seed("listings", [{ _id: id, ownerId: ids[author], type: "paid", title: "t", description: "d", status }]); return id; };
 
     resetGroups();
+    for (const k of ["SOCIAL_PUSH_POSTS", "SOCIAL_PUSH_CONFESSIONS", "SOCIAL_PUSH_SKILLSHARE"]) process.env[k] = "true";
     const noon = at("2026-10-28T07:00:00Z"); // 12:00 Karachi
     await sp.enqueue("post", { id: seedPost("ali"), authorId: ids.ali, authorName: "Ali Khan", text: "first" }, { now: noon });
     check("the first post sends at once", expo.requests.length === 1 && titles()[0].includes("Ali posted on campus"), titles().join(" | "));
@@ -237,6 +238,31 @@ const check = (name, ok, detail = "") => { if (ok) pass++; else fail++; quiet.lo
     await sp.enqueue("post", { id: seedPost("sara"), authorId: ids.sara, authorName: "Sara", text: "y" }, { now: min(noon, 1) });
     await Promise.all([sp.flushDue({ now: min(noon, 6) }), sp.flushDue({ now: min(noon, 6) })]);
     check("two timers running at once still send the group once", expo.requests.length === 2, `${expo.requests.length}`);
+
+    // ═════ 4. switches ═════
+    quiet.log("── 4. SOCIAL_PUSH_POSTS / _CONFESSIONS / _SKILLSHARE");
+    resetGroups();
+    for (const k of ["SOCIAL_PUSH_POSTS", "SOCIAL_PUSH_CONFESSIONS", "SOCIAL_PUSH_SKILLSHARE"]) delete process.env[k];
+    const offs = [];
+    offs.push(await sp.enqueue("post", { id: seedPost("ali"), authorId: ids.ali, authorName: "Ali", text: "x" }, { now: noon }));
+    offs.push(await sp.enqueue("confession", { id: seedConf("ali", U1), authorId: ids.ali, universityId: U1 }, { now: noon }));
+    offs.push(await sp.enqueue("listing", { id: seedListing("ali"), authorId: ids.ali, title: "x" }, { now: noon }));
+    check("all three off by default (unset): nothing queued or sent", offs.every((o) => o.reason === "switched_off") && expo.requests.length === 0 && fake.STORE.get("socialpushgroups").length === 0);
+    for (const v of ["TRUE", "1", "yes", "on", " true"]) {
+      process.env.SOCIAL_PUSH_POSTS = v;
+      const o = await sp.enqueue("post", { id: seedPost("ali"), authorId: ids.ali, authorName: "Ali", text: "x" }, { now: noon });
+      if (o.reason !== "switched_off") { check(`"${v}" is not "true": off`, false, o.reason); }
+    }
+    check("anything but exactly \"true\" counts as off (TRUE, 1, yes, on, ' true')", expo.requests.length === 0);
+    process.env.SOCIAL_PUSH_POSTS = "true";
+    check("posts on, the other two still off", sp.isOn("post") && !sp.isOn("confession") && !sp.isOn("listing"));
+    await sp.enqueue("post", { id: seedPost("ali"), authorId: ids.ali, authorName: "Ali", text: "x" }, { now: noon });
+    await sp.enqueue("post", { id: seedPost("sara"), authorId: ids.sara, authorName: "Sara", text: "y" }, { now: min(noon, 1) });
+    check("on: the first post sends, the second waits", expo.requests.length === 1);
+    process.env.SOCIAL_PUSH_POSTS = "false";
+    await sp.flushDue({ now: min(noon, 6) });
+    const waited = fake.STORE.get("socialpushgroups").find((x) => x.reason === "switched_off");
+    check("switched off while waiting: the waiting group is dropped, nothing sent", expo.requests.length === 1 && !!waited);
   } catch (e) {
     fail++; quiet.log("FAIL  (stopped)", e?.stack || e);
   }

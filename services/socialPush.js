@@ -18,10 +18,14 @@ const SocialPushGroup = require("../models/SocialPushGroup");
 const { isQuietHour } = require("../utils/karachiTime");
 
 const KINDS = {
-  post: { type: "social_post", pref: "posts" },
-  confession: { type: "social_confession", pref: "confessions" },
-  listing: { type: "skillshare_listing", pref: "skillshare" },
+  post: { type: "social_post", pref: "posts", env: "SOCIAL_PUSH_POSTS" },
+  confession: { type: "social_confession", pref: "confessions", env: "SOCIAL_PUSH_CONFESSIONS" },
+  listing: { type: "skillshare_listing", pref: "skillshare", env: "SOCIAL_PUSH_SKILLSHARE" },
 };
+
+// Railway switches, off unless exactly "true". Read every time (no restart needed for code,
+// though Railway restarts the service when a variable changes).
+const isOn = (kind) => process.env[KINDS[kind]?.env] === "true";
 const PAGE = 1000; // students read per query
 
 // one line, at most `max` characters ("…" when cut)
@@ -188,6 +192,7 @@ function itemFor(kind, item) {
 // confession: { id, authorId, universityId }  listing: { id, authorId, title }
 async function enqueue(kind, item, { now = new Date() } = {}) {
   if (!KINDS[kind]) throw new Error(`socialPush: unknown kind ${kind}`);
+  if (!isOn(kind)) return { queued: false, reason: "switched_off" };
   let scope = "all";
   if (kind === "confession") {
     const uni = asId(item.universityId);
@@ -229,6 +234,12 @@ async function flush(groupId, { now = new Date() } = {}) {
     { new: true }
   ).lean();
   if (!group) return { sent: false, reason: "not_due" };
+
+  // switched off while waiting: nothing goes out
+  if (!isOn(group.kind)) {
+    await SocialPushGroup.updateOne({ _id: group._id }, { $set: { status: "dropped", reason: "switched_off" } });
+    return { sent: false, reason: "switched_off" };
+  }
 
   try {
     const items = await stillThere(group.kind, group.items || []);
@@ -278,4 +289,4 @@ function startScheduler(everyMs = 60 * 1000) {
   if (timer.unref) timer.unref();
 }
 
-module.exports = { KINDS, buildContent, findRecipients, sendToStudents, snippet, enqueue, flush, flushDue, startScheduler, quietEnd, FLOOD_MS };
+module.exports = { KINDS, isOn, buildContent, findRecipients, sendToStudents, snippet, enqueue, flush, flushDue, startScheduler, quietEnd, FLOOD_MS };
