@@ -464,7 +464,10 @@ router.get("/my-total-savings", auth, async (req, res) => {
     }
     const uid = new mongoose.Types.ObjectId(req.userId);
 
+    // First $match uses the redemptions.student index (only offers I redeemed), then the
+    // second keeps only my own redemptions inside them. Was $unwind over every offer first.
     const result = await Offer.aggregate([
+      { $match: { "redemptions.student": uid } },
       { $unwind: "$redemptions" },
       { $match: { "redemptions.student": uid } },
       {
