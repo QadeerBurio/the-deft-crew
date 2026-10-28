@@ -128,6 +128,9 @@ app.use("/api/engagement", reqS("./routes/engagement.routes"));
 app.get("/api/v1/stream", (req, res) => { res.json({ big: "x".repeat(5000) }); });
 app.get("/api/test/sse", (req, res) => { res.setHeader("Content-Type", "text/event-stream"); res.end("data: " + "y".repeat(5000) + "\n\n"); });
 app.get("/api/test/big", (req, res) => { res.json({ big: "z".repeat(5000) }); });
+app.get("/api/test/req-user", reqS("./middleware/auth.middleware"), (req, res) => {
+  res.json({ keys: Object.keys(req.user).sort(), id: req.user.id, _id: String(req.user._id), isDoc: typeof req.user.save === "function", role: req.userRole });
+});
 
 // ---------- seed ----------
 const oid = () => new mongoose.Types.ObjectId();
@@ -380,6 +383,16 @@ const others = Object.values(STUDENT_IDS);
   check("R1 the brand itself still sees every claim (brand dashboard)", idPaths(brandOwner.json, others).length > 0);
   const otherBrand = await get(`/api/offers/brand/${ids.brand2}`, { tok: token(ids.brand1, "brand") });
   check("R1 another brand is trimmed like a student", Array.isArray(otherBrand.json) && idPaths(otherBrand.json, others).length === 0);
+
+  // ===== R2 auth middleware loads only the fields routes use =====
+  r = await get("/api/test/req-user", { tok: T.a });
+  const allowedKeys = ["_id", "id", "role", "name", "email", "university", "phone", "location", "headline"];
+  check("R2 req.user has only the fields routes read", r.json?.keys?.every((k) => allowedKeys.includes(k)) && ["_id", "id", "role", "name", "email", "university"].every((k) => r.json.keys.includes(k)), JSON.stringify(r.json?.keys));
+  check("R2 req.user.id is the id string (Mongoose virtual kept)", r.json?.id === String(ids.a) && r.json._id === String(ids.a));
+  check("R2 a plain object (lean), never the password or push tokens", r.json?.isDoc === false && !r.json.keys.includes("password") && !r.json.keys.includes("pushTokens"));
+  check("R2 req.userRole unchanged", r.json?.role === "student");
+  const gone = await get("/api/test/req-user", { tok: token(oid()) });
+  check("R2 unknown user still 401", gone.status === 401);
 
   // ===== every response =====
   const leaky = all.filter((x) => leaksIn(x).length);
