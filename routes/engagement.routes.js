@@ -362,36 +362,26 @@ router.get('/me', auth, async (req, res) => {
     let lifetimeActivity = 0;
 
     try {
-      const [lifetimeAgg, referralAgg, activityAgg] = await Promise.all([
-        PointsLedger.aggregate([
-          { $match: { user: userIdObj, delta: { $gt: 0 } } },
-          { $group: { _id: null, total: { $sum: '$delta' } } },
-        ]),
-        PointsLedger.aggregate([
-          {
-            $match: {
-              user: userIdObj,
-              delta: { $gt: 0 },
-              reason: { $regex: '^referral' },
+      // One pass over my positive ledger rows (was three aggregates every 60 s poll):
+      // total, and the part whose reason starts with "referral". Activity = the rest.
+      const [agg] = await PointsLedger.aggregate([
+        { $match: { user: userIdObj, delta: { $gt: 0 } } },
+        {
+          $group: {
+            _id: null,
+            total: { $sum: '$delta' },
+            referral: {
+              $sum: {
+                $cond: [{ $eq: [{ $substrCP: [{ $ifNull: ['$reason', ''] }, 0, 8] }, 'referral'] }, '$delta', 0],
+              },
             },
           },
-          { $group: { _id: null, total: { $sum: '$delta' } } },
-        ]),
-        PointsLedger.aggregate([
-          {
-            $match: {
-              user: userIdObj,
-              delta: { $gt: 0 },
-              reason: { $not: { $regex: '^referral' } },
-            },
-          },
-          { $group: { _id: null, total: { $sum: '$delta' } } },
-        ]),
+        },
       ]);
 
-      lifetime = lifetimeAgg?.[0]?.total || 0;
-      lifetimeReferral = referralAgg?.[0]?.total || 0;
-      lifetimeActivity = activityAgg?.[0]?.total || 0;
+      lifetime = agg?.total || 0;
+      lifetimeReferral = agg?.referral || 0;
+      lifetimeActivity = lifetime - lifetimeReferral;
     } catch (e) {
       console.warn('[engagement/me] ledger agg failed:', e.message);
       lifetime = profile?.points?.lifetime || 0;

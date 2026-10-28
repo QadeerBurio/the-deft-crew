@@ -4,6 +4,8 @@ const Offer = require("../models/Offer");
 const User = require("../models/User");
 const Branch = require("../models/Branch");
 const auth = require("../middleware/auth.middleware");
+const cache = require("../utils/cache");
+const { optionalUserId, myClaimedOfferIds, withMyClaim } = require("../utils/myClaims");
 
 const {
   DEFAULT_CITY,
@@ -20,8 +22,21 @@ router.use((req, res, next) => {
   next();
 });
 
-// Loads approved brands with their cities (brand city + active branch cities)
+// Approved brands change rarely (approval, logo); the list is shared by every phone, so it is
+// kept 120 s in the shared cache. Offer writes and brand approval clear it ("brands:" prefix).
+const BRANDS_CACHE_KEY = "brands:approved";
+const BRANDS_CACHE_TTL = 120;
+
 async function loadApprovedBrands() {
+  const cached = await cache.get(BRANDS_CACHE_KEY);
+  if (cached) return JSON.parse(cached);
+  const list = await queryApprovedBrands();
+  await cache.set(BRANDS_CACHE_KEY, JSON.stringify(list), BRANDS_CACHE_TTL);
+  return list;
+}
+
+// Loads approved brands with their cities (brand city + active branch cities)
+async function queryApprovedBrands() {
   const brands = await User.find({
     role: "brand",
     brandApprovalStatus: "approved",
@@ -63,6 +78,10 @@ router.get("/", async (req, res) => {
     if (city && city.toLowerCase() !== "all") {
       list = list.filter((b) => matchesCity(b.cities, city));
     }
+
+    // ?limit=N: the first N (newest first). No limit = every approved brand, as before.
+    const limit = parseInt(req.query.limit, 10);
+    if (Number.isFinite(limit) && limit > 0) list = list.slice(0, limit);
 
     res.json(list);
   } catch (err) {
@@ -168,12 +187,15 @@ router.get("/nearby", async (req, res) => {
     const offers = await Offer.find({ brand: { $in: brands.map((b) => b._id) } })
       .select("_id title discountPercentage category image isOnline isInStore claimedBy brand")
       .lean();
+    // claimedBy: only the caller's own claim (public route: token optional, never required)
+    const me = optionalUserId(req);
+    const mine = await myClaimedOfferIds(me);
     const offersByBrand = new Map();
     for (const o of offers) {
       const k = o.brand.toString();
       if (!offersByBrand.has(k)) offersByBrand.set(k, []);
       const { brand, ...rest } = o;
-      offersByBrand.get(k).push(rest);
+      offersByBrand.get(k).push(withMyClaim(rest, mine, me));
     }
 
     const list = brands

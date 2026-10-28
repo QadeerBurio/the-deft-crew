@@ -13,6 +13,7 @@ const { uploadOffer } = require("../config/cloudinary");
 const cache = require("../utils/cache");
 const { clearOfferCaches } = require("../utils/cache");
 const { getBrandCitiesMap } = require("../utils/brandCities");
+const { myClaimedOfferIds, withMyClaim } = require("../utils/myClaims");
 const { geocodeInBackground } = require("../services/geo/geocoder");
 
 // Offers/claims change all the time, never let a phone or proxy cache them
@@ -218,8 +219,12 @@ router.get("/claimed", auth, async (req, res) => {
         return r.student?.toString() === req.userId && redeemDate.getTime() === today.getTime();
       }) || [];
       
+      // Only my own claim and redemptions; never other students' ids, bills or promo codes
+      const { claimedBy, redemptions, promoCodesGenerated, ...offerFields } = offer;
       return {
-        ...offer,
+        ...offerFields,
+        claimedBy: [String(req.userId)],
+        redemptions: (redemptions || []).filter((r) => r.student?.toString() === String(req.userId)),
         redemptionsToday: todayRedemptions.length,
         maxRedemptionsPerDay: 2,
         canRedeem: todayRedemptions.length < 2,
@@ -400,45 +405,54 @@ router.get("/brand/:brandId", auth, async (req, res) => {
 });
 
 // GET: Offers summary
+// { brandId: [offer] } for every brand. The shared, cached part has no claims; each response
+// adds only the caller's own (claimedBy: [me] or []), never other students' ids.
 router.get("/summary", auth, async (req, res) => {
   try {
     const cacheKey = 'offers:summary';
-    
+    let summaryMap = null;
+
     if (!wantsFresh(req)) {
       const cached = await cache.get(cacheKey);
-      if (cached) {
-        return res.json(JSON.parse(cached));
-      }
+      if (cached) summaryMap = JSON.parse(cached);
     }
 
-    const offers = await Offer.aggregate([
-      {
-        $group: {
-          _id: "$brand",
-          offers: {
-            $push: {
-              _id: "$_id",
-              title: "$title",
-              discountPercentage: "$discountPercentage",
-              category: "$category",
-              image: "$image",
-              isOnline: "$isOnline",
-              isInStore: "$isInStore",
-              claimedBy: "$claimedBy"
+    if (!summaryMap) {
+      const offers = await Offer.aggregate([
+        {
+          $group: {
+            _id: "$brand",
+            offers: {
+              $push: {
+                _id: "$_id",
+                title: "$title",
+                discountPercentage: "$discountPercentage",
+                category: "$category",
+                image: "$image",
+                isOnline: "$isOnline",
+                isInStore: "$isInStore"
+              }
             }
           }
         }
-      }
-    ]);
+      ]);
 
-    const summaryMap = {};
-    offers.forEach(item => {
-      summaryMap[item._id] = item.offers;
-    });
+      summaryMap = {};
+      offers.forEach(item => {
+        summaryMap[item._id] = item.offers;
+      });
 
-    await cache.set(cacheKey, JSON.stringify(summaryMap), CACHE_TTL);
+      await cache.set(cacheKey, JSON.stringify(summaryMap), CACHE_TTL);
+    }
 
-    res.json(summaryMap);
+    const me = req.isGuest ? null : req.userId;
+    const mine = await myClaimedOfferIds(me);
+    const result = {};
+    for (const [brandId, list] of Object.entries(summaryMap)) {
+      result[brandId] = (list || []).map((o) => withMyClaim(o, mine, me));
+    }
+
+    res.json(result);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -454,7 +468,10 @@ router.get("/my-total-savings", auth, async (req, res) => {
     }
     const uid = new mongoose.Types.ObjectId(req.userId);
 
+    // First $match uses the redemptions.student index (only offers I redeemed), then the
+    // second keeps only my own redemptions inside them. Was $unwind over every offer first.
     const result = await Offer.aggregate([
+      { $match: { "redemptions.student": uid } },
       { $unwind: "$redemptions" },
       { $match: { "redemptions.student": uid } },
       {
@@ -1006,33 +1023,45 @@ router.get("/student/:studentId", auth, async (req, res) => {
   }
 });
 
+// Public: approved brands with their offers (guest "top discounts" on Home).
+// Two queries (was one per brand) and a 120 s shared cache ("brands:" prefix, cleared on offer
+// writes and brand approval). Same response shape as before.
+const BRANDSS_CACHE_KEY = "brands:brandss";
 router.get("/brandss", async (req, res) => {
   try {
-    const brands = await User.find({ role: "brand" })
+    const cached = await cache.get(BRANDSS_CACHE_KEY);
+    if (cached) return res.type("json").send(cached);
+
+    const brands = await User.find({ role: "brand", brandApprovalStatus: "approved" })
       .select("name logo category description location")
       .lean()
       .exec();
 
-    const brandsWithOffers = await Promise.all(
-      brands.map(async (brand) => {
-        const offers = await Offer.find({ brand: brand._id })
-          .select("title description discountPercentage category image isOnline isInStore location createdAt")
+    const offers = brands.length
+      ? await Offer.find({ brand: { $in: brands.map((b) => b._id) } })
+          .select("brand title description discountPercentage category image isOnline isInStore location createdAt")
           .lean()
-          .exec();
-        
-        return {
-          ...brand,
-          offersCount: offers.length,
-          offers: offers
-        };
-      })
-    );
+          .exec()
+      : [];
+    const byBrand = new Map();
+    for (const { brand, ...offer } of offers) {
+      const k = String(brand);
+      if (!byBrand.has(k)) byBrand.set(k, []);
+      byBrand.get(k).push(offer);
+    }
 
-    res.json({
+    const brandsWithOffers = brands.map((brand) => {
+      const list = byBrand.get(String(brand._id)) || [];
+      return { ...brand, offersCount: list.length, offers: list };
+    });
+
+    const body = JSON.stringify({
       success: true,
       count: brandsWithOffers.length,
       brands: brandsWithOffers
     });
+    await cache.set(BRANDSS_CACHE_KEY, body, CACHE_TTL);
+    res.type("json").send(body);
   } catch (err) {
     console.error("Error fetching brands:", err);
     res.status(500).json({ 
