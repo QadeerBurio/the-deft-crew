@@ -158,14 +158,17 @@ async function sendToStudents(kind, items, students) {
 // ── Daily ceiling ──
 // At most SOCIAL_PUSH_DAILY_MAX (default 10) social pushes per student per Karachi day, the three
 // kinds together; a combined push counts as one. Reached: nothing more that day.
+// 0 = no limit (Infinity). Not a whole number ≥ 0 = the default.
 function dailyMax() {
-  const n = Number(process.env.SOCIAL_PUSH_DAILY_MAX);
+  const raw = process.env.SOCIAL_PUSH_DAILY_MAX;
+  const n = Number(raw);
+  if (raw !== undefined && String(raw).trim() !== "" && n === 0) return Infinity;
   return Number.isInteger(n) && n > 0 ? n : 10;
 }
 
-// students who still have room today
+// students who still have room today (still counted with no limit, so a limit set later is right)
 async function underCeiling(students, day) {
-  if (!students.length) return students;
+  if (!students.length || dailyMax() === Infinity) return students;
   const full = await SocialPushDaily.find({ day, count: { $gte: dailyMax() }, user: { $in: students.map((s) => s._id) } })
     .select("user")
     .lean();

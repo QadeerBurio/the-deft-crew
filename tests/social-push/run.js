@@ -372,8 +372,19 @@ const check = (name, ok, detail = "") => { if (ok) pass++; else fail++; quiet.lo
     resetGroups(); resetDaily(); process.env.SOCIAL_PUSH_DAILY_MAX = "2";
     for (let i = 0; i < 4; i++) await pushOf(i, min(at("2026-10-31T05:00:00Z"), i * 6));
     check("SOCIAL_PUSH_DAILY_MAX=2: Sara gets 2", saraGot() === 2, `${saraGot()}`);
-    for (const v of ["abc", "0", "-3", "2.5", ""]) { process.env.SOCIAL_PUSH_DAILY_MAX = v; if (sp.dailyMax() !== 10) check(`invalid "${v}" falls back to 10`, false, sp.dailyMax()); }
-    check("invalid values (abc, 0, -3, 2.5, empty) fall back to 10", true);
+    for (const v of ["abc", "-3", "2.5", ""]) { process.env.SOCIAL_PUSH_DAILY_MAX = v; if (sp.dailyMax() !== 10) check(`invalid "${v}" falls back to 10`, false, sp.dailyMax()); }
+    check("invalid values (abc, -3, 2.5, empty) fall back to 10", true);
+    // 0 = no limit
+    resetGroups(); resetDaily(); process.env.SOCIAL_PUSH_DAILY_MAX = "0";
+    check("SOCIAL_PUSH_DAILY_MAX=0 means no limit", sp.dailyMax() === Infinity);
+    for (let i = 0; i < 15; i++) await pushOf(i, min(at("2026-11-01T05:00:00Z"), i * 6));
+    check("with no limit Sara gets all 15 pushes in one day", saraGot() === 15, `${saraGot()}`);
+    const counted = fake.STORE.get("socialpushdailies").find((d) => String(d.user) === String(ids.sara));
+    check("and is still counted (a limit set later starts from the real number)", counted?.count === 15, counted?.count);
+    process.env.SOCIAL_PUSH_DAILY_MAX = "10";
+    expo.requests.length = 0;
+    await pushOf(15, min(at("2026-11-01T05:00:00Z"), 16 * 6));
+    check("set back to 10 the same day: Sara (already at 15) gets nothing more", saraGot() === 0);
     delete process.env.SOCIAL_PUSH_DAILY_MAX;
 
     // ═════ 8. confession without a university ═════
