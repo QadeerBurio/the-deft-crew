@@ -42,6 +42,8 @@ app.use(express.json({
   }
 }));
 app.use(express.urlencoded({ extended: true, limit: "5mb" }));
+// gzip, except the AI chat / travel streams (middleware/compress.js)
+app.use(require("./middleware/compress")());
 // [perf] time + size of the most used GET routes (middleware/perfLog.js)
 app.use(require("./middleware/perfLog")());
 
