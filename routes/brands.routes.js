@@ -5,6 +5,7 @@ const User = require("../models/User");
 const Branch = require("../models/Branch");
 const auth = require("../middleware/auth.middleware");
 const cache = require("../utils/cache");
+const { optionalUserId, myClaimedOfferIds, withMyClaim } = require("../utils/myClaims");
 
 const {
   DEFAULT_CITY,
@@ -186,12 +187,15 @@ router.get("/nearby", async (req, res) => {
     const offers = await Offer.find({ brand: { $in: brands.map((b) => b._id) } })
       .select("_id title discountPercentage category image isOnline isInStore claimedBy brand")
       .lean();
+    // claimedBy: only the caller's own claim (public route: token optional, never required)
+    const me = optionalUserId(req);
+    const mine = await myClaimedOfferIds(me);
     const offersByBrand = new Map();
     for (const o of offers) {
       const k = o.brand.toString();
       if (!offersByBrand.has(k)) offersByBrand.set(k, []);
       const { brand, ...rest } = o;
-      offersByBrand.get(k).push(rest);
+      offersByBrand.get(k).push(withMyClaim(rest, mine, me));
     }
 
     const list = brands

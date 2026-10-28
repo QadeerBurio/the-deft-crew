@@ -13,6 +13,7 @@ const { uploadOffer } = require("../config/cloudinary");
 const cache = require("../utils/cache");
 const { clearOfferCaches } = require("../utils/cache");
 const { getBrandCitiesMap } = require("../utils/brandCities");
+const { myClaimedOfferIds, withMyClaim } = require("../utils/myClaims");
 const { geocodeInBackground } = require("../services/geo/geocoder");
 
 // Offers/claims change all the time, never let a phone or proxy cache them
@@ -400,45 +401,54 @@ router.get("/brand/:brandId", auth, async (req, res) => {
 });
 
 // GET: Offers summary
+// { brandId: [offer] } for every brand. The shared, cached part has no claims; each response
+// adds only the caller's own (claimedBy: [me] or []), never other students' ids.
 router.get("/summary", auth, async (req, res) => {
   try {
     const cacheKey = 'offers:summary';
-    
+    let summaryMap = null;
+
     if (!wantsFresh(req)) {
       const cached = await cache.get(cacheKey);
-      if (cached) {
-        return res.json(JSON.parse(cached));
-      }
+      if (cached) summaryMap = JSON.parse(cached);
     }
 
-    const offers = await Offer.aggregate([
-      {
-        $group: {
-          _id: "$brand",
-          offers: {
-            $push: {
-              _id: "$_id",
-              title: "$title",
-              discountPercentage: "$discountPercentage",
-              category: "$category",
-              image: "$image",
-              isOnline: "$isOnline",
-              isInStore: "$isInStore",
-              claimedBy: "$claimedBy"
+    if (!summaryMap) {
+      const offers = await Offer.aggregate([
+        {
+          $group: {
+            _id: "$brand",
+            offers: {
+              $push: {
+                _id: "$_id",
+                title: "$title",
+                discountPercentage: "$discountPercentage",
+                category: "$category",
+                image: "$image",
+                isOnline: "$isOnline",
+                isInStore: "$isInStore"
+              }
             }
           }
         }
-      }
-    ]);
+      ]);
 
-    const summaryMap = {};
-    offers.forEach(item => {
-      summaryMap[item._id] = item.offers;
-    });
+      summaryMap = {};
+      offers.forEach(item => {
+        summaryMap[item._id] = item.offers;
+      });
 
-    await cache.set(cacheKey, JSON.stringify(summaryMap), CACHE_TTL);
+      await cache.set(cacheKey, JSON.stringify(summaryMap), CACHE_TTL);
+    }
 
-    res.json(summaryMap);
+    const me = req.isGuest ? null : req.userId;
+    const mine = await myClaimedOfferIds(me);
+    const result = {};
+    for (const [brandId, list] of Object.entries(summaryMap)) {
+      result[brandId] = (list || []).map((o) => withMyClaim(o, mine, me));
+    }
+
+    res.json(result);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
