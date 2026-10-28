@@ -4,6 +4,7 @@ const router = express.Router();
 const User = require("../models/User");
 const Notification = require("../models/Notification");
 const auth = require("../middleware/auth.middleware");
+const { clearOfferCaches } = require("../utils/cache");
 
 // Middleware to check if user is admin
 const isAdmin = async (req, res, next) => {
@@ -135,6 +136,7 @@ router.put("/:id/status", auth, isAdmin, async (req, res) => {
     }
 
     await brand.save();
+    await clearOfferCaches(); // public brand lists (GET /brands) show the change at once
 
     // Create notification
     let notificationTitle = "";
@@ -234,6 +236,7 @@ router.put("/bulk-status", auth, isAdmin, async (req, res) => {
       { _id: { $in: brandIds }, role: "brand" },
       { $set: updateData }
     );
+    await clearOfferCaches(); // public brand lists (GET /brands) show the change at once
 
     for (const brandId of brandIds) {
       try {
