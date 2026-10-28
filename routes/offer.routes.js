@@ -1006,33 +1006,45 @@ router.get("/student/:studentId", auth, async (req, res) => {
   }
 });
 
+// Public: approved brands with their offers (guest "top discounts" on Home).
+// Two queries (was one per brand) and a 120 s shared cache ("brands:" prefix, cleared on offer
+// writes and brand approval). Same response shape as before.
+const BRANDSS_CACHE_KEY = "brands:brandss";
 router.get("/brandss", async (req, res) => {
   try {
-    const brands = await User.find({ role: "brand" })
+    const cached = await cache.get(BRANDSS_CACHE_KEY);
+    if (cached) return res.type("json").send(cached);
+
+    const brands = await User.find({ role: "brand", brandApprovalStatus: "approved" })
       .select("name logo category description location")
       .lean()
       .exec();
 
-    const brandsWithOffers = await Promise.all(
-      brands.map(async (brand) => {
-        const offers = await Offer.find({ brand: brand._id })
-          .select("title description discountPercentage category image isOnline isInStore location createdAt")
+    const offers = brands.length
+      ? await Offer.find({ brand: { $in: brands.map((b) => b._id) } })
+          .select("brand title description discountPercentage category image isOnline isInStore location createdAt")
           .lean()
-          .exec();
-        
-        return {
-          ...brand,
-          offersCount: offers.length,
-          offers: offers
-        };
-      })
-    );
+          .exec()
+      : [];
+    const byBrand = new Map();
+    for (const { brand, ...offer } of offers) {
+      const k = String(brand);
+      if (!byBrand.has(k)) byBrand.set(k, []);
+      byBrand.get(k).push(offer);
+    }
 
-    res.json({
+    const brandsWithOffers = brands.map((brand) => {
+      const list = byBrand.get(String(brand._id)) || [];
+      return { ...brand, offersCount: list.length, offers: list };
+    });
+
+    const body = JSON.stringify({
       success: true,
       count: brandsWithOffers.length,
       brands: brandsWithOffers
     });
+    await cache.set(BRANDSS_CACHE_KEY, body, CACHE_TTL);
+    res.type("json").send(body);
   } catch (err) {
     console.error("Error fetching brands:", err);
     res.status(500).json({ 
