@@ -24,6 +24,8 @@ const socialPushGroupSchema = new mongoose.Schema({
   status: { type: String, enum: ["open", "sending", "sent", "dropped"], default: "open" },
   items: { type: [itemSchema], default: [] },
   sendAfter: { type: Date, required: true },
+  // waiting only because of quiet hours: sent at once if quiet hours are switched off
+  morning: { type: Boolean, default: false },
   sentAt: { type: Date, default: null },
   result: {
     students: Number,

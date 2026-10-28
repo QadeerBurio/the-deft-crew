@@ -456,6 +456,42 @@ const check = (name, ok, detail = "") => { if (ok) pass++; else fail++; quiet.lo
     for (const v of ["abc", "-2", "", "0"]) { process.env.SOCIAL_PUSH_GROUP_MINUTES = v; if (sp.groupMs() !== 0) check(`"${v}" means no window`, false, sp.groupMs()); }
     check("0, negative, empty or not a number: no window", true);
     delete process.env.SOCIAL_PUSH_GROUP_MINUTES;
+
+    // ═════ 11. SOCIAL_PUSH_QUIET_HOURS ═════
+    quiet.log("── 11. quiet hours: on by default (night items at 09:00, combined); \"off\" sends at night");
+    const night11 = at("2026-11-05T19:30:00Z"); // 00:30 Karachi
+    resetGroups(); resetDaily(); delete process.env.SOCIAL_PUSH_QUIET_HOURS;
+    check("unset: quiet hours on", sp.quietOn());
+    for (let i = 0; i < 3; i++) await sp.enqueue("post", { id: seedPost("ali"), authorId: ids.ali, authorName: "Ali", text: `n${i}` }, { now: min(night11, i * 10) });
+    check("on, no window: 3 night posts send nothing", expo.requests.length === 0);
+    await sp.flushDue({ now: at("2026-11-06T03:59:00Z") });
+    check("08:59: still nothing", expo.requests.length === 0);
+    await sp.flushDue({ now: at("2026-11-06T04:00:00Z") });
+    check("on: at 09:00 they go as one combined push (\"3 new posts on campus\")", expo.requests.length === 1 && titles()[0].includes("3 new posts on campus"), titles().join(" | "));
+    for (const v of ["off", "OFF", "Off", " off "]) {
+      resetGroups(); process.env.SOCIAL_PUSH_QUIET_HOURS = v;
+      await sp.enqueue("post", { id: seedPost("ali"), authorId: ids.ali, authorName: "Ali", text: "late" }, { now: night11 });
+      if (expo.requests.length !== 1) check(`"${v}": night post sent at once`, false, expo.requests.length);
+    }
+    check("\"off\" (any case): a post at 00:30 is sent at once", expo.requests.length === 1 && titles()[0].includes("Ali posted on campus"));
+    resetGroups(); process.env.SOCIAL_PUSH_QUIET_HOURS = "off";
+    for (let i = 0; i < 2; i++) await sp.enqueue("listing", { id: seedListing("ali"), authorId: ids.ali, title: `night l${i}` }, { now: min(night11, i) });
+    check("off: two night listings = two pushes, at once", expo.requests.length === 2);
+    process.env.SOCIAL_PUSH_QUIET_HOURS = "yes";
+    check("anything but \"off\" keeps quiet hours on", sp.quietOn());
+    // switching off releases what is already waiting for the morning
+    resetGroups(); delete process.env.SOCIAL_PUSH_QUIET_HOURS;
+    await sp.enqueue("post", { id: seedPost("ali"), authorId: ids.ali, authorName: "Ali", text: "w1" }, { now: night11 });
+    await sp.enqueue("post", { id: seedPost("ali"), authorId: ids.ali, authorName: "Ali", text: "w2" }, { now: min(night11, 1) });
+    check("on: two night posts wait for the morning", expo.requests.length === 0 && fake.STORE.get("socialpushgroups").some((g) => g.status === "open" && g.morning === true));
+    process.env.SOCIAL_PUSH_QUIET_HOURS = "off";
+    await sp.flushDue({ now: min(night11, 2) });
+    check("switched off at night: the waiting posts go at the next timer tick, combined", expo.requests.length === 1 && titles()[0].includes("2 new posts on campus"), titles().join(" | "));
+    delete process.env.SOCIAL_PUSH_QUIET_HOURS;
+    // the default window + quiet hours on: a daytime post is still instant
+    resetGroups();
+    await sp.enqueue("post", { id: seedPost("ali"), authorId: ids.ali, authorName: "Ali", text: "day" }, { now: at("2026-11-06T07:00:00Z") });
+    check("on, daytime: sent at once as before", expo.requests.length === 1);
   } catch (e) {
     fail++; quiet.log("FAIL  (stopped)", e?.stack || e);
   }

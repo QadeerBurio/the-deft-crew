@@ -205,6 +205,9 @@ function groupMs() {
   return Number.isFinite(n) && n > 0 ? n * 60 * 1000 : 0;
 }
 const QUIET = { quietStart: 23, quietEnd: 9 };
+// SOCIAL_PUSH_QUIET_HOURS: on unless "off" (any case). Off = sent at night too.
+const quietOn = () => String(process.env.SOCIAL_PUSH_QUIET_HOURS || "").trim().toLowerCase() !== "off";
+const isQuiet = (at) => quietOn() && isQuietHour(at, QUIET);
 const PKT_MS = 5 * 60 * 60 * 1000;
 let clock = () => new Date(); // tests set a fixed time (_test.setClock)
 
@@ -223,9 +226,11 @@ async function nextSlot(kind, scope, now) {
     .lean();
   let at = now;
   if (last?.sentAt) at = new Date(Math.max(now.getTime(), new Date(last.sentAt).getTime() + groupMs()));
-  if (isQuietHour(at, QUIET)) at = quietEnd(at);
+  if (isQuiet(at)) at = quietEnd(at);
   return at;
 }
+// is this send time the end of quiet hours (09:00 Karachi)?
+const isMorning = (at) => quietOn() && at.getTime() === quietEnd(new Date(at.getTime() - 60 * 1000)).getTime();
 
 // What a group stores per item (only what the text needs)
 function itemFor(kind, item) {
@@ -261,7 +266,7 @@ async function enqueue(kind, item, { now = clock() } = {}) {
 
   const group = await SocialPushGroup.findOneAndUpdate(
     { kind, scope, status: "open" },
-    { $push: { items: stored }, $setOnInsert: { sendAfter, createdAt: now } },
+    { $push: { items: stored }, $setOnInsert: { sendAfter, morning: isMorning(sendAfter), createdAt: now } },
     { upsert: true, new: true, setDefaultsOnInsert: true }
   ).lean();
   if (group && new Date(group.sendAfter) <= now) await flush(group._id, { now });
@@ -280,12 +285,13 @@ async function stillThere(kind, items) {
 
 // Send one due group (only one caller wins the claim)
 async function flush(groupId, { now = clock() } = {}) {
-  if (isQuietHour(now, QUIET)) {
-    await SocialPushGroup.updateOne({ _id: groupId, status: "open" }, { $set: { sendAfter: quietEnd(now) } });
+  if (isQuiet(now)) {
+    await SocialPushGroup.updateOne({ _id: groupId, status: "open" }, { $set: { sendAfter: quietEnd(now), morning: true } });
     return { sent: false, reason: "quiet_hours" };
   }
   const group = await SocialPushGroup.findOneAndUpdate(
-    { _id: groupId, status: "open", sendAfter: { $lte: now } },
+    // quiet hours off: groups that were only waiting for the morning go now
+    quietOn() ? { _id: groupId, status: "open", sendAfter: { $lte: now } } : { _id: groupId, status: "open", $or: [{ sendAfter: { $lte: now } }, { morning: true }] },
     { $set: { status: "sending", sentAt: now } },
     { new: true }
   ).lean();
@@ -334,8 +340,9 @@ async function flushDue({ now = clock() } = {}) {
     { status: "sending", sentAt: { $lt: new Date(now.getTime() - 10 * 60 * 1000) } },
     { $set: { status: "dropped", reason: "interrupted" } }
   );
-  if (isQuietHour(now, QUIET)) return 0;
-  const due = await SocialPushGroup.find({ status: "open", sendAfter: { $lte: now } }).select("_id").lean();
+  if (isQuiet(now)) return 0;
+  const dueFilter = quietOn() ? { status: "open", sendAfter: { $lte: now } } : { status: "open", $or: [{ sendAfter: { $lte: now } }, { morning: true }] };
+  const due = await SocialPushGroup.find(dueFilter).select("_id").lean();
   for (const g of due) await flush(g._id, { now });
   return due.length;
 }
@@ -351,4 +358,4 @@ function startScheduler(everyMs = 60 * 1000) {
 
 const _test = { setClock: (fn) => { clock = fn || (() => new Date()); } };
 
-module.exports = { _test, KINDS, isOn, dailyMax, buildContent, findRecipients, sendToStudents, snippet, enqueue, flush, flushDue, startScheduler, quietEnd, groupMs };
+module.exports = { _test, KINDS, isOn, dailyMax, buildContent, findRecipients, sendToStudents, snippet, enqueue, flush, flushDue, startScheduler, quietEnd, groupMs, quietOn };
