@@ -99,6 +99,11 @@ const profileSchema = new mongoose.Schema(
       deals:            { type: Boolean, default: true },
       jobsScholarships: { type: Boolean, default: true },
       social:           { type: Boolean, default: true },
+      // pushes for every new post / confession (own university) / skillshare listing
+      // (services/socialPush.js). Missing on old profiles = on.
+      posts:            { type: Boolean, default: true },
+      confessions:      { type: Boolean, default: true },
+      skillshare:       { type: Boolean, default: true },
     },
     osPushPermission: {
       type: String,

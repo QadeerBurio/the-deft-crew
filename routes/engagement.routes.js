@@ -486,14 +486,7 @@ router.get('/me', auth, async (req, res) => {
           cta: p.cta,
         })),
 
-      notifPrefs:
-        profile?.notifPrefs || {
-          streaks: true,
-          dailyDrop: true,
-          deals: true,
-          jobsScholarships: true,
-          social: true,
-        },
+      notifPrefs: { ...NOTIF_PREF_DEFAULTS, ...(profile?.notifPrefs || {}) },
 
       askPushPermission: !profile?.pushPermissionAskedAt && sortedCount >= 1,
     });
@@ -928,27 +921,43 @@ router.post('/rewards/:id/redeem', auth, requireAuth, async (req, res) => {
 // ============================================================
 // Notification prefs
 // ============================================================
+// Every switch, on unless the student turned it off (old profiles miss the newer keys)
+const NOTIF_PREF_DEFAULTS = {
+  streaks: true,
+  dailyDrop: true,
+  deals: true,
+  jobsScholarships: true,
+  social: true,
+  posts: true,
+  confessions: true,
+  skillshare: true,
+};
+
 router.get('/notification-prefs', auth, requireAuth, async (req, res) => {
   const profile = await EngagementProfile.findOne({ user: req.userId })
     .select('notifPrefs osPushPermission')
     .lean();
   res.json({
+    ...NOTIF_PREF_DEFAULTS,
     ...(profile?.notifPrefs || {}),
     osPermission: profile?.osPushPermission || 'undetermined',
   });
 });
 
 router.put('/notification-prefs', auth, requireAuth, async (req, res) => {
-  const allowed = ['streaks', 'dailyDrop', 'deals', 'jobsScholarships', 'social'];
   const set = {};
-  for (const k of allowed) {
+  for (const k of Object.keys(NOTIF_PREF_DEFAULTS)) {
     if (typeof req.body[k] === 'boolean') set[`notifPrefs.${k}`] = req.body[k];
   }
-  await EngagementProfile.updateOne({ user: req.userId }, { $set: set });
+  // upsert: a student without an engagement profile could not save any switch before
+  if (Object.keys(set).length) {
+    await EngagementProfile.updateOne({ user: req.userId }, { $set: set }, { upsert: true });
+  }
   const profile = await EngagementProfile.findOne({ user: req.userId })
     .select('notifPrefs osPushPermission')
     .lean();
   res.json({
+    ...NOTIF_PREF_DEFAULTS,
     ...(profile?.notifPrefs || {}),
     osPermission: profile?.osPushPermission || 'undetermined',
   });
