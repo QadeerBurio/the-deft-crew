@@ -146,7 +146,7 @@ const check = (name, ok, detail = "") => { if (ok) pass++; else fail++; quiet.lo
     c = sp.buildContent("post", [{ id: "a" }, { id: "b" }, { id: "c" }, { id: "d" }]);
     check("combined: \"4 new posts on campus\", opens the feed", c.title === "4 new posts on campus" && c.data.route === "FeedScreen" && c.data.params.tab === "Feed");
     c = sp.buildContent("listing", [{ id: "l1", title: "Guitar lessons for beginners, weekends only, bring your own guitar please" }]);
-    check("listing: \"new skillshare listing: <title, max 60>\", opens the listing", c.title.startsWith("new skillshare listing: Guitar lessons") && c.title.length <= "new skillshare listing: ".length + 60 && c.data.route === "ListingDetail" && c.data.params.id === "l1");
+    check("listing: \"new skillshare listing: <title, max 60>\", opens the listing", c.title.startsWith("new skillshare listing: Guitar lessons") && c.title.length <= "new skillshare listing: ".length + 60 && c.data.route === "Dashboard" && c.data.params.screen === "ListingDetail" && c.data.params.params.id === "l1");
     c = sp.buildContent("listing", [{ id: "a" }, { id: "b" }]);
     check("combined listings open skillshare", c.title === "2 new skillshare listings" && c.data.route === "Dashboard");
     c = sp.buildContent("confession", [{ id: "c1" }]);
@@ -160,7 +160,7 @@ const check = (name, ok, detail = "") => { if (ok) pass++; else fail++; quiet.lo
     rec = await sp.findRecipients("listing", { excludeUserIds: [ids.ali] });
     const res = await sp.sendToStudents("listing", [{ id: "l9", title: "Calculus tutoring" }], rec);
     check(`bulk: ${rec.length} students in ${expo.requests.length} Expo requests of at most 100`, expo.requests.length === Math.ceil(res.devices / 100) && expo.requests.every((q) => q.length <= 100) && res.devices === rec.length, `${expo.requests.map((q) => q.length)}`);
-    check("one message per device, title with the mood emoji, Android channel and tap data", expo.requests[0][0].title.includes("new skillshare listing: Calculus tutoring") && /^tdc2_/.test(expo.requests[0][0].channelId) && expo.requests[0][0].data.route === "ListingDetail");
+    check("one message per device, title with the mood emoji, Android channel and tap data", expo.requests[0][0].title.includes("new skillshare listing: Calculus tutoring") && /^tdc2_/.test(expo.requests[0][0].channelId) && expo.requests[0][0].data.params.screen === "ListingDetail");
     await tick(30);
     const deadLeft = fake.STORE.get("users").find((u) => (u.pushTokens || []).some((t) => t.token === tok("many7")));
     check("a dead token (DeviceNotRegistered) is removed from its student", !deadLeft && res.failed === 1 && res.reached.length === rec.length - 1);
@@ -303,7 +303,7 @@ const check = (name, ok, detail = "") => { if (ok) pass++; else fail++; quiet.lo
     check("create listing: 201", r.status === 201, r.text);
     await waitFor(() => expo.requests.length === 1);
     sent = expo.requests[0] || [];
-    check("listing push: \"new skillshare listing: Python for beginners\", opens the listing, not to the author", sent[0]?.title.includes("new skillshare listing: Python for beginners") && sent[0]?.data.route === "ListingDetail" && !sent.map((m) => m.to).includes(tok("omar")), JSON.stringify(sent[0]));
+    check("listing push: \"new skillshare listing: Python for beginners\", opens the listing, not to the author", sent[0]?.title.includes("new skillshare listing: Python for beginners") && sent[0]?.data.route === "Dashboard" && sent[0]?.data.params.screen === "ListingDetail" && !sent.map((m) => m.to).includes(tok("omar")), JSON.stringify(sent[0]));
 
     // never slower: Expo takes 1.5 s, the create answers at once
     resetGroups();

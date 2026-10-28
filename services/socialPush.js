@@ -63,7 +63,9 @@ function buildContent(kind, items) {
       return {
         title: `new skillshare listing: ${snippet(one.title)}`,
         body: "",
-        data: { route: "ListingDetail", params: { listingId: String(one.id), id: String(one.id) }, listingId: String(one.id) },
+        // ListingDetail lives in the skillshare stack: opened through Dashboard, the same way the
+        // Daily Drop does (services/engagement/drops.js), so it works from any tab and cold start
+        data: { route: "Dashboard", params: { screen: "ListingDetail", params: { id: String(one.id), listingId: String(one.id) } }, listingId: String(one.id) },
       };
     }
     return { title: `${n} new skillshare listings`, body: "", data: { route: "Dashboard", params: {} } };
