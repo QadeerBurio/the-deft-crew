@@ -15,7 +15,8 @@ const EngagementProfile = require("../models/EngagementProfile");
 const { sendAllSafe, handleTickets, channelForToken, safeSoundKey, resolveSoundKey, featureMood, iconUrlForMood, titleWithEmoji } = require("../utils/pushNotification");
 const { projectOfEntries } = require("../utils/expoProjects");
 const SocialPushGroup = require("../models/SocialPushGroup");
-const { isQuietHour } = require("../utils/karachiTime");
+const SocialPushDaily = require("../models/SocialPushDaily");
+const { isQuietHour, dayKey } = require("../utils/karachiTime");
 
 const KINDS = {
   post: { type: "social_post", pref: "posts", env: "SOCIAL_PUSH_POSTS" },
@@ -152,6 +153,40 @@ async function sendToStudents(kind, items, students) {
   return { students: students.length, devices: messages.length, delivered: r.ok, failed: r.failed, reached: [...reached] };
 }
 
+// ── Daily ceiling ──
+// At most SOCIAL_PUSH_DAILY_MAX (default 10) social pushes per student per Karachi day, the three
+// kinds together; a combined push counts as one. Reached: nothing more that day.
+function dailyMax() {
+  const n = Number(process.env.SOCIAL_PUSH_DAILY_MAX);
+  return Number.isInteger(n) && n > 0 ? n : 10;
+}
+
+// students who still have room today
+async function underCeiling(students, day) {
+  if (!students.length) return students;
+  const full = await SocialPushDaily.find({ day, count: { $gte: dailyMax() }, user: { $in: students.map((s) => s._id) } })
+    .select("user")
+    .lean();
+  const fullSet = new Set(full.map((d) => String(d.user)));
+  return students.filter((s) => !fullSet.has(String(s._id)));
+}
+
+// +1 for each student the push reached
+async function countSent(userIds, day) {
+  if (!userIds.length) return;
+  const ids = userIds.map(asId).filter(Boolean);
+  const existing = await SocialPushDaily.find({ day, user: { $in: ids } }).select("user").lean();
+  const have = new Set(existing.map((d) => String(d.user)));
+  if (have.size) await SocialPushDaily.updateMany({ day, user: { $in: ids.filter((i) => have.has(String(i))) } }, { $inc: { count: 1 } });
+  const fresh = ids.filter((i) => !have.has(String(i))).map((user) => ({ user, day, count: 1 }));
+  if (fresh.length) {
+    // two pushes at the same moment may both insert: the duplicate is skipped
+    await SocialPushDaily.insertMany(fresh, { ordered: false }).catch((e) => {
+      if (!/E11000|duplicate/i.test(String(e?.message))) throw e;
+    });
+  }
+}
+
 // ── Grouping, flood guard, quiet hours ──
 // At most one push per kind (and per university for confessions) every 5 minutes; items in
 // that window are combined ("4 new posts on campus"). 23:00–09:00 Karachi nothing is sent:
@@ -250,17 +285,21 @@ async function flush(groupId, { now = clock() } = {}) {
     }
     // never an author of anything in the group
     const authors = [...new Set((group.items || []).map((i) => String(i.authorId)))];
-    const students = await findRecipients(group.kind, {
+    const everyone = await findRecipients(group.kind, {
       universityId: group.kind === "confession" ? group.scope : null,
       excludeUserIds: authors,
     });
+    const day = dayKey(now);
+    const students = await underCeiling(everyone, day);
     const result = await sendToStudents(group.kind, items, students);
+    await countSent(result.reached, day);
+    const capped = everyone.length - students.length;
     await SocialPushGroup.updateOne(
       { _id: group._id },
-      { $set: { status: "sent", result: { students: result.students, devices: result.devices, delivered: result.delivered, failed: result.failed } } }
+      { $set: { status: "sent", result: { students: result.students, devices: result.devices, delivered: result.delivered, failed: result.failed, capped } } }
     );
     // counts only, never names, ids or text
-    console.log(`[socialPush] ${group.kind} x${items.length} → ${result.students} students, ${result.devices} devices, ${result.failed} failed`);
+    console.log(`[socialPush] ${group.kind} x${items.length} → ${result.students} students, ${result.devices} devices, ${result.failed} failed, ${capped} at the daily ceiling`);
     return { sent: true, ...result };
   } catch (err) {
     await SocialPushGroup.updateOne({ _id: group._id }, { $set: { status: "dropped", reason: `error: ${err.message}` } }).catch(() => {});
@@ -292,4 +331,4 @@ function startScheduler(everyMs = 60 * 1000) {
 
 const _test = { setClock: (fn) => { clock = fn || (() => new Date()); } };
 
-module.exports = { _test, KINDS, isOn, buildContent, findRecipients, sendToStudents, snippet, enqueue, flush, flushDue, startScheduler, quietEnd, FLOOD_MS };
+module.exports = { _test, KINDS, isOn, dailyMax, buildContent, findRecipients, sendToStudents, snippet, enqueue, flush, flushDue, startScheduler, quietEnd, FLOOD_MS };

@@ -333,6 +333,45 @@ const check = (name, ok, detail = "") => { if (ok) pass++; else fail++; quiet.lo
     check("confession: 😳 title, confession sound and channel", m.title.startsWith("😳") && m.data.soundKey === "tdc_push_confession" && m.channelId === "tdc2_tdc_push_confession" && m.data.type === "social_confession");
     m = await look("listing", [{ id: oid(), title: "x" }]);
     check("listing: 🤩 title, deal sound and channel", m.title.startsWith("🤩") && m.data.soundKey === "tdc_push_deal" && m.channelId === "tdc2_tdc_push_deal" && m.data.type === "skillshare_listing");
+
+    // ═════ 7. daily ceiling ═════
+    quiet.log("── 7. at most SOCIAL_PUSH_DAILY_MAX (10) social pushes per student per Karachi day");
+    const resetDaily = () => fake.STORE.set("socialpushdailies", []);
+    const saraGot = () => expo.requests.filter((q) => q.some((x) => x.to === tok("sara"))).length;
+    // one push of a given kind at a given time, authored by Ali (Sara is a recipient of all three)
+    const pushOf = async (i, when) => {
+      const kind = ["post", "listing", "confession"][i % 3];
+      if (kind === "post") return sp.enqueue("post", { id: seedPost("ali"), authorId: ids.ali, authorName: "Ali", text: `p${i}` }, { now: when });
+      if (kind === "listing") return sp.enqueue("listing", { id: seedListing("ali"), authorId: ids.ali, title: `l${i}` }, { now: when });
+      return sp.enqueue("confession", { id: seedConf("ali", U1), authorId: ids.ali, universityId: U1 }, { now: when });
+    };
+    resetGroups(); resetDaily(); delete process.env.SOCIAL_PUSH_DAILY_MAX;
+    const day1 = at("2026-10-28T05:00:00Z"); // 10:00 Karachi
+    for (let i = 0; i < 12; i++) await pushOf(i, min(day1, i * 6));
+    check("12 pushes across posts, listings and confessions: Sara gets the first 10, then nothing that day", expo.requests.length === 12 && saraGot() === 10, `requests ${expo.requests.length}, sara ${saraGot()}`);
+    const hinaGot = expo.requests.filter((q) => q.some((x) => x.to === tok("hina"))).length;
+    check("the ceiling is per student (Hina, posts off, still got her listings and confessions)", hinaGot === 8, `${hinaGot}`);
+    const lastGroup = fake.STORE.get("socialpushgroups").filter((g) => g.status === "sent").sort((a, b) => new Date(b.sentAt) - new Date(a.sentAt))[0];
+    check("the push log counts students left out by the ceiling", (lastGroup?.result?.capped || 0) >= 1, JSON.stringify(lastGroup?.result));
+    // next Karachi day: a fresh count
+    expo.requests.length = 0;
+    await pushOf(0, at("2026-10-29T05:00:00Z"));
+    check("the next Karachi day Sara gets pushes again", saraGot() === 1);
+    // a combined push counts once
+    resetGroups(); resetDaily();
+    const day3 = at("2026-10-30T05:00:00Z");
+    await sp.enqueue("post", { id: seedPost("ali"), authorId: ids.ali, authorName: "Ali", text: "a" }, { now: day3 });
+    for (let i = 1; i <= 3; i++) await sp.enqueue("post", { id: seedPost("ali"), authorId: ids.ali, authorName: "Ali", text: `b${i}` }, { now: min(day3, i) });
+    await sp.flushDue({ now: min(day3, 5) });
+    const saraDoc = fake.STORE.get("socialpushdailies").find((d) => String(d.user) === String(ids.sara));
+    check("1 single + 1 combined (\"3 new posts\") count as 2", expo.requests.length === 2 && saraDoc?.count === 2, `${expo.requests.length} ${saraDoc?.count}`);
+    // configurable
+    resetGroups(); resetDaily(); process.env.SOCIAL_PUSH_DAILY_MAX = "2";
+    for (let i = 0; i < 4; i++) await pushOf(i, min(at("2026-10-31T05:00:00Z"), i * 6));
+    check("SOCIAL_PUSH_DAILY_MAX=2: Sara gets 2", saraGot() === 2, `${saraGot()}`);
+    for (const v of ["abc", "0", "-3", "2.5", ""]) { process.env.SOCIAL_PUSH_DAILY_MAX = v; if (sp.dailyMax() !== 10) check(`invalid "${v}" falls back to 10`, false, sp.dailyMax()); }
+    check("invalid values (abc, 0, -3, 2.5, empty) fall back to 10", true);
+    delete process.env.SOCIAL_PUSH_DAILY_MAX;
   } catch (e) {
     fail++; quiet.log("FAIL  (stopped)", e?.stack || e);
   }
