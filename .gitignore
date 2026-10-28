@@ -1,0 +1,15 @@
+# dependencies (npm install recreates them)
+node_modules/
+
+# logs
+logs/
+*.log
+
+# Expo
+.expo/
+
+# secrets: Railway variables, never in git. .env is still tracked until the Railway
+# variables are checked; ignoring it here stops it being re-added once it is untracked.
+.env
+.env.*
+!.env.example
