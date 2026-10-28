@@ -357,6 +357,30 @@ const others = Object.values(STUDENT_IDS);
   check("S10 confessions: no likedBy, likedByCurrentUser still right", Array.isArray(r.json) && r.json.every((c) => !("likedBy" in c)) && r.json.find((c) => c.text === "older")?.likedByCurrentUser === true && r.json.find((c) => c.text === "newest")?.likedByCurrentUser === false);
   check("S10 confessions have no other student's id", idPaths(r.json, others).length === 0, idPaths(r.json, others).join(", "));
 
+  // ===== R1 /offers/brand/:id =====
+  await clearOfferCaches({ brandId: String(ids.brand1) });
+  const brandUrl = `/api/offers/brand/${ids.brand1}`;
+  r = await track(get(brandUrl, { tok: T.a }));
+  const bo1 = Array.isArray(r.json) && r.json.find((o) => String(o._id) === String(ids.o1));
+  const bo2 = Array.isArray(r.json) && r.json.find((o) => String(o._id) === String(ids.o2));
+  check("R1 brand offers as a student: no other student's id", Array.isArray(r.json) && idPaths(r.json, others).length === 0, idPaths(r.json, others).join(", "));
+  check("R1 claimedBy keeps its length (claimed by 3) with only my id in it", bo1?.claimedBy?.length === 3 && bo1.claimedBy.filter(Boolean).length === 1 && bo1.claimedBy.includes(String(ids.a)), JSON.stringify(bo1?.claimedBy));
+  check("R1 an offer I did not claim: claimedBy all null, count kept", bo2?.claimedBy?.length === 1 && bo2.claimedBy[0] === null);
+  // OfferScreen (old builds): isOfferClaimedByUser skips empty entries, count = claimedBy.length
+  const oldIsClaimed = (offer, me) => (offer.claimedBy || []).some((e) => { if (!e) return false; if (typeof e === "string") return e === me; return (e._id?.toString?.() || e.toString?.()) === me; });
+  check("R1 old-build claim check and count still right", oldIsClaimed(bo1, String(ids.a)) && !oldIsClaimed(bo2, String(ids.a)) && bo1.claimedBy.length === 3);
+  check("R1 redemptions only mine, promoCodesGenerated not sent", bo1?.redemptions?.length === 2 && bo1.redemptions.every((x) => String(x.student) === String(ids.a)) && !("promoCodesGenerated" in bo1) && bo2?.redemptions?.length === 0);
+  const brandCached = await track(get(brandUrl, { tok: T.a }));
+  check("R1 cached copy is trimmed per caller too", idPaths(brandCached.json, others).length === 0 && brandCached.json.find((o) => String(o._id) === String(ids.o1))?.claimedBy?.length === 3);
+  const brandGuest = await track(get(brandUrl));
+  check("R1 guest: every claimedBy entry null, no redemptions", Array.isArray(brandGuest.json) && brandGuest.json.every((o) => o.claimedBy.every((x) => x === null) && o.redemptions.length === 0));
+  const brandAdmin = await get(brandUrl, { tok: T.admin });
+  check("R1 admin still sees every claim and redemption (admin web)", brandAdmin.json?.find((o) => String(o._id) === String(ids.o1))?.claimedBy?.length === 3 && idPaths(brandAdmin.json, others).length > 0);
+  const brandOwner = await get(brandUrl, { tok: token(ids.brand1, "brand") });
+  check("R1 the brand itself still sees every claim (brand dashboard)", idPaths(brandOwner.json, others).length > 0);
+  const otherBrand = await get(`/api/offers/brand/${ids.brand2}`, { tok: token(ids.brand1, "brand") });
+  check("R1 another brand is trimmed like a student", Array.isArray(otherBrand.json) && idPaths(otherBrand.json, others).length === 0);
+
   // ===== every response =====
   const leaky = all.filter((x) => leaksIn(x).length);
   check(`no hidden user field or secret in any of ${all.length} responses`, leaky.length === 0, leaky.map((x) => leaksIn(x).join("/")).join(", "));
