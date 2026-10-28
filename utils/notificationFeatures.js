@@ -30,6 +30,7 @@ const FEATURES = {
   listing_updated:  { mood: 'sorted',  sound: 'tdc_push_default' },
   listing_deleted:  { mood: 'sleepy',  sound: 'tdc_push_default' },
   try_skillshare:   { mood: 'cheeky',  sound: 'tdc_push_deal' },
+  skillshare_listing: { mood: 'excited', sound: 'tdc_push_deal' },  // every new listing (socialPush)
 
   // ── Social ──
   like:                { mood: 'excited', sound: 'tdc_like' },
@@ -45,6 +46,9 @@ const FEATURES = {
   try_social:          { mood: 'sus',     sound: 'tdc_push_message' },
   confession:          { mood: 'shock',   sound: 'tdc_push_confession' },
   confession_tease:    { mood: 'shock',   sound: 'tdc_push_confession' },
+  // every new post / confession (services/socialPush.js)
+  social_post:         { mood: 'excited', sound: 'tdc_push_message' },
+  social_confession:   { mood: 'shock',   sound: 'tdc_push_confession' },
 
   // ── Careers / scholarships / events ──
   new_job:          { mood: 'hype',    sound: 'tdc_push_internship' },

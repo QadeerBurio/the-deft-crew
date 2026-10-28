@@ -323,6 +323,16 @@ const check = (name, ok, detail = "") => { if (ok) pass++; else fail++; quiet.lo
     await tick(150);
     Expo.prototype.sendPushNotificationsAsync = realSend;
     check("Expo down: the post is still created (201)", r.status === 201);
+
+    // ═════ 6. icon and sound per type ═════
+    quiet.log("── 6. feature table: emoji, sound, Android channel");
+    const look = async (kind, items) => { resetGroups(); const rec2 = await sp.findRecipients(kind, { universityId: U1, excludeUserIds: [] }); await sp.sendToStudents(kind, items, rec2); return expo.requests[0][0]; };
+    let m = await look("post", [{ id: oid(), firstName: "Ali", text: "x" }]);
+    check("post: 🤩 title, message sound and channel", m.title.startsWith("🤩") && m.data.soundKey === "tdc_push_message" && m.channelId === "tdc2_tdc_push_message" && m.data.type === "social_post", JSON.stringify({ t: m.title, c: m.channelId, s: m.data.soundKey }));
+    m = await look("confession", [{ id: oid() }]);
+    check("confession: 😳 title, confession sound and channel", m.title.startsWith("😳") && m.data.soundKey === "tdc_push_confession" && m.channelId === "tdc2_tdc_push_confession" && m.data.type === "social_confession");
+    m = await look("listing", [{ id: oid(), title: "x" }]);
+    check("listing: 🤩 title, deal sound and channel", m.title.startsWith("🤩") && m.data.soundKey === "tdc_push_deal" && m.channelId === "tdc2_tdc_push_deal" && m.data.type === "skillshare_listing");
   } catch (e) {
     fail++; quiet.log("FAIL  (stopped)", e?.stack || e);
   }
