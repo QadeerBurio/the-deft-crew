@@ -14,6 +14,8 @@ const User = require("../models/User");
 const EngagementProfile = require("../models/EngagementProfile");
 const { sendAllSafe, handleTickets, channelForToken, safeSoundKey, resolveSoundKey, featureMood, iconUrlForMood, titleWithEmoji } = require("../utils/pushNotification");
 const { projectOfEntries } = require("../utils/expoProjects");
+const SocialPushGroup = require("../models/SocialPushGroup");
+const { isQuietHour } = require("../utils/karachiTime");
 
 const KINDS = {
   post: { type: "social_post", pref: "posts" },
@@ -146,4 +148,134 @@ async function sendToStudents(kind, items, students) {
   return { students: students.length, devices: messages.length, delivered: r.ok, failed: r.failed, reached: [...reached] };
 }
 
-module.exports = { KINDS, buildContent, findRecipients, sendToStudents, snippet };
+// ── Grouping, flood guard, quiet hours ──
+// At most one push per kind (and per university for confessions) every 5 minutes; items in
+// that window are combined ("4 new posts on campus"). 23:00–09:00 Karachi nothing is sent:
+// those items go out together at 09:00. The create request only adds the item (in the
+// background); a timer sends groups that are due.
+const FLOOD_MS = 5 * 60 * 1000;
+const QUIET = { quietStart: 23, quietEnd: 9 };
+const PKT_MS = 5 * 60 * 60 * 1000;
+
+// next 09:00 Karachi time (04:00 UTC) after a moment in quiet hours
+function quietEnd(at) {
+  const pkt = new Date(at.getTime() + PKT_MS);
+  const day = pkt.getUTCHours() >= QUIET.quietStart ? pkt.getUTCDate() + 1 : pkt.getUTCDate();
+  return new Date(Date.UTC(pkt.getUTCFullYear(), pkt.getUTCMonth(), day, QUIET.quietEnd, 0, 0) - PKT_MS);
+}
+
+// earliest moment this kind/scope may send again
+async function nextSlot(kind, scope, now) {
+  const last = await SocialPushGroup.findOne({ kind, scope, status: { $in: ["sending", "sent"] } })
+    .sort({ sentAt: -1 })
+    .select("sentAt")
+    .lean();
+  let at = now;
+  if (last?.sentAt) at = new Date(Math.max(now.getTime(), new Date(last.sentAt).getTime() + FLOOD_MS));
+  if (isQuietHour(at, QUIET)) at = quietEnd(at);
+  return at;
+}
+
+// What a group stores per item (only what the text needs)
+function itemFor(kind, item) {
+  const base = { id: asId(item.id), authorId: asId(item.authorId) };
+  if (kind === "post") return { ...base, firstName: firstName(item.authorName), text: snippet(item.text), hasImage: !!item.hasImage };
+  if (kind === "listing") return { ...base, title: snippet(item.title) };
+  return base; // confession: nothing but its id
+}
+
+// Add a new item. post: { id, authorId, authorName, text, hasImage }
+// confession: { id, authorId, universityId }  listing: { id, authorId, title }
+async function enqueue(kind, item, { now = new Date() } = {}) {
+  if (!KINDS[kind]) throw new Error(`socialPush: unknown kind ${kind}`);
+  let scope = "all";
+  if (kind === "confession") {
+    const uni = asId(item.universityId);
+    if (!uni) return { queued: false, reason: "no_university" };
+    scope = String(uni);
+  }
+  const stored = itemFor(kind, item);
+  if (!stored.id || !stored.authorId) return { queued: false, reason: "bad_item" };
+
+  const sendAfter = await nextSlot(kind, scope, now);
+  const group = await SocialPushGroup.findOneAndUpdate(
+    { kind, scope, status: "open" },
+    { $push: { items: stored }, $setOnInsert: { sendAfter, createdAt: now } },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  ).lean();
+  if (group && new Date(group.sendAfter) <= now) await flush(group._id, { now });
+  return { queued: true, groupId: group?._id, sendAfter: group?.sendAfter };
+}
+
+// Items that still exist (deleted ones and closed listings are left out)
+async function stillThere(kind, items) {
+  const Model = kind === "post" ? require("../models/Post") : kind === "confession" ? require("../models/Confession") : require("../models/Listing");
+  const filter = { _id: { $in: items.map((i) => i.id) } };
+  if (kind === "listing") filter.status = "open";
+  const found = await Model.find(filter).select("_id").lean();
+  const ok = new Set(found.map((d) => String(d._id)));
+  return items.filter((i) => ok.has(String(i.id)));
+}
+
+// Send one due group (only one caller wins the claim)
+async function flush(groupId, { now = new Date() } = {}) {
+  if (isQuietHour(now, QUIET)) {
+    await SocialPushGroup.updateOne({ _id: groupId, status: "open" }, { $set: { sendAfter: quietEnd(now) } });
+    return { sent: false, reason: "quiet_hours" };
+  }
+  const group = await SocialPushGroup.findOneAndUpdate(
+    { _id: groupId, status: "open", sendAfter: { $lte: now } },
+    { $set: { status: "sending", sentAt: now } },
+    { new: true }
+  ).lean();
+  if (!group) return { sent: false, reason: "not_due" };
+
+  try {
+    const items = await stillThere(group.kind, group.items || []);
+    if (!items.length) {
+      await SocialPushGroup.updateOne({ _id: group._id }, { $set: { status: "dropped", reason: "items_gone" } });
+      return { sent: false, reason: "items_gone" };
+    }
+    // never an author of anything in the group
+    const authors = [...new Set((group.items || []).map((i) => String(i.authorId)))];
+    const students = await findRecipients(group.kind, {
+      universityId: group.kind === "confession" ? group.scope : null,
+      excludeUserIds: authors,
+    });
+    const result = await sendToStudents(group.kind, items, students);
+    await SocialPushGroup.updateOne(
+      { _id: group._id },
+      { $set: { status: "sent", result: { students: result.students, devices: result.devices, delivered: result.delivered, failed: result.failed } } }
+    );
+    // counts only, never names, ids or text
+    console.log(`[socialPush] ${group.kind} x${items.length} → ${result.students} students, ${result.devices} devices, ${result.failed} failed`);
+    return { sent: true, ...result };
+  } catch (err) {
+    await SocialPushGroup.updateOne({ _id: group._id }, { $set: { status: "dropped", reason: `error: ${err.message}` } }).catch(() => {});
+    console.warn(`[socialPush] ${group.kind} not sent:`, err.message);
+    return { sent: false, reason: "error" };
+  }
+}
+
+// Every due group; groups stuck in "sending" (server stopped mid-send) are closed, not resent
+async function flushDue({ now = new Date() } = {}) {
+  await SocialPushGroup.updateMany(
+    { status: "sending", sentAt: { $lt: new Date(now.getTime() - 10 * 60 * 1000) } },
+    { $set: { status: "dropped", reason: "interrupted" } }
+  );
+  if (isQuietHour(now, QUIET)) return 0;
+  const due = await SocialPushGroup.find({ status: "open", sendAfter: { $lte: now } }).select("_id").lean();
+  for (const g of due) await flush(g._id, { now });
+  return due.length;
+}
+
+let timer = null;
+function startScheduler(everyMs = 60 * 1000) {
+  if (timer) return;
+  timer = setInterval(() => {
+    flushDue().catch((e) => console.warn("[socialPush] timer:", e.message));
+  }, everyMs);
+  if (timer.unref) timer.unref();
+}
+
+module.exports = { KINDS, buildContent, findRecipients, sendToStudents, snippet, enqueue, flush, flushDue, startScheduler, quietEnd, FLOOD_MS };

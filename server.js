@@ -62,6 +62,9 @@ connectDB().then(() => {
   const eventScheduler = require("./services/events/scheduler");
   eventScheduler.initialize();
 
+  // social pushes (new posts / confessions / listings): sends the groups that are due, every minute
+  require("./services/socialPush").startScheduler();
+
   // Purge any existing non-Pakistan/worldwide external jobs to keep the feed clean
   const Job = require("./models/Job");
   const JobEmbedding = require("./models/JobEmbedding");

@@ -165,6 +165,78 @@ const check = (name, ok, detail = "") => { if (ok) pass++; else fail++; quiet.lo
     check("a dead token (DeviceNotRegistered) is removed from its student", !deadLeft && res.failed === 1 && res.reached.length === rec.length - 1);
     fake.STORE.set("users", fake.STORE.get("users").filter((u) => !/^S\d+$/.test(u.name)));
     expo.dead.clear();
+
+    // ═════ 3. grouping, flood guard, quiet hours ═════
+    quiet.log("── 3. one push per 5 minutes per kind (per university for confessions); quiet hours");
+    const at = (iso) => new Date(iso);
+    const min = (d, m) => new Date(d.getTime() + m * 60000);
+    const resetGroups = () => { fake.STORE.set("socialpushgroups", []); expo.requests.length = 0; };
+    const titles = () => expo.requests.map((q) => q[0]?.title || "");
+    const seedPost = (author) => { const id = oid(); fake.seed("posts", [{ _id: id, author: ids[author], content: "x", createdAt: new Date() }]); return id; };
+    const seedConf = (author, uni) => { const id = oid(); fake.seed("confessions", [{ _id: id, authorId: ids[author], text: "secret", university: uni, createdAt: new Date() }]); return id; };
+    const seedListing = (author, status = "open") => { const id = oid(); fake.seed("listings", [{ _id: id, ownerId: ids[author], type: "paid", title: "t", description: "d", status }]); return id; };
+
+    resetGroups();
+    const noon = at("2026-10-28T07:00:00Z"); // 12:00 Karachi
+    await sp.enqueue("post", { id: seedPost("ali"), authorId: ids.ali, authorName: "Ali Khan", text: "first" }, { now: noon });
+    check("the first post sends at once", expo.requests.length === 1 && titles()[0].includes("Ali posted on campus"), titles().join(" | "));
+    await sp.enqueue("post", { id: seedPost("sara"), authorId: ids.sara, authorName: "Sara", text: "second" }, { now: min(noon, 1) });
+    await sp.enqueue("post", { id: seedPost("omar"), authorId: ids.omar, authorName: "Omar", text: "third" }, { now: min(noon, 2) });
+    check("posts within 5 minutes wait (no second push)", expo.requests.length === 1);
+    await sp.flushDue({ now: min(noon, 4) });
+    check("still nothing at +4 min", expo.requests.length === 1);
+    await sp.flushDue({ now: min(noon, 5) });
+    check("at +5 min one combined push: \"2 new posts on campus\"", expo.requests.length === 2 && titles()[1].includes("2 new posts on campus"), titles().join(" | "));
+    const combinedTo = expo.requests[1].map((m) => m.to);
+    check("authors of anything in the combined push get nothing (Sara, Omar)", !combinedTo.includes(tok("sara")) && !combinedTo.includes(tok("omar")) && combinedTo.includes(tok("ali")));
+
+    // confessions: per university, separately (a second Beta student, so Beta has someone to tell)
+    resetGroups();
+    const betaId = oid();
+    fake.seed("users", [{ _id: betaId, name: "Beta Two", role: "student", university: U2, pushTokens: [{ token: tok("beta2"), channels: "snd_v2" }] }]);
+    await sp.enqueue("confession", { id: seedConf("ali", U1), authorId: ids.ali, universityId: U1 }, { now: noon });
+    await sp.enqueue("confession", { id: seedConf("omar", U2), authorId: ids.omar, universityId: U2 }, { now: min(noon, 1) });
+    check("confessions at two universities: each its own push, not combined", expo.requests.length === 2);
+    await sp.enqueue("confession", { id: seedConf("sara", U1), authorId: ids.sara, universityId: U1 }, { now: min(noon, 2) });
+    check("a second Alpha confession within 5 minutes waits", expo.requests.length === 2);
+    const r3 = await sp.enqueue("confession", { id: oid(), authorId: ids.noUni, universityId: null }, { now: noon });
+    check("a confession without a university is never queued", r3.queued === false && r3.reason === "no_university");
+
+    // quiet hours: night items go together at 09:00 Karachi
+    resetGroups();
+    const night = at("2026-10-28T19:30:00Z"); // 00:30 Karachi
+    for (let i = 0; i < 3; i++) await sp.enqueue("listing", { id: seedListing("ali"), authorId: ids.ali, title: `L${i}` }, { now: min(night, i * 20) });
+    check("night (00:30–01:10): nothing sent", expo.requests.length === 0);
+    const g = fake.STORE.get("socialpushgroups").find((x) => x.status === "open");
+    check("they wait for 09:00 Karachi (04:00 UTC)", g && new Date(g.sendAfter).toISOString() === "2026-10-29T04:00:00.000Z", g && new Date(g.sendAfter).toISOString());
+    await sp.flushDue({ now: at("2026-10-29T03:59:00Z") });
+    check("08:59: still nothing", expo.requests.length === 0);
+    await sp.flushDue({ now: at("2026-10-29T04:00:00Z") });
+    check("09:00: one combined push \"3 new skillshare listings\"", expo.requests.length === 1 && titles()[0].includes("3 new skillshare listings"), titles().join(" | "));
+    check("quietEnd from 23:30 Karachi is 09:00 the next day", sp.quietEnd(at("2026-10-28T18:30:00Z")).toISOString() === "2026-10-29T04:00:00.000Z");
+
+    // deleted items and closed listings are left out; nothing left → no push
+    resetGroups();
+    const gone = seedPost("ali");
+    await sp.enqueue("post", { id: seedPost("sara"), authorId: ids.sara, authorName: "Sara", text: "a" }, { now: noon });
+    await sp.enqueue("post", { id: gone, authorId: ids.ali, authorName: "Ali", text: "b" }, { now: min(noon, 1) });
+    fake.STORE.set("posts", fake.STORE.get("posts").filter((p) => String(p._id) !== String(gone)));
+    await sp.flushDue({ now: min(noon, 5) });
+    check("a post deleted before its push is not counted (no \"2 new posts\")", expo.requests.length === 1, titles().join(" | "));
+    const dropped = fake.STORE.get("socialpushgroups").find((x) => x.status === "dropped");
+    check("a group with nothing left is dropped, not sent", dropped && dropped.reason === "items_gone");
+    resetGroups();
+    const closed = seedListing("ali", "closed");
+    await sp.enqueue("listing", { id: closed, authorId: ids.ali, title: "closed one" }, { now: noon });
+    check("a listing that is no longer open sends nothing", expo.requests.length === 0);
+
+    // two timers at once: one push
+    resetGroups();
+    const pA = seedPost("ali");
+    await sp.enqueue("post", { id: pA, authorId: ids.ali, authorName: "Ali", text: "x" }, { now: noon });
+    await sp.enqueue("post", { id: seedPost("sara"), authorId: ids.sara, authorName: "Sara", text: "y" }, { now: min(noon, 1) });
+    await Promise.all([sp.flushDue({ now: min(noon, 6) }), sp.flushDue({ now: min(noon, 6) })]);
+    check("two timers running at once still send the group once", expo.requests.length === 2, `${expo.requests.length}`);
   } catch (e) {
     fail++; quiet.log("FAIL  (stopped)", e?.stack || e);
   }

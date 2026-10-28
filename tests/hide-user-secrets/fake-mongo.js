@@ -9,6 +9,8 @@ const isOid = (v) => v != null && typeof v === "object" && v._bsontype === "Obje
 const isPlain = (v) => v != null && typeof v === "object" && !Array.isArray(v) && !isOid(v) && !(v instanceof Date) && !(v instanceof RegExp) && !Buffer.isBuffer(v);
 
 function clone(v) {
+  // Mongoose documents / arrays (e.g. a cast $push of subdocuments): their plain data
+  if (v && typeof v === "object" && !isOid(v) && typeof v.toObject === "function") return clone(v.toObject({ depopulate: true }));
   if (Array.isArray(v)) return v.map(clone);
   if (isOid(v)) return v; // immutable
   if (v instanceof Date) return new Date(v.getTime());
