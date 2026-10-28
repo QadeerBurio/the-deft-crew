@@ -75,7 +75,13 @@ const ago = (h) => new Date(now - h * 3600 * 1000);
 const user = (id, role, name) => ({ _id: id, name, email: `${name}@test.local`, password: "$2a$04$seedhashseedhashseedhashseedhashseedhashseedhashseedha", role, status: "Verified", accountStatus: "active", pushTokens: [{ token: `ExponentPushToken[SEED-${name}]` }], createdAt: new Date(), updatedAt: new Date() });
 fake.seed("users", [user(ids.a, "student", "studenta"), user(ids.b, "student", "studentb"), user(ids.brand, "brand", "brand"), user(ids.admin, "admin", "admin")]);
 const red = (student, hoursAgo) => ({ _id: oid(), student, billAmount: 1000, savedAmount: 200, redeemedAt: ago(hoursAgo) });
-const r = { a1: red(ids.a, 2), a2: red(ids.a, 24 * 10), aOld: red(ids.a, 24 * 40), b1: red(ids.b, 1), a3: red(ids.a, 5) };
+// B's earlier redemption must fall on the same Karachi day as now: the server's daily cap counts
+// per Karachi day. "1 hour ago" was yesterday between 00:00 and 01:00 Karachi time, so the
+// cap check failed then. Halfway between Karachi midnight and now is always earlier today.
+const KARACHI_MS = 5 * 3600 * 1000;
+const karachiMidnight = now - ((now + KARACHI_MS) % (24 * 3600 * 1000));
+const earlierToday = new Date(Math.floor((karachiMidnight + now) / 2));
+const r = { a1: red(ids.a, 2), a2: red(ids.a, 24 * 10), aOld: red(ids.a, 24 * 40), b1: { ...red(ids.b, 1), redeemedAt: earlierToday }, a3: red(ids.a, 5) };
 const offer = (id, title, redemptions) => ({ _id: id, brand: ids.brand, title, discountPercentage: 20, category: "Restaurant", active: true, claimedBy: [ids.a, ids.b], redemptions, promoCodesGenerated: [], createdAt: new Date(), updatedAt: new Date() });
 fake.seed("offers", [offer(ids.offer1, "20% off", [r.a1, r.b1, r.aOld]), offer(ids.offer2, "buy one", [r.a2, r.a3])]);
 const token = (who, role) => jwt.sign({ id: String(ids[who]), role }, "test-only", { expiresIn: "1h" });
