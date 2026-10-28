@@ -2,6 +2,12 @@
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
 
+// The fields routes read from req.user (every req.user.<field> in routes/, services/, utils/,
+// middleware/): _id, id, role, name, email, university, phone, location, headline. Loaded lean,
+// instead of the whole document (every field but the password) on every signed-in request.
+// routes/jobs.routes.js loads its own full user and is not affected.
+const REQ_USER_FIELDS = "_id role name email university phone location headline";
+
 module.exports = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
@@ -54,10 +60,11 @@ module.exports = async (req, res, next) => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     
     // Get user from database
-    const user = await User.findById(decoded.id).select('-password');
+    const user = await User.findById(decoded.id).select(REQ_USER_FIELDS).lean();
     if (!user) {
       return res.status(401).json({ message: "User not found" });
     }
+    user.id = String(user._id); // Mongoose's "id" virtual; routes use req.user.id
     
     // Set user data on request
     req.user = user;
