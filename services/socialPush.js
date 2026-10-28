@@ -160,6 +160,7 @@ async function sendToStudents(kind, items, students) {
 const FLOOD_MS = 5 * 60 * 1000;
 const QUIET = { quietStart: 23, quietEnd: 9 };
 const PKT_MS = 5 * 60 * 60 * 1000;
+let clock = () => new Date(); // tests set a fixed time (_test.setClock)
 
 // next 09:00 Karachi time (04:00 UTC) after a moment in quiet hours
 function quietEnd(at) {
@@ -190,7 +191,7 @@ function itemFor(kind, item) {
 
 // Add a new item. post: { id, authorId, authorName, text, hasImage }
 // confession: { id, authorId, universityId }  listing: { id, authorId, title }
-async function enqueue(kind, item, { now = new Date() } = {}) {
+async function enqueue(kind, item, { now = clock() } = {}) {
   if (!KINDS[kind]) throw new Error(`socialPush: unknown kind ${kind}`);
   if (!isOn(kind)) return { queued: false, reason: "switched_off" };
   let scope = "all";
@@ -223,7 +224,7 @@ async function stillThere(kind, items) {
 }
 
 // Send one due group (only one caller wins the claim)
-async function flush(groupId, { now = new Date() } = {}) {
+async function flush(groupId, { now = clock() } = {}) {
   if (isQuietHour(now, QUIET)) {
     await SocialPushGroup.updateOne({ _id: groupId, status: "open" }, { $set: { sendAfter: quietEnd(now) } });
     return { sent: false, reason: "quiet_hours" };
@@ -269,7 +270,7 @@ async function flush(groupId, { now = new Date() } = {}) {
 }
 
 // Every due group; groups stuck in "sending" (server stopped mid-send) are closed, not resent
-async function flushDue({ now = new Date() } = {}) {
+async function flushDue({ now = clock() } = {}) {
   await SocialPushGroup.updateMany(
     { status: "sending", sentAt: { $lt: new Date(now.getTime() - 10 * 60 * 1000) } },
     { $set: { status: "dropped", reason: "interrupted" } }
@@ -289,4 +290,6 @@ function startScheduler(everyMs = 60 * 1000) {
   if (timer.unref) timer.unref();
 }
 
-module.exports = { KINDS, isOn, buildContent, findRecipients, sendToStudents, snippet, enqueue, flush, flushDue, startScheduler, quietEnd, FLOOD_MS };
+const _test = { setClock: (fn) => { clock = fn || (() => new Date()); } };
+
+module.exports = { _test, KINDS, isOn, buildContent, findRecipients, sendToStudents, snippet, enqueue, flush, flushDue, startScheduler, quietEnd, FLOOD_MS };

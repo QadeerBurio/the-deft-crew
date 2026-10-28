@@ -17,6 +17,7 @@ const { Conversation, Message } = require('../models/Chat');
 const { awardDaily } = require('../services/engagement/dailyPoints');
 const { track } = require('../services/engagement');
 const { sendToUser } = require('../utils/pushNotification');
+const socialPush = require('../services/socialPush');
 // ============================================
 // ============ REPORT ROUTES ================
 // ============================================
@@ -956,6 +957,13 @@ router.post('/create-post', auth, async (req, res) => {
 
     await newPost.save();
 
+    // push to students, in the background: the response never waits (services/socialPush.js)
+    setImmediate(() => {
+      socialPush
+        .enqueue('post', { id: newPost._id, authorId: req.user._id, authorName: req.user.name, text: newPost.content, hasImage: !!newPost.image })
+        .catch((e) => console.warn('[socialPush] post not queued:', e.message));
+    });
+
     const populatedPost = await Post.findById(newPost._id)
       .populate({
         path: 'author',
@@ -1891,6 +1899,14 @@ router.post('/confessions/create', auth, async (req, res) => {
     });
 
     await confession.save();
+
+    // push to students of the author's university only, in the background
+    // (no text, author or university in the push; services/socialPush.js)
+    setImmediate(() => {
+      socialPush
+        .enqueue('confession', { id: confession._id, authorId: req.user._id, universityId: confession.university })
+        .catch((e) => console.warn('[socialPush] confession not queued:', e.message));
+    });
     try {
   await track(req.user._id, 'social_posted', {
     meta: { confessionId: confession._id.toString() },

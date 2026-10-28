@@ -6,6 +6,7 @@ const SkillOffer = require('../models/SkillOffer');
 const upload = require('../middleware/listingUpload.middleware');
 const attachProfessionalProfiles = require('../utils/attachProfessionalProfiles');
 const { track } = require('../services/engagement');
+const socialPush = require('../services/socialPush');
 
 // Helper function to get user ID consistently
 const getUserId = (req) => {
@@ -55,6 +56,15 @@ router.post('/', auth, async (req, res) => {
     const listing = new Listing(listingData);
     await listing.validate();
     await listing.save();
+
+    // push to students, in the background: the response never waits (services/socialPush.js)
+    if (listing.status === 'open') {
+      setImmediate(() => {
+        socialPush
+          .enqueue('listing', { id: listing._id, authorId: listing.ownerId, title: listing.title })
+          .catch((e) => console.warn('[socialPush] listing not queued:', e.message));
+      });
+    }
     
     // ✅ Fix: Only populate fields that exist in User schema
     const populatedListing = await Listing.findById(listing._id)

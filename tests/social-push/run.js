@@ -100,6 +100,7 @@ function request(method, url, { token, body } = {}) {
   });
 }
 const tick = (ms = 20) => new Promise((r) => setTimeout(r, ms));
+const LISTING_BODY = { type: "paid", title: "Python for beginners", description: "4 weeks of basics", skillOffered: { skillName: "Python", yearsOfExperience: 2, proficiencyLevel: "intermediate" }, price: 1000, duration: "4 weeks" };
 let pass = 0, fail = 0;
 const check = (name, ok, detail = "") => { if (ok) pass++; else fail++; quiet.log(`${ok ? "PASS" : "FAIL"}  ${name}${!ok && detail ? `  -> ${String(detail).slice(0, 400)}` : ""}`); };
 
@@ -263,6 +264,65 @@ const check = (name, ok, detail = "") => { if (ok) pass++; else fail++; quiet.lo
     await sp.flushDue({ now: min(noon, 6) });
     const waited = fake.STORE.get("socialpushgroups").find((x) => x.reason === "switched_off");
     check("switched off while waiting: the waiting group is dropped, nothing sent", expo.requests.length === 1 && !!waited);
+
+    // ═════ 5. the create routes ═════
+    quiet.log("── 5. create routes: background push, never slower, privacy end to end");
+    for (const k of ["SOCIAL_PUSH_POSTS", "SOCIAL_PUSH_CONFESSIONS", "SOCIAL_PUSH_SKILLSHARE"]) process.env[k] = "true";
+    let clockNow = noon;
+    sp._test.setClock(() => clockNow);
+    const waitFor = async (cond, ms = 3000) => { const end = Date.now() + ms; while (Date.now() < end) { if (cond()) return true; await tick(20); } return cond(); };
+
+    resetGroups();
+    r = await request("POST", "/api/social/create-post", { token: T("sara"), body: { content: "Library open till midnight during exams!" } });
+    check("create post: 201", r.status === 201, r.text);
+    await waitFor(() => expo.requests.length === 1);
+    let sent = expo.requests[0] || [];
+    check("post push: \"Sara posted on campus\" + the text, opens that post", sent[0]?.title.includes("Sara posted on campus") && sent[0]?.body === "Library open till midnight during exams!" && sent[0]?.data.route === "PostDetailScreen" && sent[0]?.data.postId === String(r.json?._id), JSON.stringify(sent[0]));
+    const to = sent.map((m) => m.to);
+    check("post push: students only, never the author", !to.includes(tok("sara")) && !to.includes(tok("brand")) && !to.includes(tok("admin")) && to.includes(tok("ali")) && to.includes(tok("omar")), to.join(","));
+
+    // confession, end to end: same university only, nothing identifying anywhere in the push
+    resetGroups();
+    const secret = "my secret crush sits in CS-101 every monday";
+    r = await request("POST", "/api/social/confessions/create", { token: T("ali"), body: { text: secret, visibility: "public" } });
+    check("create confession: 201", r.status === 201, r.text);
+    await waitFor(() => expo.requests.length === 1);
+    sent = expo.requests.flat();
+    const whole = JSON.stringify(sent);
+    check("confession push reaches Alpha students only (Sara, Hina), not the author", JSON.stringify(sent.map((m) => m.to).sort()) === JSON.stringify([tok("hina"), tok("sara")].sort()), sent.map((m) => m.to).join(","));
+    check("other universities (Omar, Beta Two) and students without one (Zara) get nothing", !/omar|beta2|noUni/.test(sent.map((m) => m.to).join(",")));
+    const forbidden = [secret, "secret crush", "CS-101", "Ali", "Khan", "Alpha", String(U1), String(ids.ali), "ali@test.local"];
+    const leaked = forbidden.filter((s) => whole.toLowerCase().includes(s.toLowerCase()));
+    check("no confession text, author or university (name or id) anywhere in the push (title, body, data)", leaked.length === 0 && sent[0]?.title.includes("new confession on campus. tap to read.") && sent[0]?.body === "", leaked.join(", "));
+    const storedGroup = JSON.stringify(fake.STORE.get("socialpushgroups"));
+    check("the stored group holds no confession text either", !storedGroup.includes("secret crush"));
+
+    // skillshare listing
+    resetGroups();
+    r = await request("POST", "/api/listings", { token: T("omar"), body: LISTING_BODY });
+    check("create listing: 201", r.status === 201, r.text);
+    await waitFor(() => expo.requests.length === 1);
+    sent = expo.requests[0] || [];
+    check("listing push: \"new skillshare listing: Python for beginners\", opens the listing, not to the author", sent[0]?.title.includes("new skillshare listing: Python for beginners") && sent[0]?.data.route === "ListingDetail" && !sent.map((m) => m.to).includes(tok("omar")), JSON.stringify(sent[0]));
+
+    // never slower: Expo takes 1.5 s, the create answers at once
+    resetGroups();
+    clockNow = min(noon, 30);
+    expo.delayMs = 1500;
+    r = await request("POST", "/api/social/create-post", { token: T("hina"), body: { content: "slow expo test" } });
+    check(`create post answers without waiting for the push (${r.ms} ms with Expo taking 1500 ms)`, r.status === 201 && r.ms < 600, `${r.ms} ms`);
+    await waitFor(() => expo.requests.length === 1, 4000);
+    check("the push still goes out afterwards", expo.requests.length === 1);
+    expo.delayMs = 0;
+    // a push that fails never fails the create
+    resetGroups();
+    clockNow = min(noon, 60);
+    const realSend = Expo.prototype.sendPushNotificationsAsync;
+    Expo.prototype.sendPushNotificationsAsync = async () => { throw new Error("expo down"); };
+    r = await request("POST", "/api/social/create-post", { token: T("hina"), body: { content: "expo down test" } });
+    await tick(150);
+    Expo.prototype.sendPushNotificationsAsync = realSend;
+    check("Expo down: the post is still created (201)", r.status === 201);
   } catch (e) {
     fail++; quiet.log("FAIL  (stopped)", e?.stack || e);
   }
