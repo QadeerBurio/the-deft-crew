@@ -122,6 +122,49 @@ const check = (name, ok, detail = "") => { if (ok) pass++; else fail++; quiet.lo
     check("an old profile without the new keys reads them as on, keeps its own values", r.json?.posts === true && r.json?.confessions === true && r.json?.skillshare === true && r.json?.dailyDrop === false, r.text);
     // put Ali back to all on for the next sections
     await request("PUT", "/api/engagement/notification-prefs", { token: T("ali"), body: { posts: true, skillshare: true } });
+
+    // ═════ 2. recipients, texts, bulk send ═════
+    quiet.log("── 2. recipients, texts and the bulk send");
+    const sp = reqS("./services/socialPush");
+    const names = (list) => list.map((u) => Object.keys(ids).find((k) => String(ids[k]) === String(u._id))).sort();
+    let rec = await sp.findRecipients("post", { excludeUserIds: [ids.ali] });
+    check("posts: every student with a token except the author; no brand, admin or token-less student", JSON.stringify(names(rec)) === JSON.stringify(["hina", "noUni", "omar", "sara"]), names(rec).join(","));
+    fake.seed("engagementprofiles", [{ _id: oid(), user: ids.hina, notifPrefs: { posts: false, confessions: true, skillshare: true } }]);
+    rec = await sp.findRecipients("post", { excludeUserIds: [ids.ali] });
+    check("a student who turned posts off gets nothing; profile-less students count as on", JSON.stringify(names(rec)) === JSON.stringify(["noUni", "omar", "sara"]), names(rec).join(","));
+    rec = await sp.findRecipients("confession", { universityId: U1, excludeUserIds: [ids.sara] });
+    check("confessions: only students of the author's university (Alpha), author excluded", JSON.stringify(names(rec)) === JSON.stringify(["ali", "hina"]), names(rec).join(","));
+    check("confessions: other universities (Omar) and students without one (Zara) get nothing", !names(rec).includes("omar") && !names(rec).includes("noUni"));
+    rec = await sp.findRecipients("confession", { universityId: null, excludeUserIds: [] });
+    check("confessions: an author without a university reaches nobody", rec.length === 0);
+
+    let c = sp.buildContent("post", [{ id: "p1", firstName: "Sara Ahmed", text: "  exam   timetable is out!\nsee the notice board near the library for the full list of rooms " }]);
+    check("post: \"<first name> posted on campus\" + the text, one line, max 60 chars", c.title === "Sara posted on campus" && c.body.length <= 60 && c.body.startsWith("exam timetable is out! see") && c.body.endsWith("…") && c.data.route === "PostDetailScreen" && c.data.params.postId === "p1", JSON.stringify(c));
+    c = sp.buildContent("post", [{ id: "p2", firstName: "Ali", text: "", hasImage: true }]);
+    check("post with only a photo: \"shared a photo\"", c.body === "shared a photo");
+    c = sp.buildContent("post", [{ id: "a" }, { id: "b" }, { id: "c" }, { id: "d" }]);
+    check("combined: \"4 new posts on campus\", opens the feed", c.title === "4 new posts on campus" && c.data.route === "FeedScreen" && c.data.params.tab === "Feed");
+    c = sp.buildContent("listing", [{ id: "l1", title: "Guitar lessons for beginners, weekends only, bring your own guitar please" }]);
+    check("listing: \"new skillshare listing: <title, max 60>\", opens the listing", c.title.startsWith("new skillshare listing: Guitar lessons") && c.title.length <= "new skillshare listing: ".length + 60 && c.data.route === "ListingDetail" && c.data.params.id === "l1");
+    c = sp.buildContent("listing", [{ id: "a" }, { id: "b" }]);
+    check("combined listings open skillshare", c.title === "2 new skillshare listings" && c.data.route === "Dashboard");
+    c = sp.buildContent("confession", [{ id: "c1" }]);
+    check("confession: fixed text, opens the confessions feed at that confession", c.title === "new confession on campus. tap to read." && c.body === "" && c.data.route === "FeedScreen" && c.data.params.tab === "Confession" && c.data.params.postId === "c1");
+
+    // the bulk send: 250 extra students → 3 Expo requests of at most 100; dead token removed
+    const many = Array.from({ length: 250 }, (_, i) => ({ _id: oid(), name: `S${i}`, role: "student", university: U2, pushTokens: [{ token: tok(`many${i}`), channels: "snd_v2" }] }));
+    fake.seed("users", many);
+    expo.dead.add(tok("many7"));
+    expo.requests.length = 0;
+    rec = await sp.findRecipients("listing", { excludeUserIds: [ids.ali] });
+    const res = await sp.sendToStudents("listing", [{ id: "l9", title: "Calculus tutoring" }], rec);
+    check(`bulk: ${rec.length} students in ${expo.requests.length} Expo requests of at most 100`, expo.requests.length === Math.ceil(res.devices / 100) && expo.requests.every((q) => q.length <= 100) && res.devices === rec.length, `${expo.requests.map((q) => q.length)}`);
+    check("one message per device, title with the mood emoji, Android channel and tap data", expo.requests[0][0].title.includes("new skillshare listing: Calculus tutoring") && /^tdc2_/.test(expo.requests[0][0].channelId) && expo.requests[0][0].data.route === "ListingDetail");
+    await tick(30);
+    const deadLeft = fake.STORE.get("users").find((u) => (u.pushTokens || []).some((t) => t.token === tok("many7")));
+    check("a dead token (DeviceNotRegistered) is removed from its student", !deadLeft && res.failed === 1 && res.reached.length === rec.length - 1);
+    fake.STORE.set("users", fake.STORE.get("users").filter((u) => !/^S\d+$/.test(u.name)));
+    expo.dead.clear();
   } catch (e) {
     fail++; quiet.log("FAIL  (stopped)", e?.stack || e);
   }
