@@ -1,4 +1,5 @@
 const express = require("express");
+const mongoose = require("mongoose");
 const router = express.Router();
 const multer = require("multer");
 const path = require("path");
@@ -38,6 +39,10 @@ const courseUpload = multer({
 // --- Routes ---
 const isAdmin = async (req, res, next) => {
   try {
+    // no token or the shared guest token: not an account id (findById would throw: 500)
+    if (!mongoose.Types.ObjectId.isValid(String(req.userId || ""))) {
+      return res.status(403).json({ message: "Access denied. Admins only." });
+    }
     const user = await User.findById(req.userId);
     if (user && user.role === "admin") {
       next();
@@ -199,17 +204,39 @@ router.put("/users/role/:id", auth, isAdmin, async (req, res) => {
   }
 });
 
-// ✅ Delete user (Admin only)
-router.delete("/users/:id", auth, isAdmin, async (req, res) => {
+// ✅ Delete a brand or student account for good (Admin only), with everything that points to it
+// (services/accountDeletion.js). Off unless ADMIN_DELETE_ENABLED=true; the preview always answers.
+const accountDeletion = require("../services/accountDeletion");
+const deletionEnabled = () => String(process.env.ADMIN_DELETE_ENABLED || "").trim().toLowerCase() === "true";
+const deletionError = (res, err, what) => {
+  if (err instanceof accountDeletion.DeletionError) return res.status(err.status).json({ message: err.message });
+  console.error(`Error ${what}:`, err.message);
+  return res.status(500).json({ message: `could not ${what}` });
+};
+
+// what would go: counts only, plus the name the admin has to type
+router.get("/users/:id/delete-preview", auth, isAdmin, async (req, res) => {
   try {
-    const user = await User.findByIdAndDelete(req.params.id);
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
-    res.json({ message: "User deleted successfully" });
+    if (String(req.params.id) === String(req.userId)) return res.status(400).json({ message: "you can't delete your own account here" });
+    const p = await accountDeletion.preview(req.params.id);
+    if (p.role === "admin") return res.status(403).json({ message: "admin accounts can't be deleted" });
+    res.json({ ...p, enabled: deletionEnabled() });
   } catch (err) {
-    console.error("Error deleting user:", err);
-    res.status(500).json({ error: err.message });
+    deletionError(res, err, "load the deletion preview");
+  }
+});
+
+// body: { confirmName } — exactly the account's name as the admin screens show it
+router.delete("/users/:id", auth, isAdmin, async (req, res) => {
+  if (!deletionEnabled()) return res.status(503).json({ message: "account deletion is not enabled" });
+  try {
+    const out = await accountDeletion.deleteAccount(req.params.id, {
+      actor: { type: "admin", adminId: req.userId },
+      confirmName: req.body?.confirmName,
+    });
+    res.json({ message: "account deleted", ...out });
+  } catch (err) {
+    deletionError(res, err, "delete the account");
   }
 });
 
