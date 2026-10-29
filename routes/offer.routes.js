@@ -15,6 +15,8 @@ const { clearOfferCaches } = require("../utils/cache");
 const { getBrandCitiesMap } = require("../utils/brandCities");
 const { myClaimedOfferIds, withMyClaim, offerForStudent } = require("../utils/myClaims");
 const { geocodeInBackground } = require("../services/geo/geocoder");
+const RedemptionArchive = require("../models/RedemptionArchive");
+const { brandFigures, TOTAL_KEYS } = require("../services/brandRevenue");
 
 // Offers/claims change all the time, never let a phone or proxy cache them
 router.use((req, res, next) => {
@@ -490,9 +492,12 @@ router.get("/my-total-savings", auth, async (req, res) => {
 
     const stats = result[0] || { totalSaved: 0, redemptionCount: 0 };
 
+    // redemptions at brands whose account was deleted still count
+    const archived = await RedemptionArchive.find({ kind: "redemption", student: uid }).select("savedAmount").lean();
+
     res.json({
-      totalSaved: stats.totalSaved,
-      redemptionCount: stats.redemptionCount
+      totalSaved: stats.totalSaved + archived.reduce((s, r) => s + (r.savedAmount || 0), 0),
+      redemptionCount: stats.redemptionCount + archived.length
     });
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -529,6 +534,14 @@ router.get("/my-redemptions", auth, async (req, res) => {
         if (Number.isNaN(at.getTime()) || at < from) continue;
         redemptions.push({ redemptionId: String(r._id), offerId: String(offer._id), redeemedAt: at.toISOString() });
       }
+    }
+    // redemptions at brands whose account was deleted: same ids as before the deletion
+    const archived = await RedemptionArchive.find({ kind: "redemption", student: req.userId, redeemedAt: { $gte: from } })
+      .select("redemptionId offerId redeemedAt")
+      .lean();
+    for (const r of archived) {
+      if (!r.redemptionId || !r.offerId) continue;
+      redemptions.push({ redemptionId: String(r.redemptionId), offerId: String(r.offerId), redeemedAt: new Date(r.redeemedAt).toISOString() });
     }
     redemptions.sort((a, b) => (a.redeemedAt < b.redeemedAt ? 1 : -1));
     res.json({ redemptions: redemptions.slice(0, MY_REDEMPTIONS_LIMIT) });
@@ -1412,12 +1425,8 @@ router.get("/admin/brands-revenue", auth, async (req, res) => {
       .select('name brandName logo category brandApprovalStatus platform address phone email websiteUrl isOnline isInStore createdAt')
       .lean();
 
-    const allOffers = await Offer.find({})
-      .populate({
-        path: "redemptions.student",
-        select: "name rollNo university"
-      })
-      .lean();
+    // student ids are only counted, never shown: no populate (a deleted student's placeholder id still counts)
+    const allOffers = await Offer.find({}).lean();
 
     const allPromoCodes = await PromoCode.find({ status: 'used' })
       .populate('offer', 'title image discountPercentage')
@@ -1444,58 +1453,7 @@ router.get("/admin/brands-revenue", auth, async (req, res) => {
       const brandOffers = offersByBrand[brandId] || [];
       const brandPromos = promosByBrand[brandId] || [];
 
-      let qrRevenue = 0;
-      let qrBill = 0;
-      let qrSaved = 0;
-      let qrCount = 0;
-      const uniqueQrStudents = new Set();
-
-      brandOffers.forEach(offer => {
-        (offer.redemptions || []).forEach(r => {
-          const bill = r.billAmount || 0;
-          const saved = r.savedAmount || 0;
-          qrBill += bill;
-          qrSaved += saved;
-          qrRevenue += (bill - saved);
-          qrCount += 1;
-          if (r.student?._id) uniqueQrStudents.add(r.student._id.toString());
-        });
-      });
-
-      let promoRevenue = 0;
-      let promoBill = 0;
-      let promoCount = 0;
-      const uniquePromoStudents = new Set();
-
-      brandPromos.forEach(pc => {
-        const bill = pc.externalAmount || 0;
-        const saved = Math.round((bill * (pc.discountPercentage || 0)) / 100);
-        promoBill += bill;
-        promoRevenue += (bill - saved);
-        promoCount += 1;
-        if (pc.student) uniquePromoStudents.add(pc.student.toString());
-      });
-
-      const promoSaved = Math.round((promoBill * (brandPromos[0]?.discountPercentage || 0)) / 100);
-
-      const totalRevenue = qrRevenue + promoRevenue;
-      const totalBill = qrBill + promoBill;
-      const totalSaved = qrSaved + promoSaved;
-      const totalRedemptions = qrCount + promoCount;
-      const uniqueStudents = new Set([
-        ...uniqueQrStudents,
-        ...uniquePromoStudents
-      ]).size;
-
-      let topOffer = "—";
-      let topCount = 0;
-      brandOffers.forEach(offer => {
-        const count = (offer.redemptions || []).length;
-        if (count > topCount) {
-          topCount = count;
-          topOffer = offer.title || "Offer";
-        }
-      });
+      const figures = brandFigures(brandOffers, brandPromos);
 
       return {
         _id: brand._id,
@@ -1512,35 +1470,24 @@ router.get("/admin/brands-revenue", auth, async (req, res) => {
         isOnline: brand.isOnline || false,
         isInStore: brand.isInStore || false,
 
-        totalRevenue,
-        totalBill,
-        totalSaved,
-        totalRedemptions,
-        uniqueStudents,
-
-        qrRevenue,
-        qrBill,
-        qrSaved,
-        qrCount,
-
-        promoRevenue,
-        promoBill,
-        promoCount,
-
-        topOffer,
-        topOfferCount: topCount,
-        offersCount: brandOffers.length,
+        ...figures,
       };
     });
 
     brandsWithRevenue.sort((a, b) => b.totalRevenue - a.totalRevenue);
 
-    const grandTotalRevenue = brandsWithRevenue.reduce((s, b) => s + b.totalRevenue, 0);
-    const grandTotalBill = brandsWithRevenue.reduce((s, b) => s + b.totalBill, 0);
-    const grandTotalSaved = brandsWithRevenue.reduce((s, b) => s + b.totalSaved, 0);
-    const grandTotalRedemptions = brandsWithRevenue.reduce((s, b) => s + b.totalRedemptions, 0);
-    const grandUniqueStudents = brandsWithRevenue.reduce((s, b) => s + b.uniqueStudents, 0);
-    const brandsWithRevenueCount = brandsWithRevenue.filter(b => b.totalRevenue > 0).length;
+    // brands whose account was deleted: their figures as they were, added to the totals
+    const deletedRows = await RedemptionArchive.find({ kind: "brand-totals" }).select("totals").lean();
+    const deletedBrands = { count: deletedRows.length };
+    for (const k of TOTAL_KEYS) deletedBrands[k] = deletedRows.reduce((s, r) => s + (r.totals?.[k] || 0), 0);
+
+    const grandTotalRevenue = brandsWithRevenue.reduce((s, b) => s + b.totalRevenue, 0) + deletedBrands.totalRevenue;
+    const grandTotalBill = brandsWithRevenue.reduce((s, b) => s + b.totalBill, 0) + deletedBrands.totalBill;
+    const grandTotalSaved = brandsWithRevenue.reduce((s, b) => s + b.totalSaved, 0) + deletedBrands.totalSaved;
+    const grandTotalRedemptions = brandsWithRevenue.reduce((s, b) => s + b.totalRedemptions, 0) + deletedBrands.totalRedemptions;
+    const grandUniqueStudents = brandsWithRevenue.reduce((s, b) => s + b.uniqueStudents, 0) + deletedBrands.uniqueStudents;
+    const brandsWithRevenueCount = brandsWithRevenue.filter(b => b.totalRevenue > 0).length
+      + deletedRows.filter((r) => (r.totals?.totalRevenue || 0) > 0).length;
 
     res.json({
       success: true,
@@ -1555,6 +1502,7 @@ router.get("/admin/brands-revenue", auth, async (req, res) => {
         averageRevenue: brandsWithRevenueCount > 0
           ? Math.round(grandTotalRevenue / brandsWithRevenueCount)
           : 0,
+        deletedBrands,
       },
       brands: brandsWithRevenue,
     });
