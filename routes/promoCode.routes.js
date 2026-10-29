@@ -718,8 +718,9 @@ router.get("/:code", auth, async (req, res) => {
         .json({ success: false, message: "Promo code not found" });
     }
 
-    const isStudent = promoCode.student._id.toString() === userId;
-    const isBrand = promoCode.brand._id.toString() === userId;
+    // a deleted student's used codes keep a placeholder id that no account has (populate gives null)
+    const isStudent = String(promoCode.student?._id || "") === String(userId);
+    const isBrand = String(promoCode.brand?._id || "") === String(userId);
 
     if (!isStudent && !isBrand) {
       return res
