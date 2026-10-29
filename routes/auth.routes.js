@@ -24,6 +24,7 @@ const EngagementEvent = require("../models/EngagementEvent");
 const crypto = require("crypto");
 const { sendMail, logMailerStatus } = require("../utils/mailer");
 const OtpCode = require("../models/OtpCode");
+const accountDeletion = require("../services/accountDeletion");
 
 logMailerStatus();
 
@@ -1195,12 +1196,25 @@ router.delete("/delete-account", authMiddleware, async (req, res) => {
   try {
     const userId = req.userId;
 
+    if (!mongoose.Types.ObjectId.isValid(String(userId))) {
+      return res.status(404).json({ error: "User not found" });
+    }
     const user = await User.findById(userId);
     
     if (!user) {
       return res.status(404).json({ error: "User not found" });
     }
 
+    // students and brands: everything goes, the same way an admin deletion does (services/accountDeletion.js)
+    if (accountDeletion.SUPPORTED_ROLES.has(user.role)) {
+      await accountDeletion.deleteAccount(userId, { actor: { type: "self" } });
+      return res.status(200).json({
+        message: "Account deleted successfully",
+        success: true
+      });
+    }
+
+    // other roles: unchanged for now
     await Notification.deleteMany({ recipient: userId });
     await Application.deleteMany({ userId: userId });
 
