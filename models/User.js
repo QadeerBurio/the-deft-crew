@@ -102,10 +102,12 @@ const userSchema = new mongoose.Schema(
       default: false,
     },
 
+    // the brand's connected online store: "none" until a connection works (BrandStoreConnection for
+    // WooCommerce, ShopifyStore for Shopify); set by those flows and scripts/migrate-store-platform.js
     platform: {
       type: String,
-      enum: ["woocommerce", "shopify", "custom"],
-      default: "woocommerce",
+      enum: ["none", "woocommerce", "shopify", "custom"],
+      default: "none",
     },
     websiteUrl: {
       type: String,
