@@ -5,6 +5,7 @@ const User = require("../models/User");
 const Notification = require("../models/Notification");
 const auth = require("../middleware/auth.middleware");
 const { clearOfferCaches } = require("../utils/cache");
+const { onlineStoresFor } = require("../services/storeStatus");
 
 // Middleware to check if user is admin
 const isAdmin = async (req, res, next) => {
@@ -40,7 +41,11 @@ router.get("/", auth, isAdmin, async (req, res) => {
 
     const brands = await User.find(filter)
       .select("name email brandName logo category address isOnline isInStore brandApprovalStatus brandApprovalNote brandApprovedAt brandRejectedAt createdAt phone")
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .lean();
+    // the online store each brand really has: platform and connection status (no keys)
+    const stores = await onlineStoresFor(brands.map((b) => b._id));
+    for (const b of brands) b.onlineStore = stores.get(String(b._id));
 
     const stats = {
       total: await User.countDocuments({ role: "brand" }),
