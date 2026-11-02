@@ -65,18 +65,12 @@ connectDB().then(() => {
   // social pushes (new posts / confessions / listings): sends the groups that are due, every minute
   require("./services/socialPush").startScheduler();
 
-  // Purge any existing non-Pakistan/worldwide external jobs to keep the feed clean
+  // Imported jobs outside Pakistan leave the feed: archived (hidden, kept), never deleted, and never a
+  // job an employer posted (only isExternal imports with no postedBy). Applications stay with the job.
   const Job = require("./models/Job");
-  const JobEmbedding = require("./models/JobEmbedding");
-  Job.find({
-    location: { $not: /pakistan|karachi|lahore|islamabad|rawalpindi|faisalabad|multan|peshawar|quetta|sialkot|gujranwala|hyderabad|abbottabad|sargodha|bahawalpur|sukkur|larkana|gujrat|sheikhupura|jhelum|sahiwal|pk/i }
-  }).select("_id").then(async jobsToDelete => {
-    if (jobsToDelete.length > 0) {
-      const ids = jobsToDelete.map(j => j._id);
-      const deleteJobsResult = await Job.deleteMany({ _id: { $in: ids } });
-      const deleteEmbeddingsResult = await JobEmbedding.deleteMany({ jobId: { $in: ids } });
-      console.log(`🧹 [Startup] Purged ${deleteJobsResult.deletedCount} foreign jobs and ${deleteEmbeddingsResult.deletedCount} orphaned embeddings.`);
-    }
+  const { archiveForeignImportedJobs } = require("./services/jobArchive");
+  archiveForeignImportedJobs().then((r) => {
+    console.log(`🧹 [Startup] Archived ${r.archived} imported jobs outside Pakistan (${r.checked} imported jobs checked; employer jobs are never touched).`);
   }).catch(err => {
     console.error("❌ [Startup] Failed to purge non-Pakistan jobs:", err);
   });
