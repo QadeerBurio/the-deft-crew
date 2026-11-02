@@ -62,6 +62,7 @@ function matchCond(vals, cond) {
       case "$size": return vals.some((v) => Array.isArray(v) && v.length === arg);
       case "$elemMatch": return vals.some((v) => Array.isArray(v) && v.some((el) => matches(el, arg)));
       case "$not": return !matchCond(vals, arg);
+      case "$type": { const t = { string: "string", number: "number", double: "number", int: "number", bool: "boolean" }[arg]; if (!t) throw new Error(`fake-mongo: unsupported $type ${arg}`); return vals.some((v) => typeof v === t); }
       default: throw new Error(`fake-mongo: unsupported operator ${op}`);
     }
   });
@@ -166,10 +167,36 @@ function makeCursor(docsPromise) {
   return c;
 }
 
-function install(mongoose, ObjectId) {
+// Unique indexes (opt-in: install(mongoose, ObjectId, { unique: true })): the schema's unique indexes
+// (field-level and schema.index, partial filters respected) are enforced on inserts and upserts with a
+// real-looking E11000 error. Documents missing every indexed field are let through (like sparse).
+function uniqueIndexes(mongoose, name) {
+  const out = [];
+  for (const m of Object.values(mongoose.models)) {
+    if (!m.collection || m.collection.collectionName !== name) continue;
+    for (const [fields, opts] of m.schema.indexes()) if (opts && opts.unique) out.push({ fields: Object.keys(fields), partial: opts.partialFilterExpression });
+  }
+  return out;
+}
+function checkUnique(mongoose, name, docs, doc) {
+  for (const ix of uniqueIndexes(mongoose, name)) {
+    if (ix.partial && !matches(doc, ix.partial)) continue;
+    const vals = ix.fields.map((f) => getPath(doc, f));
+    if (vals.every((v) => v == null)) continue;
+    const clash = docs.some((d) => d !== doc && (!ix.partial || matches(d, ix.partial)) && ix.fields.every((f, i) => norm(getPath(d, f)) === norm(vals[i])));
+    if (clash) {
+      const err = new Error(`E11000 duplicate key error collection: ${name} index: ${ix.fields.join("_")}_1`);
+      err.code = 11000;
+      throw err;
+    }
+  }
+}
+
+function install(mongoose, ObjectId, opts = {}) {
   // the prototype shared by every model's collection (mongoose's native driver wrapper)
   const P = Object.getPrototypeOf(mongoose.connection.collection("__fake_probe"));
   const coll = (self) => { const n = self.collectionName || self.name; if (!STORE.has(n)) STORE.set(n, []); return STORE.get(n); };
+  const unique = (self, doc) => { if (opts.unique) checkUnique(mongoose, self.collectionName || self.name, coll(self), doc); };
   const find = (self, filter, opts = {}) => {
     let docs = coll(self).filter((d) => matches(d, filter));
     docs = sortDocs(docs, opts.sort);
@@ -182,8 +209,8 @@ function install(mongoose, ObjectId) {
   P.countDocuments = async function (filter) { return coll(this).filter((d) => matches(d, filter)).length; };
   P.estimatedDocumentCount = async function () { return coll(this).length; };
   P.distinct = async function (field, filter) { const s = new Map(); for (const d of coll(this).filter((x) => matches(x, filter))) for (const v of valuesAt(d, field).flat()) s.set(String(norm(v)), v); return [...s.values()]; };
-  P.insertOne = async function (doc) { const d = clone(doc); if (d._id == null) d._id = new ObjectId(); coll(this).push(d); return { acknowledged: true, insertedId: d._id }; };
-  P.insertMany = async function (docs) { const ids = {}; docs.forEach((doc, i) => { const d = clone(doc); if (d._id == null) d._id = new ObjectId(); coll(this).push(d); ids[i] = d._id; }); return { acknowledged: true, insertedCount: docs.length, insertedIds: ids }; };
+  P.insertOne = async function (doc) { const d = clone(doc); if (d._id == null) d._id = new ObjectId(); unique(this, d); coll(this).push(d); return { acknowledged: true, insertedId: d._id }; };
+  P.insertMany = async function (docs) { const ids = {}; docs.forEach((doc, i) => { const d = clone(doc); if (d._id == null) d._id = new ObjectId(); unique(this, d); coll(this).push(d); ids[i] = d._id; }); return { acknowledged: true, insertedCount: docs.length, insertedIds: ids }; };
   const upd = (self, filter, update, opts = {}, many) => {
     const hits = coll(self).filter((d) => matches(d, filter));
     const targets = many ? hits : hits.slice(0, 1);
@@ -191,7 +218,7 @@ function install(mongoose, ObjectId) {
     let upserted = null;
     if (!targets.length && opts.upsert) {
       const d = {}; for (const [k, v] of Object.entries(filter || {})) if (!k.startsWith("$") && !isPlain(v)) setPath(d, k, clone(v));
-      applyUpdate(d, update, filter, true); if (d._id == null) d._id = new ObjectId(); coll(self).push(d); upserted = d;
+      applyUpdate(d, update, filter, true); if (d._id == null) d._id = new ObjectId(); unique(self, d); coll(self).push(d); upserted = d;
     }
     return { targets, upserted, matched: hits.length };
   };
@@ -215,6 +242,17 @@ function install(mongoose, ObjectId) {
   P.createIndexes = async function () { return []; };
   P.listIndexes = function () { return makeCursor(Promise.resolve([])); };
   P.indexes = async function () { return []; };
+  // opts.interleave: every operation waits a turn of the event loop first, like a real round-trip, so
+  // requests sent at the same moment interleave between their reads and writes (check-then-act races show)
+  if (opts.interleave) {
+    const turn = () => new Promise((r) => setImmediate(r));
+    for (const k of ["findOne", "countDocuments", "distinct", "insertOne", "insertMany", "updateOne", "updateMany", "findOneAndUpdate", "findOneAndDelete", "deleteOne", "deleteMany"]) {
+      const op = P[k];
+      P[k] = async function (...args) { await turn(); return op.apply(this, args); };
+    }
+    const findNow = P.find;
+    P.find = function (...args) { return makeCursor(turn().then(() => findNow.apply(this, args).toArray())); };
+  }
   mongoose.set("autoIndex", false);
   mongoose.set("autoCreate", false);
 }
