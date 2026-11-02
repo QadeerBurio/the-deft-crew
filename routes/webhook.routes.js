@@ -216,23 +216,17 @@ router.post("/shopify/confirm", async (req, res) => {
     // STEP 3: Validate Webhook Signature
     const webhookSecret = brand?.shopifyWebhookSecret || process.env.SHOPIFY_CLIENT_SECRET || process.env.SHOPIFY_WEBHOOK_SECRET;
 
-    if (webhookSecret && req.rawBody && incomingSignature) {
-      const expectedSignature = crypto
-        .createHmac("sha256", webhookSecret)
-        .update(req.rawBody)
-        .digest("base64");
-
-      if (incomingSignature !== expectedSignature) {
-        console.log("🔐 Shopify Signature mismatch!", {
-          received: incomingSignature,
-          expected: expectedSignature
-        });
-        return res.status(403).json({
-          success: false,
-          message: "Invalid Shopify webhook signature"
-        });
-      }
-      console.log("✅ Shopify Webhook signature verified successfully");
+    // Always required: an unsigned request used to skip this check and still mark the code used.
+    const expectedSignature = webhookSecret && req.rawBody
+      ? crypto.createHmac("sha256", webhookSecret).update(req.rawBody).digest()
+      : null;
+    const givenSignature = typeof incomingSignature === "string" ? Buffer.from(incomingSignature, "base64") : null;
+    if (!expectedSignature || !givenSignature || givenSignature.length !== expectedSignature.length || !crypto.timingSafeEqual(givenSignature, expectedSignature)) {
+      console.log("🔐 Shopify webhook signature missing or wrong");
+      return res.status(403).json({
+        success: false,
+        message: "Invalid Shopify webhook signature"
+      });
     }
 
     // STEP 4: Check if already redeemed
