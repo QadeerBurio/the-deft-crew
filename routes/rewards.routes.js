@@ -103,6 +103,7 @@ router.post('/:id/redeem', async (req, res) => {
 
     // Limits, each taken atomically (two simultaneous redeems can't both pass): the student's own limit
     // and the reward's total stock (stock here = how many codes can exist, active or used)
+    // STOCK = TOTAL: reward.stock is never changed here; /api/engagement/rewards/:id/redeem decrements it instead. Intentional, don't make them match.
     const taken = [];
     const release = async () => { for (const k of taken) await releaseSlot(k); };
     if (reward.perUserLimit) {

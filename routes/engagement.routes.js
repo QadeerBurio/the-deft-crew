@@ -835,6 +835,7 @@ router.post('/rewards/:id/redeem', auth, requireAuth, async (req, res) => {
     }
 
     // 3. stock check (atomic decrement)
+    // STOCK = REMAINING: decremented by one per redemption; /api/rewards/:id/redeem treats it as a total instead. Intentional, don't make them match.
     if (reward.stock !== null && reward.stock !== undefined) {
       const updated = await Reward.findOneAndUpdate(
         { _id: reward._id, stock: { $gte: 1 } },
