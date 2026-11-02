@@ -209,6 +209,7 @@ app.post("/webhooks/app/scopes_update", async (req, res) => {
 });
 // ---------------- ROUTES ----------------
 // IMPORTANT: Register webhook routes FIRST
+app.use("/api/webhooks/woocommerce", require("./routes/storeWebhook.routes")); // connected WooCommerce stores
 app.use("/api/webhooks", require("./routes/webhook.routes"));
 
 // Now register all other routes
