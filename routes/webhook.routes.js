@@ -5,185 +5,131 @@ const User = require("../models/User");
 const Notification = require("../models/Notification");
 const Offer = require("../models/Offer");
 const crypto = require("crypto");
+const axios = require("axios");
 
 // ==================== BRAND ORDER CONFIRMATION WEBHOOK ====================
 // POST /api/webhooks/confirm
-// Called by brand's WordPress/WooCommerce (or any external site) when an order completes
-// No user login — verified instead via HMAC signature header, checked against raw request bytes
+// Called by a brand's site (WordPress/WooCommerce plugin) when an order is paid. No login: the body must be
+// signed with the brand's own secret: header x-webhook-signature = hex HMAC-SHA256 of the raw body, keyed
+// with User.webhookSecret of the brand that owns the code. No secret, a wrong or missing signature, or an
+// unknown code all get the same reply, so the endpoint can't be used to find codes.
+//   body: { coupon_code, order_id, amount, status }
+// Only "processing" and "completed" orders count. If the brand's WooCommerce keys are set, the order is
+// read back from the store and its total is used (the code must be on the order); otherwise the signed
+// amount is used, after checks.
+const { rateLimit } = require("express-rate-limit");
+const confirmLimit = rateLimit({
+    windowMs: 60 * 1000,
+    limit: () => Number(process.env.WEBHOOK_CONFIRM_RATE_LIMIT) || 60,
+    standardHeaders: "draft-7",
+    legacyHeaders: false,
+    // "trust proxy" is not set: the last x-forwarded-for hop is the one Railway's proxy added
+    keyGenerator: (req) => String(req.headers["x-forwarded-for"] || "").split(",").pop().trim() || req.ip || "unknown",
+    message: { success: false, message: "Too many requests" },
+});
+const NOT_ACCEPTED = { success: false, message: "Webhook not accepted" };
+const PAID_STATUSES = new Set(["processing", "completed"]);
+const MAX_AMOUNT = 10000000; // PKR; anything above is a mistake or an attack
 
-router.post("/confirm", async (req, res) => {
-    let requestBody;
-    let parsedBody;
-    
+// hex HMAC compared in constant time; false for anything that isn't 64 hex characters
+function signatureMatches(rawBody, secret, incoming) {
+    if (typeof incoming !== "string" || !/^[0-9a-f]{64}$/i.test(incoming.trim())) return false;
+    const expected = crypto.createHmac("sha256", secret).update(rawBody).digest();
+    const given = Buffer.from(incoming.trim(), "hex");
+    return given.length === expected.length && crypto.timingSafeEqual(given, expected);
+}
+
+// the order as the brand's WooCommerce store has it (only when the brand's keys are set), https only
+async function readBackWooOrder(brand, orderId) {
+    let base;
     try {
-        // Handle both raw and parsed body
-        if (req.body && typeof req.body === 'object') {
-            parsedBody = req.body;
-            requestBody = JSON.stringify(req.body);
-        } else if (req.body && Buffer.isBuffer(req.body)) {
-            requestBody = req.body.toString();
-            parsedBody = JSON.parse(requestBody);
-        } else {
-            // Try to parse if it's a string
-            try {
-                parsedBody = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
-                requestBody = JSON.stringify(parsedBody);
-            } catch (e) {
-                return res.status(400).json({
-                    success: false,
-                    message: "Invalid JSON body"
-                });
-            }
-        }
-
-        const { coupon_code, order_id, amount, status, brand_website, brand_email } = parsedBody;
-        const incomingSignature = req.headers["x-webhook-signature"];
-
-        console.log('📨 Webhook received:', {
-            coupon_code,
-            order_id,
-            amount,
-            status,
-            brand_website,
-            brand_email,
-            timestamp: new Date().toISOString()
+        base = new URL(brand.websiteUrl);
+    } catch {
+        return { ok: false };
+    }
+    if (base.protocol !== "https:" || !/^\d+$/.test(String(orderId))) return { ok: false };
+    try {
+        const r = await axios.get(`${base.origin}${base.pathname.replace(/\/$/, "")}/wp-json/wc/v3/orders/${orderId}`, {
+            auth: { username: brand.wooConsumerKey, password: brand.wooConsumerSecret },
+            timeout: 10000,
+            maxRedirects: 0,
+            maxContentLength: 2 * 1024 * 1024,
         });
+        return { ok: true, order: r.data };
+    } catch {
+        return { ok: false };
+    }
+}
 
-        // Validate required fields
-        if (!coupon_code) {
-            return res.status(400).json({
-                success: false,
-                message: "Missing required field: coupon_code"
-            });
+router.post("/confirm", confirmLimit, async (req, res) => {
+    try {
+        const body = req.body && typeof req.body === "object" && !Buffer.isBuffer(req.body) ? req.body : null;
+        if (!body || !req.rawBody) return res.status(400).json({ success: false, message: "Invalid JSON body" });
+        const couponCode = typeof body.coupon_code === "string" ? body.coupon_code.toUpperCase().trim() : "";
+        const orderId = body.order_id != null && /^[\w-]{1,64}$/.test(String(body.order_id)) ? String(body.order_id) : "";
+        if (!couponCode || couponCode.length > 40 || !orderId) {
+            return res.status(400).json({ success: false, message: "coupon_code and order_id are required" });
         }
 
-        if (!order_id) {
-            return res.status(400).json({
-                success: false,
-                message: "Missing required field: order_id"
-            });
+        // code -> brand -> that brand's secret. Every failure on this path gives the same answer.
+        const promoCodeDoc = await PromoCode.findOne({ code: couponCode });
+        const brand = promoCodeDoc ? await User.findById(promoCodeDoc.brand).select("+webhookSecret +wooConsumerKey +wooConsumerSecret websiteUrl") : null;
+        if (!brand || !brand.webhookSecret || !signatureMatches(req.rawBody, brand.webhookSecret, req.headers["x-webhook-signature"])) {
+            return res.status(403).json(NOT_ACCEPTED);
         }
 
-        if (!req.rawBody) {
-            return res.status(400).json({
-                success: false,
-                message: "Raw body unavailable for signature verification"
-            });
+        // signed by the brand from here on
+        const status = String(body.status || "").toLowerCase();
+        if (!PAID_STATUSES.has(status)) {
+            return res.json({ success: true, ignored: true, message: "Only processing or completed orders are counted" });
         }
-
-        // STEP 1: Find the promo code
-        const promoCodeDoc = await PromoCode.findOne({
-            code: coupon_code.toUpperCase().trim()
-        });
-
-        if (!promoCodeDoc) {
-            console.log('❌ Promo code not found:', coupon_code);
-            return res.status(404).json({
-                success: false,
-                message: "Promo code not found",
-                code: coupon_code
-            });
-        }
-
-        console.log('✅ Found promo code:', {
-            code: promoCodeDoc.code,
-            status: promoCodeDoc.status,
-            brand: promoCodeDoc.brand,
-            student: promoCodeDoc.student
-        });
-
-        // STEP 2: Get the brand
-        const brand = await User.findById(promoCodeDoc.brand).select("+webhookSecret");
-        if (!brand) {
-            console.log('❌ Brand not found:', promoCodeDoc.brand);
-            return res.status(404).json({
-                success: false,
-                message: "Brand not found"
-            });
-        }
-
-        // STEP 3: Verify webhook signature (if configured)
-        if (brand.webhookSecret) {
-            const expectedSignature = crypto
-                .createHmac("sha256", brand.webhookSecret)
-                .update(req.rawBody)
-                .digest("hex");
-
-            console.log('🔐 Signature verification:', {
-                expected: expectedSignature,
-                received: incomingSignature,
-                match: incomingSignature === expectedSignature
-            });
-
-            if (!incomingSignature || incomingSignature !== expectedSignature) {
-                return res.status(403).json({
-                    success: false,
-                    message: "Invalid webhook signature"
-                });
-            }
-        } else {
-            // For backward compatibility - use default secret
-            const defaultSecret = process.env.DEFAULT_WEBHOOK_SECRET || 'be0adcf4b7444c1cf51f9f2507f25f0c';
-            const expectedSignature = crypto
-                .createHmac("sha256", defaultSecret)
-                .update(req.rawBody)
-                .digest("hex");
-
-            if (!incomingSignature || incomingSignature !== expectedSignature) {
-                console.log('⚠️ No webhook secret configured and default signature mismatch');
-                // Don't block - just log warning for now
-                console.log('⚠️ Continuing without signature verification');
-            }
-        }
-
-        // STEP 4: Check if already used
         if (promoCodeDoc.status === "used") {
-            console.log('⚠️ Promo code already used:', promoCodeDoc.code);
-            return res.status(200).json({
-                success: true,
-                message: "Promo code already confirmed",
-                alreadyUsed: true
-            });
+            return res.json({ success: true, alreadyUsed: true, message: "Promo code already confirmed" });
+        }
+        if (promoCodeDoc.status !== "active") {
+            return res.status(409).json({ success: false, message: `Promo code is ${promoCodeDoc.status}` });
         }
 
-        // STEP 5: Calculate savings
-        const billAmount = Number(amount) || 0;
-        const discountAmount = (billAmount * promoCodeDoc.discountPercentage) / 100;
-        const savedAmount = Math.round(discountAmount);
-
-        // STEP 6: Mark as used
-        promoCodeDoc.status = "used";
-        promoCodeDoc.usedAt = new Date();
-        promoCodeDoc.redeemedVia = "webhook";
-        promoCodeDoc.externalOrderId = order_id.toString();
-        promoCodeDoc.externalAmount = billAmount;
-        promoCodeDoc.usedCount = (promoCodeDoc.usedCount || 0) + 1;
-        
-        await promoCodeDoc.save();
-        console.log('✅ Promo code marked as used:', promoCodeDoc.code);
-
-        // STEP 7: Update offer redemptions
-        if (promoCodeDoc.offer) {
-            const offer = await Offer.findById(promoCodeDoc.offer);
-            if (offer) {
-                offer.redemptions.push({
-                    student: promoCodeDoc.student,
-                    billAmount: billAmount,
-                    savedAmount: savedAmount,
-                    redeemedAt: new Date(),
-                    promoCode: promoCodeDoc.code,
-                    promoCodeId: promoCodeDoc._id,
-                    source: 'webhook',
-                    externalOrderId: order_id.toString()
-                });
-                await offer.save();
-                console.log('✅ Offer redemptions updated');
+        // the amount: from the store when we can read the order, otherwise the signed amount after checks
+        let billAmount;
+        let amountSource;
+        if (brand.websiteUrl && brand.wooConsumerKey && brand.wooConsumerSecret) {
+            const back = await readBackWooOrder(brand, orderId);
+            if (!back.ok) return res.status(502).json({ success: false, message: "Could not read the order from the store; try again" });
+            const order = back.order || {};
+            const line = (order.coupon_lines || []).find((c) => String(c.code || "").toUpperCase().trim() === couponCode);
+            if (!line) return res.status(409).json({ success: false, message: "The code is not on that order" });
+            if (!PAID_STATUSES.has(String(order.status || "").toLowerCase())) {
+                return res.json({ success: true, ignored: true, message: "Only processing or completed orders are counted" });
             }
+            billAmount = (Number(order.total) || 0) + (Number(line.discount) || 0); // before the tdc discount
+            amountSource = "store";
+        } else {
+            billAmount = Number(body.amount);
+            amountSource = "signed";
+        }
+        if (!Number.isFinite(billAmount) || billAmount <= 0 || billAmount > MAX_AMOUNT) {
+            return res.status(400).json({ success: false, message: "amount must be a positive number" });
+        }
+        billAmount = Math.round(billAmount);
+        const savedAmount = Math.round((billAmount * promoCodeDoc.discountPercentage) / 100);
+
+        // mark used only if still active (two deliveries of the same order count once)
+        const marked = await PromoCode.findOneAndUpdate(
+            { _id: promoCodeDoc._id, status: "active" },
+            { $set: { status: "used", usedAt: new Date(), redeemedVia: "webhook", externalOrderId: orderId, externalAmount: billAmount }, $inc: { usedCount: 1 } },
+            { new: true }
+        );
+        if (!marked) return res.json({ success: true, alreadyUsed: true, message: "Promo code already confirmed" });
+
+        if (promoCodeDoc.offer) {
+            await Offer.updateOne(
+                { _id: promoCodeDoc.offer },
+                { $push: { redemptions: { student: promoCodeDoc.student, billAmount, savedAmount, redeemedAt: new Date(), promoCode: promoCodeDoc.code, promoCodeId: promoCodeDoc._id, source: "webhook", externalOrderId: orderId } } }
+            );
         }
 
-        // STEP 8: Create notifications
         try {
-            // Notify student
             await Notification.create({
                 recipient: promoCodeDoc.student,
                 title: "✅ Promo Code Used!",
@@ -191,60 +137,31 @@ router.post("/confirm", async (req, res) => {
                 type: "System",
                 icon: "checkmark-circle"
             });
-
-            // Notify brand
             await Notification.create({
                 recipient: brand._id,
                 title: "💰 Webhook Order Confirmed",
-                description: `Order #${order_id} completed with promo code ${promoCodeDoc.code}. Savings: Rs. ${savedAmount}`,
+                description: `Order #${orderId} completed with promo code ${promoCodeDoc.code}. Savings: Rs. ${savedAmount}`,
                 type: "System",
                 icon: "cash-outline"
             });
-            console.log('✅ Notifications created');
         } catch (notifError) {
-            console.error('⚠️ Notification error:', notifError.message);
+            console.error("[webhook confirm] notification error:", notifError.message);
         }
         try {
-  const { track } = require('../services/engagement');
-  await track(promoCodeDoc.student, 'deal_redeemed', {
-    meta: { offerId: promoCodeDoc.offer?.toString(), savedAmount },
-    dedupeKey: `deal:${promoCodeDoc.student}:${promoCodeDoc._id}:${order_id || orderIdStr}`,
-  });
-} catch (e) {
-  console.error('[engagement] webhook deal hook failed:', e.message);
-}
+            const { track } = require("../services/engagement");
+            await track(promoCodeDoc.student, "deal_redeemed", {
+                meta: { offerId: promoCodeDoc.offer?.toString(), savedAmount },
+                dedupeKey: `deal:${promoCodeDoc.student}:${promoCodeDoc._id}:${orderId}`,
+            });
+        } catch (e) {
+            console.error("[engagement] webhook deal hook failed:", e.message);
+        }
 
-        // STEP 9: Send success response
-        res.json({
-            success: true,
-            message: "Promo code confirmed successfully",
-            data: {
-                promoCode: promoCodeDoc.code,
-                orderId: order_id,
-                savedAmount: savedAmount,
-                status: "confirmed"
-            }
-        });
-
-        console.log('✅ Webhook processed successfully:', {
-            promoCode: promoCodeDoc.code,
-            orderId: order_id,
-            savedAmount: savedAmount
-        });
-
+        console.log(`[webhook confirm] code confirmed for order ${orderId} (${amountSource} amount)`);
+        res.json({ success: true, message: "Promo code confirmed successfully", data: { orderId, savedAmount, status: "confirmed" } });
     } catch (err) {
-        console.error("❌ Webhook confirm error:", {
-            message: err.message,
-            stack: err.stack,
-            body: req.body
-        });
-
-        // Always return a proper JSON response
-        res.status(500).json({
-            success: false,
-            message: err.message || "Webhook processing failed",
-            error: process.env.NODE_ENV === 'development' ? err.stack : undefined
-        });
+        console.error("[webhook confirm] error:", err.message);
+        res.status(500).json({ success: false, message: "Webhook processing failed" });
     }
 });
 
@@ -424,42 +341,11 @@ router.get("/test", async (req, res) => {
     });
 });
 
-// ==================== WEBHOOK STATUS ====================
-// GET /api/webhooks/status/:code
-router.get("/status/:code", async (req, res) => {
-    try {
-        const { code } = req.params;
-        
-        const promoCode = await PromoCode.findOne({
-            code: code.toUpperCase().trim()
-        }).populate('student', 'name email').populate('brand', 'name');
-
-        if (!promoCode) {
-            return res.status(404).json({
-                success: false,
-                message: "Promo code not found"
-            });
-        }
-
-        res.json({
-            success: true,
-            data: {
-                code: promoCode.code,
-                status: promoCode.status,
-                usedAt: promoCode.usedAt,
-                redeemedVia: promoCode.redeemedVia,
-                externalOrderId: promoCode.externalOrderId,
-                externalAmount: promoCode.externalAmount,
-                student: promoCode.student,
-                brand: promoCode.brand
-            }
-        });
-    } catch (err) {
-        res.status(500).json({
-            success: false,
-            message: err.message
-        });
-    }
+// ==================== WEBHOOK STATUS (retired) ====================
+// GET /api/webhooks/status/:code answered anyone with the code's student name and e-mail and told
+// whether a code exists. Nothing calls it; it now answers 410 for every code.
+router.get("/status/:code", (req, res) => {
+    res.status(410).json({ success: false, message: "This endpoint is no longer available" });
 });
 
 module.exports = router;
