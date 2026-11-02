@@ -181,7 +181,21 @@ production URL directly. Don't hand out a staging build before then.
    as `mongodb://[redacted]`, `***@domain` and `[phone]`.
 5. In the production logs, nothing changed.
 
-## 7. Removing staging
+## 7. Backlog (known, not changed)
+
+- **Leftover `job_applied` block in `POST /api/jobs/:jobId/interactions`** (`routes/jobs.routes.js`,
+  around line 1573). After saving the interaction, the handler runs a copy of the apply route's
+  engagement hook: `track(req.userId, 'job_applied', …)`. That copy refers to `application`, which
+  doesn't exist in this route.
+  - **What happens now:** a `ReferenceError`, caught by the block's own `try/catch`. Each call logs
+    `[engagement] job_applied hook failed: application is not defined`, and the request still
+    returns 200. No `job_applied` points are awarded from here, which is correct.
+  - **Why it matters soon:** nothing calls this route yet. Once the app calls it (the app's
+    `fix/two-404-calls` branch corrects the path), every job view will log that line.
+  - **The fix:** delete the block (lines `try { await track(… 'job_applied' …) } catch …`) from this
+    handler only, and leave the one in the apply route.
+
+## 8. Removing staging
 
 Railway → **Settings → Environments** → delete `staging`. This removes its services and variables.
 Atlas → the `tdc-staging` project → terminate the cluster. Revoke any staging-only keys you created
