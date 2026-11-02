@@ -8,8 +8,8 @@ logs/
 # Expo
 .expo/
 
-# secrets: Railway variables, never in git. .env is still tracked until the Railway
-# variables are checked; ignoring it here stops it being re-added once it is untracked.
+# secrets: Railway variables, never in git. .env is no longer tracked (and must never be added
+# again); every value it held must be set as a Railway variable and rotated.
 .env
 .env.*
 !.env.example
