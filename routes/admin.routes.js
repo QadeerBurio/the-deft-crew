@@ -346,8 +346,7 @@ router.post("/users/reset-password/:id", auth, isAdmin, async (req, res) => {
 router.post("/add", auth, isAdmin, uploadOffer.single("image"), async (req, res) => {
   try {
     console.log("=== ADMIN ADD ROUTE HIT ===");
-    console.log("Request body:", req.body);
-    console.log("Request file:", req.file);
+    console.log("Request fields:", Object.keys(req.body || {}).join(", "), req.file ? "(with an image)" : "");
     
     const { type, title, description, link } = req.body;
     

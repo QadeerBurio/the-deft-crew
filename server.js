@@ -1,3 +1,8 @@
+// First: everything written to the logs is redacted (e-mails, phones, tokens, connection strings) and
+// lines inside a request carry its id (utils/logSafety.js)
+const logSafety = require("./utils/logSafety");
+logSafety.install();
+
 const express = require("express");
 const cors = require("cors");
 require("dotenv").config();
@@ -18,6 +23,9 @@ const connectDB = require("./config/db");
 
 const app = express();
 const server = http.createServer(app);
+
+// every request gets an id: X-Request-Id response header, and [rid:<id>] on its log lines
+app.use(logSafety.requestId());
 
 const io = new Server(server, {
   cors: { origin: "*" }

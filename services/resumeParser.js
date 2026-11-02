@@ -169,7 +169,7 @@ const parsePersonalInfo = (text) => {
   const addressMatch = text.match(addressRegex);
   if (addressMatch) {
     address = addressMatch[0] || '';
-    console.log(`📍 Found address: ${address}`);
+    console.log("📍 Found an address");
   }
 
   const result = {
