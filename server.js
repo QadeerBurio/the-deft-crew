@@ -216,6 +216,7 @@ app.use("/api/auth", require("./routes/auth.routes"));
 app.use("/api/universities", require("./routes/university.routes"));
 app.use("/api/offers", require("./routes/offer.routes"));
 app.use("/api/brands", require("./routes/brands.routes"));
+app.use("/api/brand/store", require("./routes/brandStore.routes")); // a brand's own online store (WooCommerce)
 app.use("/api/notification", require("./routes/notification.routes"));
 app.use("/api/profile", require("./routes/profile.routes"));
 app.use("/api/admin", require("./routes/admin.routes"));
