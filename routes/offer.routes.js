@@ -36,11 +36,8 @@ const wantsFresh = (req) => req.query.fresh === "1" || req.query.fresh === "true
 
 const CACHE_TTL = 120;
 
-// ============================================================
-// ✅ PENDING SCANS — declared at TOP so every route can access them
-// ============================================================
-const pendingScans = [];
-const processedScans = new Set();
+// Pending scans live in the PendingScan collection (models/PendingScan.js, removed after 30 minutes)
+const PendingScan = require("../models/PendingScan");
 
 async function clearBrandCaches(brandId, userId) {
   await clearOfferCaches({ brandId: brandId?.toString(), userId: userId?.toString() });
@@ -362,17 +359,14 @@ router.post('/redeem-payment', auth, async (req, res) => {
     // Redemption changes claimedBy + redemptions → clear every list that shows them
     await clearBrandCaches(offer.brand, userId);
 
-    // Mark pending scan as processed
+    // Close the student's pending scan at this brand
     try {
-      const idx = pendingScans.findIndex(
-        (scan) => scan.studentId === userId && scan.status === 'pending'
+      await PendingScan.updateOne(
+        { student: userId, brand: offer.brand, status: 'pending' },
+        { $set: { status: 'processed', processedAt: new Date() } }
       );
-      if (idx !== -1) {
-        pendingScans[idx].status = 'processed';
-        processedScans.add(userId);
-      }
     } catch (err) {
-      console.error('Error marking scan as processed:', err);
+      console.error('Error marking scan as processed:', err.message);
     }
 
     // 🎯 Engagement hook — fires ONCE per (student, offer) using a stable dedupe key
@@ -899,61 +893,66 @@ router.post("/scan-verify", auth, async (req, res) => {
       });
     }
     
-    const existingScan = pendingScans.find(
-      scan => scan.studentId === studentId.toString() && 
-              scan.brandId === (brandId ? brandId.toString() : '') && 
-              scan.status === 'pending'
-    );
-    
-    if (existingScan) {
-      return res.json({ 
-        success: true, 
-        message: 'Student already scanned',
-        scanId: pendingScans.indexOf(existingScan),
-        student: existingScan,
-        redemptionsUsed: todayRedemptions.length,
-        maxRedemptions: 2
-      });
-    }
-    
     let universityName = '';
     if (typeof university === 'string') {
       universityName = university;
     } else if (university && typeof university === 'object') {
-      universityName = university.name || university._id || 'University';
+      universityName = university.name || String(university._id || '') || 'University';
     } else {
       universityName = 'University';
     }
-    
-    pendingScans.push({
-      studentId: studentId.toString(),
-      name: name || 'Student',
-      rollNo: rollNo || 'N/A',
-      university: universityName,
-      universityName: universityName,
-      email: email || '',
-      offerId: offerId.toString(),
-      offerTitle: offerTitle || 'Offer',
-      discountPercentage: discountPercentage || 0,
-      brandId: brandId ? brandId.toString() : '',
-      brandName: brandName || 'Brand',
-      scannedAt: new Date().toISOString(),
-      status: 'pending',
-      redemptionsUsed: todayRedemptions.length,
-      maxRedemptions: 2
-    });
-    
-    while (pendingScans.length > 50) {
-      pendingScans.shift();
+
+    // one pending scan per student per brand (a unique index): a repeat scan, or two at the same
+    // moment, gets the scan that is already waiting
+    const existingScan = await PendingScan.findOne({ student: studentId, brand: brandId, status: 'pending' });
+    if (existingScan) {
+      return res.json({
+        success: true,
+        message: 'Student already scanned',
+        scanId: String(existingScan._id),
+        student: existingScan.toScan(),
+        redemptionsUsed: todayRedemptions.length,
+        maxRedemptions: 2
+      });
     }
-    
+
+    let scan;
+    try {
+      scan = await PendingScan.create({
+        student: studentId,
+        brand: brandId,
+        offer: offer._id,
+        name: name || 'Student',
+        rollNo: rollNo || 'N/A',
+        universityName,
+        email: email || '',
+        offerTitle: offerTitle || 'Offer',
+        discountPercentage: discountPercentage || 0,
+        brandName: brandName || 'Brand',
+        redemptionsUsed: todayRedemptions.length,
+        maxRedemptions: 2,
+      });
+    } catch (err) {
+      if (err?.code !== 11000) throw err;
+      scan = await PendingScan.findOne({ student: studentId, brand: brandId, status: 'pending' });
+      if (!scan) throw err;
+      return res.json({
+        success: true,
+        message: 'Student already scanned',
+        scanId: String(scan._id),
+        student: scan.toScan(),
+        redemptionsUsed: todayRedemptions.length,
+        maxRedemptions: 2
+      });
+    }
+
     // 🚫 No engagement hook here — /redeem-payment is the only place that awards points
-    
-    res.json({ 
-      success: true, 
+
+    res.json({
+      success: true,
       message: 'Student data received successfully',
-      scanId: pendingScans.length - 1,
-      student: pendingScans[pendingScans.length - 1],
+      scanId: String(scan._id),
+      student: scan.toScan(),
       redemptionsUsed: todayRedemptions.length,
       maxRedemptions: 2
     });
@@ -972,9 +971,9 @@ router.get("/pending-scans", auth, async (req, res) => {
       return res.status(403).json({ message: "Only brands allowed" });
     }
     
-    const brandScans = pendingScans.filter(
-      scan => scan.brandId === req.userId && scan.status === 'pending'
-    );
+    const brandScans = (await PendingScan.find({ brand: req.userId, status: 'pending', expiresAt: { $gt: new Date() } })
+      .sort({ scannedAt: 1 })
+      .limit(50)).map((scan) => scan.toScan());
     
     const formattedScans = brandScans.map(scan => ({
       studentId: scan.studentId,
@@ -1008,20 +1007,18 @@ router.post("/scan-processed", auth, async (req, res) => {
     if (!requester || !["brand", "admin"].includes(requester.role)) {
       return res.status(403).json({ success: false, message: "Only the brand can close a scan" });
     }
-    const mine = (scan) => requester.role === "admin" || scan.brandId === String(req.userId);
     
     if (!studentId) {
       return res.status(400).json({ success: false, message: "Student ID required" });
     }
     
-    let found = false;
-    for (let i = 0; i < pendingScans.length; i++) {
-      if (pendingScans[i].studentId === String(studentId) && pendingScans[i].status === 'pending' && mine(pendingScans[i])) {
-        pendingScans[i].status = 'processed';
-        processedScans.add(studentId);
-        found = true;
-      }
+    if (!mongoose.Types.ObjectId.isValid(String(studentId))) {
+      return res.status(404).json({ success: false, message: "Scan not found" });
     }
+    const filter = { student: studentId, status: 'pending' };
+    if (requester.role !== "admin") filter.brand = req.userId; // a brand closes only its own scans
+    const r = await PendingScan.updateMany(filter, { $set: { status: 'processed', processedAt: new Date() } });
+    const found = r.modifiedCount > 0;
     
     if (found) {
       res.json({ success: true, message: "Scan marked as processed" });
