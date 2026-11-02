@@ -144,6 +144,9 @@ router.post("/generate", auth, async (req, res) => {
         .status(404)
         .json({ success: false, message: "Offer not found" });
     }
+    if (offer.status === "archived") {
+      return res.status(410).json({ success: false, message: "This offer has ended" });
+    }
 
     const hasClaimed = (offer.claimedBy || []).some(
       (id) => id.toString() === studentId.toString()

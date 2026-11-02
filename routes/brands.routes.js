@@ -155,7 +155,7 @@ router.get("/nearby", async (req, res) => {
         { $project: { brand: 1, name: 1, location: 1, city: 1, distM: 1 } },
       ]),
       Offer.aggregate([
-        geoNear({ isInStore: true }),
+        geoNear({ isInStore: true, status: { $ne: "archived" } }),
         { $limit: 500 },
         { $project: { brand: 1, title: 1, location: 1, distM: 1 } },
       ]),
@@ -185,7 +185,8 @@ router.get("/nearby", async (req, res) => {
     if (!brands.length) return res.json([]);
 
     // Offers, same fields as /offers/summary
-    const offers = await Offer.find({ brand: { $in: brands.map((b) => b._id) } })
+    // archived offers (replaced by a newer one) aren't shown to students
+    const offers = await Offer.find({ brand: { $in: brands.map((b) => b._id) }, status: { $ne: "archived" } })
       .select("_id title discountPercentage category image isOnline isInStore claimedBy brand")
       .lean();
     // claimedBy: only the caller's own claim (public route: token optional, never required)
@@ -261,7 +262,7 @@ router.get("/:brandId/offers", auth, async (req, res) => {
       });
     }
 
-    const offers = await Offer.find({ brand: req.params.brandId })
+    const offers = await Offer.find({ brand: req.params.brandId, status: { $ne: "archived" } })
       .populate("brand", "name brandName logo")
       .populate("university", "name")
       .sort({ createdAt: -1 }); // NEWEST OFFERS FIRST

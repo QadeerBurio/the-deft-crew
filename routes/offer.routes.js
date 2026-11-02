@@ -4,6 +4,10 @@ const multer = require("multer");
 const Offer = require("../models/Offer");
 const User = require("../models/User");
 const RedemptionGuard = require("../models/RedemptionGuard");
+// archived offers (replaced by a newer one) are hidden from students and closed to new claims, codes
+// and scans; they stay in revenue, savings and the brand's history. No status = active (older offers).
+const NOT_ARCHIVED = { status: { $ne: "archived" } };
+const isArchived = (offer) => offer?.status === "archived";
 const auth = require("../middleware/auth.middleware");
 const Notification = require("../models/Notification");
 const Slider = require("../models/Slider");
@@ -50,7 +54,12 @@ router.post("/", auth, uploadOffer.single("image"), async (req, res) => {
       return res.status(403).json({ message: "Only brands allowed" });
     }
 
-    await Offer.deleteMany({ brand: req.userId });
+    // One active offer per brand: the previous one is archived, not deleted (it holds the brand's
+    // claims and redemptions, so revenue, savings and history stay)
+    await Offer.updateMany(
+      { brand: req.userId, status: { $ne: "archived" } },
+      { $set: { status: "archived", archivedAt: new Date() } }
+    );
 
     const offerData = {
       title: req.body.title,
@@ -101,8 +110,9 @@ setImmediate(async () => {
 router.put("/:offerId", auth, uploadOffer.single("image"), async (req, res) => {
   try {
     const offer = await Offer.findById(req.params.offerId);
-    
+
     if (!offer) return res.status(404).json({ message: "Offer not found" });
+    if (isArchived(offer)) return res.status(410).json({ message: "This offer has ended" });
     
     if (offer.brand.toString() !== req.userId) {
       return res.status(403).json({ message: "Unauthorized" });
@@ -148,7 +158,7 @@ router.get("/my-offers", auth, async (req, res) => {
       return res.status(403).json({ message: "Only brands allowed" });
     }
 
-    const offers = await Offer.find({ brand: req.userId })
+    const offers = await Offer.find({ brand: req.userId, ...NOT_ARCHIVED })
       .sort({ createdAt: -1 })
       .lean()
       .exec();
@@ -164,6 +174,7 @@ router.post("/claim/:offerId", auth, async (req, res) => {
   try {
     const offer = await Offer.findById(req.params.offerId);
     if (!offer) return res.status(404).json({ message: "Offer not found" });
+    if (isArchived(offer)) return res.status(410).json({ message: "This offer has ended" });
 
     // Check if already claimed
     if (offer.claimedBy.includes(req.userId)) {
@@ -203,7 +214,7 @@ router.get("/claimed", auth, async (req, res) => {
       }
     }
 
-    const claimedOffers = await Offer.find({ claimedBy: req.userId })
+    const claimedOffers = await Offer.find({ claimedBy: req.userId, ...NOT_ARCHIVED })
       .populate("brand", "name brandName logo websiteUrl city address isOnline isInStore")
       .lean()
       .exec();
@@ -295,6 +306,7 @@ router.post('/redeem-payment', auth, async (req, res) => {
     if (requester.role !== 'admin' && String(offer.brand) !== String(req.userId)) {
       return res.status(403).json({ message: 'This offer belongs to another brand' });
     }
+    if (isArchived(offer)) return res.status(410).json({ message: "This offer has ended" });
 
     // Server computes the saved amount (B7)
     const discount = Number(offer.discountPercentage) || 0;
@@ -414,7 +426,7 @@ router.get("/brand/:brandId", auth, async (req, res) => {
       }
     }
 
-    const offers = await Offer.find({ brand: req.params.brandId })
+    const offers = await Offer.find({ brand: req.params.brandId, ...NOT_ARCHIVED })
       .populate("brand", "name logo category websiteUrl")
       .lean()
       .exec();
@@ -442,6 +454,7 @@ router.get("/summary", auth, async (req, res) => {
 
     if (!summaryMap) {
       const offers = await Offer.aggregate([
+        { $match: NOT_ARCHIVED },
         {
           $group: {
             _id: "$brand",
@@ -754,8 +767,9 @@ router.get("/images/all", auth, async (req, res) => {
   try {
     const { brandId, category, limit = 100 } = req.query;
     
-    const filter = { 
-      image: { $ne: null, $ne: '' }
+    const filter = {
+      image: { $ne: null, $ne: '' },
+      ...NOT_ARCHIVED,
     };
     
     if (brandId) filter.brand = brandId;
@@ -850,6 +864,7 @@ router.post("/scan-verify", auth, async (req, res) => {
     if (!offer) {
       return res.status(404).json({ success: false, message: "Offer not found" });
     }
+    if (isArchived(offer)) return res.status(410).json({ success: false, message: "This offer has ended" });
     const brandDoc = await User.findById(offer.brand).select("brandName name").lean();
     const studentId = String(me._id);
     const name = me.name;
@@ -1021,11 +1036,12 @@ router.get("/can-scan/:offerId", auth, async (req, res) => {
     
     const offer = await Offer.findById(offerId);
     if (!offer) {
-      return res.status(404).json({ 
-        canScan: false, 
-        message: "Offer not found" 
+      return res.status(404).json({
+        canScan: false,
+        message: "Offer not found"
       });
     }
+    if (isArchived(offer)) return res.json({ canScan: false, message: "This offer has ended" });
     
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -1096,7 +1112,7 @@ router.get("/brandss", async (req, res) => {
       .exec();
 
     const offers = brands.length
-      ? await Offer.find({ brand: { $in: brands.map((b) => b._id) } })
+      ? await Offer.find({ brand: { $in: brands.map((b) => b._id) }, ...NOT_ARCHIVED })
           .select("brand title description discountPercentage category image isOnline isInStore location createdAt")
           .lean()
           .exec()
@@ -1139,11 +1155,11 @@ router.post("/generate-promo/:offerId", auth, async (req, res) => {
     const offer = await Offer.findById(offerId)
       .populate('brand', 'name')
       .lean();
-    
-    if (!offer) {
-      return res.status(404).json({ 
-        success: false, 
-        message: "Offer not found" 
+
+    if (!offer || isArchived(offer)) {
+      return res.status(offer ? 410 : 404).json({
+        success: false,
+        message: offer ? "This offer has ended" : "Offer not found"
       });
     }
     
