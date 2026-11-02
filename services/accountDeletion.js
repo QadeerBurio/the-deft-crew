@@ -108,23 +108,7 @@ function parseCloudLink(url) {
 }
 
 // ---------- transaction ----------
-const noTransactions = (err) =>
-  err && (err.code === 20 || err.codeName === "IllegalOperation" || /Transaction numbers are only allowed|replica set|does not support (sessions|transactions)/i.test(err.message || ""));
-
-async function withTransaction(work) {
-  const conn = mongoose.connection;
-  if (conn.readyState !== 1) return { transaction: false, result: await work(null) };
-  try {
-    let result;
-    await conn.transaction(async (session) => {
-      result = await work(session);
-    });
-    return { transaction: true, result };
-  } catch (err) {
-    if (!noTransactions(err)) throw err;
-    return { transaction: false, result: await work(null) };
-  }
-}
+const { withTransaction } = require("../utils/transaction");
 
 // ---------- the database steps ----------
 async function deleteInDatabase({ id, role, deletionId, ghost, session }) {

@@ -88,6 +88,8 @@ that as staging even if `APP_ENV` is missing. Set `APP_ENV=staging` anyway, so t
 
 **Feature flags** work the same as in production: `FLAG_<NAME>` (see `config/featureFlags.js`).
 Staging is the place to try a rule first, e.g. `FLAG_META_EVENTS=roles:admin`.
+Brand loyalty is `FLAG_LOYALTY_V2` (off by default). It must cover both the brand and the student,
+e.g. `FLAG_LOYALTY_V2=ids:<test brand id>,<test student id>`.
 
 ---
 

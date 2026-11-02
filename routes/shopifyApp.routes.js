@@ -1,5 +1,6 @@
 // routes/shopifyApp.routes.js
 const express = require("express");
+const { creditSafe } = require("../services/loyalty");
 const router = express.Router();
 const User = require("../models/User");
 const PromoCode = require("../models/PromoCode");
@@ -386,7 +387,9 @@ router.post("/order-webhook", verifyApiKey, async (req, res) => {
               promoCodeId: promo._id,
               externalOrderId: orderId, // ← add this field to your schema
             });
+            const pushed = offer.redemptions[offer.redemptions.length - 1];
             await offer.save();
+            await creditSafe(pushed._id, { source: "shopify-app" }); // a loyalty visit (FLAG_LOYALTY_V2)
           }
         }
       } else {

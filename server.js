@@ -264,6 +264,7 @@ app.use('/api/engagement', require('./routes/engagement.routes'));
 // 🆕 admin engagement
 app.use('/api/admin/engagement', require('./routes/adminEngagement.routes'));
 app.use('/api/rewards', require('./routes/rewards.routes'));
+app.use('/api/loyalty', require('./routes/loyalty.routes')); // brand loyalty (FLAG_LOYALTY_V2)
 
 // 🆕 admin crew
 app.use('/api/admin/crew', require('./routes/adminCrew.routes'));

@@ -12,14 +12,14 @@
 
 const express = require('express');
 const auth = require('../middleware/auth.middleware');
-const { clientFlags } = require('../config/featureFlags');
+const { clientFlags, publicFlags } = require('../config/featureFlags');
 
 const router = express.Router();
 
 router.get('/flags', (req, res) => {
   // short cache: a switch-off reaches phones within minutes
   res.set('Cache-Control', 'public, max-age=60');
-  res.json(clientFlags(null));
+  res.json(publicFlags());
 });
 
 router.get('/flags/me', auth, (req, res) => {
