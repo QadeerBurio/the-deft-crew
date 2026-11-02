@@ -7,6 +7,34 @@ const User = require("../models/User");
 const Notification = require("../models/Notification");
 const auth = require("../middleware/auth.middleware");
 const axios = require("axios");
+const BrandStoreConnection = require("../models/BrandStoreConnection");
+const wooStore = require("../services/wooStore");
+
+// What the student is told about where a code works (the app words it from this):
+// connected = the code really exists on that store ("use code X at <store>"); otherwise the brand checks
+// it by hand ("show this code to <brand>").
+function onlineStoreOf(promo, brand, storeUrls) {
+  const ext = promo.externalProvider;
+  const connected = ext === "woocommerce" || ext === "shopify";
+  const brandId = String(brand?._id || brand || "");
+  return {
+    platform: connected ? ext : brand?.platform === "woocommerce" || brand?.platform === "shopify" ? brand.platform : "none",
+    storeUrl: connected ? storeUrls.get(`${ext}:${brandId}`) || "" : "",
+    connected,
+  };
+}
+// store addresses for a set of brands: "woocommerce:<id>" / "shopify:<id>" -> https URL
+async function storeUrlsFor(brands) {
+  const map = new Map();
+  const ids = brands.map((b) => b?._id).filter(Boolean);
+  for (const c of await BrandStoreConnection.find({ brand: { $in: ids }, status: "connected" }).select("brand storeUrl").lean()) {
+    map.set(`woocommerce:${c.brand}`, c.storeUrl);
+  }
+  for (const b of brands) {
+    if (b?.shopifyStoreUrl) map.set(`shopify:${b._id}`, `https://${String(b.shopifyStoreUrl).replace(/^https?:\/\//, "").replace(/\/$/, "")}`);
+  }
+  return map;
+}
 
 // ============================================================
 // HELPERS
@@ -79,47 +107,6 @@ async function createShopifyDiscountViaRemix(
 }
 
 // ============================================================
-// WOOCOMMERCE
-// ============================================================
-async function createWooCommerceCoupon(
-  brand,
-  code,
-  discountPercentage,
-  expiresAt
-) {
-  if (!brand.websiteUrl || !brand.wooConsumerKey || !brand.wooConsumerSecret) {
-    return { success: false, reason: "not_configured" };
-  }
-  try {
-    await axios.post(
-      `${brand.websiteUrl.replace(/\/$/, "")}/wp-json/wc/v3/coupons`,
-      {
-        code,
-        discount_type: "percent",
-        amount: discountPercentage.toString(),
-        individual_use: true,
-        usage_limit: 1,
-        date_expires: expiresAt.toISOString(),
-      },
-      {
-        auth: {
-          username: brand.wooConsumerKey,
-          password: brand.wooConsumerSecret,
-        },
-        timeout: 15000,
-      }
-    );
-    return { success: true };
-  } catch (err) {
-    console.error(
-      "[woo] coupon creation failed:",
-      err.response?.data || err.message
-    );
-    return { success: false, reason: err.message };
-  }
-}
-
-// ============================================================
 // CACHE (Redis, with in-memory fallback)
 // ============================================================
 // Shared with offer.routes.js, so clearing "offers:claimed:<id>" here
@@ -149,7 +136,7 @@ router.post("/generate", auth, async (req, res) => {
     }
 
     const offer = await Offer.findById(offerId)
-      .populate("brand", "name brandName logo shopifyStoreUrl websiteUrl")
+      .populate("brand", "name brandName logo shopifyStoreUrl websiteUrl platform")
       .lean();
 
     if (!offer) {
@@ -250,7 +237,7 @@ router.post("/generate", auth, async (req, res) => {
     });
 
     // ------- EXTERNAL PROVIDERS -------
-    const brandUser = await User.findById(offer.brand._id).select("+wooConsumerKey +wooConsumerSecret").lean();
+    const brandUser = await User.findById(offer.brand._id).select("shopifyStoreUrl platform").lean();
 
     // Shopify: tell Remix to create the discount
     if (brandUser?.shopifyStoreUrl) {
@@ -283,34 +270,25 @@ router.post("/generate", auth, async (req, res) => {
       }
     }
 
-    // WooCommerce (unchanged)
-    if (
-      brandUser?.websiteUrl &&
-      brandUser?.wooConsumerKey &&
-      brandUser?.wooConsumerSecret
-    ) {
-      const wooResult = await createWooCommerceCoupon(
-        brandUser,
-        newPromoCode.code,
-        newPromoCode.discountPercentage,
-        newPromoCode.expiresAt
-      );
-      if (wooResult.success) {
-        newPromoCode.externalProvider = "woocommerce";
-        await newPromoCode.save();
-      } else {
-        console.warn(`[generate] Woo coupon failed: ${wooResult.reason}`);
-        // Same rollback for Woo
-        await PromoCode.findByIdAndDelete(newPromoCode._id);
-        await Offer.findByIdAndUpdate(offerId, {
-          $pull: { promoCodesGenerated: newPromoCode._id },
+    // WooCommerce: a connected store gets a real single-use coupon. If the store fails, the code stays a
+    // tdc code the brand checks by hand (promo code verify) and the student is told to show it.
+    if (newPromoCode.externalProvider === "none") {
+      const store = await wooStore.connectedStore(offer.brand._id);
+      if (store) {
+        const wooResult = await wooStore.createCoupon(store, {
+          code: newPromoCode.code,
+          percent: newPromoCode.discountPercentage,
+          expiresAt: newPromoCode.expiresAt,
+          description: `tdc student discount: ${offer.title}`.slice(0, 200),
         });
-        return res.status(502).json({
-          success: false,
-          message:
-            "Could not create the coupon on the brand's WooCommerce store. Please try again later.",
-          reason: wooResult.reason,
-        });
+        if (wooResult.success) {
+          newPromoCode.externalProvider = "woocommerce";
+          newPromoCode.externalDiscountId = wooResult.couponId;
+          await newPromoCode.save();
+        } else {
+          console.warn(`[generate] Woo coupon failed: ${wooResult.reason}`);
+          await BrandStoreConnection.updateOne({ _id: store._id }, { $set: { lastError: "A coupon couldn't be created on the store. Use \"test connection\".", lastCheckAt: new Date() } });
+        }
       }
     }
 
@@ -345,6 +323,7 @@ router.post("/generate", auth, async (req, res) => {
         expiresAt: newPromoCode.expiresAt,
         qrData: newPromoCode.qrData,
         externalProvider: newPromoCode.externalProvider,
+        onlineStore: onlineStoreOf(newPromoCode, brandUser ? { ...brandUser, _id: offer.brand._id } : offer.brand, await storeUrlsFor([{ ...(brandUser || {}), _id: offer.brand._id }])),
       },
     });
   } catch (err) {
@@ -566,9 +545,10 @@ router.get("/my-codes", auth, async (req, res) => {
     const studentId = req.userId;
     const promoCodes = await PromoCode.find({ student: studentId })
       .populate("offer", "title discountPercentage image category")
-      .populate("brand", "name brandName logo")
+      .populate("brand", "name brandName logo platform shopifyStoreUrl")
       .sort({ createdAt: -1 })
       .lean();
+    const storeUrls = await storeUrlsFor(promoCodes.map((c) => c.brand));
 
     res.json({
       success: true,
@@ -585,6 +565,7 @@ router.get("/my-codes", auth, async (req, res) => {
         generatedAt: code.generatedAt,
         qrData: code.qrData,
         externalProvider: code.externalProvider,
+        onlineStore: onlineStoreOf(code, code.brand, storeUrls),
         offer: code.offer,
       })),
     });
@@ -685,6 +666,12 @@ router.post("/cancel/:codeId", auth, async (req, res) => {
     }
 
     await PromoCode.findByIdAndUpdate(codeId, { status: "cancelled" });
+
+    // a WooCommerce coupon made for this code goes too (best effort)
+    if (promoCode.externalProvider === "woocommerce" && promoCode.externalDiscountId) {
+      const store = await wooStore.connectedStore(promoCode.brand);
+      if (store) await wooStore.deleteCoupon(store, promoCode.externalDiscountId);
+    }
 
     // Note: we do NOT delete the Shopify discount — merchant can clean up
     // in Shopify Admin if needed. This avoids an extra Remix round-trip.

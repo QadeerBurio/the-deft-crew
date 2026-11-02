@@ -17,6 +17,7 @@ const { myClaimedOfferIds, withMyClaim, offerForStudent } = require("../utils/my
 const { geocodeInBackground } = require("../services/geo/geocoder");
 const RedemptionArchive = require("../models/RedemptionArchive");
 const { brandFigures, TOTAL_KEYS } = require("../services/brandRevenue");
+const { onlineStoresFor } = require("../services/storeStatus");
 
 // Offers/claims change all the time, never let a phone or proxy cache them
 router.use((req, res, next) => {
@@ -661,7 +662,8 @@ router.get("/savings-report", auth, async (req, res) => {
 
     // Get the brand to determine platform
     const brandUser = await User.findById(req.userId).lean();
-    const brandPlatform = brandUser?.platform || 'woocommerce';
+    // where each code was used: the store it was made on, else the brand's platform ("none" = checked by hand)
+    const brandPlatform = brandUser?.platform || 'none';
 
     const promoRedemptions = usedPromoCodes.map(pc => {
       const bill = pc.externalAmount || 0;
@@ -679,7 +681,7 @@ router.get("/savings-report", auth, async (req, res) => {
         paid: paid,
         date: pc.usedAt || pc.updatedAt,
         redemptionType: "promo",
-        platform: brandPlatform,
+        platform: pc.externalProvider === 'shopify' || pc.externalProvider === 'woocommerce' ? pc.externalProvider : brandPlatform,
         promoCode: pc.code,
         offerId: pc.offer?._id,
         offerImage: pc.offer?.image,
@@ -1344,7 +1346,8 @@ router.get("/brand/:brandId/redemptions", auth, async (req, res) => {
       .lean();
 
     const brandUser = await User.findById(brandId).lean();
-    const brandPlatform = brandUser?.platform || 'woocommerce';
+    // where each code was used: the store it was made on, else the brand's platform ("none" = checked by hand)
+    const brandPlatform = brandUser?.platform || 'none';
 
     const promoRedemptions = usedPromoCodes.map(pc => {
       const bill = pc.externalAmount || 0;
@@ -1364,7 +1367,7 @@ router.get("/brand/:brandId/redemptions", auth, async (req, res) => {
         paid: bill - saved,
         date: pc.usedAt || pc.updatedAt,
         redemptionType: "promo",
-        platform: brandPlatform,
+        platform: pc.externalProvider === 'shopify' || pc.externalProvider === 'woocommerce' ? pc.externalProvider : brandPlatform,
         promoCode: pc.code,
         studentId: pc.student?._id,
         externalOrderId: pc.externalOrderId || null
@@ -1448,6 +1451,9 @@ router.get("/admin/brands-revenue", auth, async (req, res) => {
       promosByBrand[brandId].push(pc);
     });
 
+    // the store each brand really has (platform + connection status), never keys
+    const stores = await onlineStoresFor(brands.map((b) => b._id));
+
     const brandsWithRevenue = brands.map(brand => {
       const brandId = brand._id.toString();
       const brandOffers = offersByBrand[brandId] || [];
@@ -1461,7 +1467,8 @@ router.get("/admin/brands-revenue", auth, async (req, res) => {
         logo: brand.logo || null,
         category: brand.category || 'General',
         approvalStatus: brand.brandApprovalStatus || 'pending',
-        platform: brand.platform || 'woocommerce',
+        platform: stores.get(String(brand._id))?.platform || 'none',
+        onlineStore: stores.get(String(brand._id)) || { platform: 'none', status: 'none', storeUrl: '' },
         websiteUrl: brand.websiteUrl || '',
         address: brand.address || '',
         phone: brand.phone || '',
