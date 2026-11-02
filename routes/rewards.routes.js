@@ -6,7 +6,8 @@ const Reward = require('../models/Reward');
 const RewardRedemption = require('../models/RewardRedemption');
 const PointsLedger = require('../models/PointsLedger');
 const EngagementProfile = require('../models/EngagementProfile');
-const { award } = require('../services/engagement/points');
+const { spend, refund } = require('../services/engagement/points');
+const { takeSlot, releaseSlot } = require('../models/RedemptionGuard');
 const { generateCode } = require('../services/engagement/rewardCodes');
 
 router.use(auth);
@@ -94,41 +95,43 @@ router.post('/:id/redeem', async (req, res) => {
       return res.status(404).json({ message: 'reward not available' });
     }
 
-    // load profile
-    let profile = await EngagementProfile.findOne({ user: userId });
-    if (!profile) profile = await EngagementProfile.create({ user: userId });
-
-    const balance = profile.points?.balance || 0;
-    if (balance < reward.costPoints) {
+    let profile = await EngagementProfile.findOne({ user: userId }).lean();
+    if (!profile) profile = (await EngagementProfile.create({ user: userId })).toObject();
+    if ((profile.points?.balance || 0) < reward.costPoints) {
       return res.status(400).json({ message: 'not enough points' });
     }
 
-    // stock check
-    if (typeof reward.stock === 'number') {
-      const redeemed = await RewardRedemption.countDocuments({
-        reward: reward._id,
-        status: { $in: ['active', 'used'] },
-      });
-      if (redeemed >= reward.stock) {
-        return res.status(400).json({ message: 'sold out' });
-      }
-    }
-
-    // per-user limit
+    // Limits, each taken atomically (two simultaneous redeems can't both pass): the student's own limit
+    // and the reward's total stock (stock here = how many codes can exist, active or used)
+    const taken = [];
+    const release = async () => { for (const k of taken) await releaseSlot(k); };
     if (reward.perUserLimit) {
-      const mine = await RewardRedemption.countDocuments({
-        user: userId,
-        reward: reward._id,
-        status: { $in: ['active', 'used'] },
-      });
-      if (mine >= reward.perUserLimit) {
+      const mine = await RewardRedemption.countDocuments({ user: userId, reward: reward._id, status: { $in: ['active', 'used'] } });
+      const key = `reward-user:${userId}:${reward._id}`;
+      if (!(await takeSlot(key, reward.perUserLimit, mine, null))) {
         return res.status(400).json({ message: 'you already redeemed this' });
       }
+      taken.push(key);
+    }
+    if (typeof reward.stock === 'number') {
+      const redeemed = await RewardRedemption.countDocuments({ reward: reward._id, status: { $in: ['active', 'used'] } });
+      const key = `reward-stock:${reward._id}`;
+      if (!(await takeSlot(key, reward.stock, redeemed, null))) {
+        await release();
+        return res.status(400).json({ message: 'sold out' });
+      }
+      taken.push(key);
     }
 
-    // deduct points (idempotent per redemption attempt)
+    // deduct points atomically (only if the balance still covers it)
     const idem = `reward_redeem:${userId}:${rewardId}:${Date.now()}`;
-    await award(userId, -reward.costPoints, 'reward_redeemed', 'self', userId, idem);
+    try {
+      await spend(userId, reward.costPoints, 'reward_redeemed', 'reward', String(reward._id), idem);
+    } catch (e) {
+      await release();
+      if (e.code === 'INSUFFICIENT_POINTS') return res.status(400).json({ message: 'not enough points' });
+      throw e;
+    }
 
     // create redemption
     const code = generateCode('TDC');
@@ -136,21 +139,28 @@ router.post('/:id/redeem', async (req, res) => {
       Date.now() + (reward.validDays || 30) * 24 * 60 * 60 * 1000
     );
 
-    const redemption = await RewardRedemption.create({
-      user: userId,
-      reward: reward._id,
-      code,
-      costPoints: reward.costPoints,
-      expiresAt,
-      status: 'active',
-      promoCode: reward.kind === 'promo_code' ? code : null,
-      snapshot: {
-        title: reward.title,
-        description: reward.description,
-        kind: reward.kind,
-        brand: reward.brand,
-      },
-    });
+    let redemption;
+    try {
+      redemption = await RewardRedemption.create({
+        user: userId,
+        reward: reward._id,
+        code,
+        costPoints: reward.costPoints,
+        expiresAt,
+        status: 'active',
+        promoCode: reward.kind === 'promo_code' ? code : null,
+        snapshot: {
+          title: reward.title,
+          description: reward.description,
+          kind: reward.kind,
+          brand: reward.brand,
+        },
+      });
+    } catch (e) {
+      await refund(userId, reward.costPoints, 'reward_redeem_failed', 'reward', String(reward._id));
+      await release();
+      throw e;
+    }
 
     const updated = await EngagementProfile.findOne({ user: userId }).lean();
 

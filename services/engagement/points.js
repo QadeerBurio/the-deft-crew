@@ -173,29 +173,69 @@ async function award(userId, delta, reason, arg4 = 'system', arg5 = null, arg6 =
 }
 
 /**
- * Spend points — safe, idempotent, refuses on insufficient balance.
+ * Spend points: atomic, idempotent, refuses on insufficient balance.
+ * The balance only goes down if it is still >= amount at that moment (one conditional update), so two
+ * simultaneous spends can't both use the same points. Lifetime and level don't change.
  */
 async function spend(userId, amount, reason = 'spend', refType = null, refId = null, idemKey = null) {
-  const delta = -Math.abs(Number(amount) || 0);
-  if (delta === 0) throw new Error('amount must be > 0');
+  const cost = Math.abs(Number(amount) || 0);
+  if (!cost) throw new Error('amount must be > 0');
 
-  const profile = await EngagementProfile.findOne({ user: userId }).lean();
-  const balance = profile?.points?.balance || 0;
-  if (balance < Math.abs(delta)) {
+  if (idemKey) {
+    const existing = await PointsLedger.findOne({ $or: [{ idemKey }, { dedupeKey: idemKey }] }).lean();
+    if (existing) {
+      const p = await EngagementProfile.findOne({ user: userId }).lean();
+      return { ok: true, duplicate: true, awarded: false, balance: p?.points?.balance || 0, lifetime: p?.points?.lifetime || 0, level: p?.level || resolveLevel(p?.points?.lifetime || 0) };
+    }
+  }
+
+  const profile = await EngagementProfile.findOneAndUpdate(
+    { user: userId, 'points.balance': { $gte: cost } },
+    { $inc: { 'points.balance': -cost }, $set: { 'stats.lastActiveAt': new Date() } },
+    { new: true }
+  );
+  if (!profile) {
+    const p = await EngagementProfile.findOne({ user: userId }).lean();
     const err = new Error('not enough points');
     err.code = 'INSUFFICIENT_POINTS';
-    err.balance = balance;
-    err.required = Math.abs(delta);
+    err.balance = p?.points?.balance || 0;
+    err.required = cost;
     throw err;
   }
 
-  return award(userId, delta, reason, {
-    actorRole: 'self',
-    actor: userId,
-    refType,
-    refId,
-    idemKey,
-  });
+  try {
+    await PointsLedger.create({
+      user: userId,
+      delta: -cost,
+      balanceAfter: profile.points.balance,
+      reason,
+      actorRole: 'self',
+      actor: userId,
+      refType,
+      refId,
+      metadata: {},
+      ...(idemKey ? { idemKey, dedupeKey: idemKey } : {}),
+    });
+  } catch (err) {
+    // the same spend recorded at the same moment by another request: give these points back
+    await EngagementProfile.updateOne({ _id: profile._id }, { $inc: { 'points.balance': cost } });
+    if (err?.code === 11000) {
+      return { ok: true, duplicate: true, awarded: false, balance: profile.points.balance + cost, lifetime: profile.points?.lifetime || 0, level: profile.level };
+    }
+    throw err;
+  }
+
+  return { ok: true, awarded: true, duplicate: false, balance: profile.points.balance, lifetime: profile.points?.lifetime || 0, level: profile.level };
 }
 
-module.exports = { award, spend, resolveLevel, LEVELS };
+// give spent points back (a redemption that failed after the spend); no lifetime change
+async function refund(userId, amount, reason, refType = null, refId = null) {
+  const cost = Math.abs(Number(amount) || 0);
+  if (!cost) return null;
+  const profile = await EngagementProfile.findOneAndUpdate({ user: userId }, { $inc: { 'points.balance': cost } }, { new: true });
+  if (!profile) return null;
+  await PointsLedger.create({ user: userId, delta: cost, balanceAfter: profile.points.balance, reason, actorRole: 'system', refType, refId, metadata: {} });
+  return profile.points.balance;
+}
+
+module.exports = { award, spend, refund, resolveLevel, LEVELS };
