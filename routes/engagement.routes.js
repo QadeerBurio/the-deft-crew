@@ -164,17 +164,23 @@ router.post('/brand/redemptions/:id/use', auth, requireBrand, async (req, res) =
     }
 
     if (new Date(redemption.expiresAt) < new Date()) {
-      redemption.status = 'expired';
-      await redemption.save();
+      await RewardRedemption.updateOne({ _id: redemption._id, status: 'active' }, { $set: { status: 'expired' } });
       return res
         .status(400)
         .json({ message: 'code expired', status: 'expired' });
     }
 
-    redemption.status = 'used';
-    redemption.usedAt = new Date();
-    redemption.usedBy = req.userId; // ✅ audit trail
-    await redemption.save();
+    // one conditional update: only one of two simultaneous "use" taps succeeds
+    const used = await RewardRedemption.findOneAndUpdate(
+      { _id: redemption._id, status: 'active' },
+      { $set: { status: 'used', usedAt: new Date(), usedBy: req.userId } }, // usedBy: audit trail
+      { new: true }
+    );
+    if (!used) {
+      return res.status(400).json({ message: 'already used', status: 'used' });
+    }
+    redemption.status = used.status;
+    redemption.usedAt = used.usedAt;
 
     res.json({
       ok: true,
@@ -840,14 +846,19 @@ router.post('/rewards/:id/redeem', auth, requireAuth, async (req, res) => {
       }
     }
 
-    // 4. per-user limit check
-    if (reward.perUserLimit) {
+    // 4. per-user limit, taken atomically (two simultaneous redeems can't both pass)
+    const { takeSlot, releaseSlot } = require('../models/RedemptionGuard');
+    const userKey = reward.perUserLimit ? `reward-user:${userId}:${reward._id}` : null;
+    if (userKey) {
       const mine = await RewardRedemption.countDocuments({
         user: userId,
         reward: reward._id,
         status: { $in: ['active', 'used'] },
       });
-      if (mine >= reward.perUserLimit) {
+      if (!(await takeSlot(userKey, reward.perUserLimit, mine, null))) {
+        if (reward.stock !== null && reward.stock !== undefined) {
+          await Reward.updateOne({ _id: reward._id }, { $inc: { stock: 1 } });
+        }
         return res.status(409).json({ message: 'you already redeemed this' });
       }
     }
@@ -894,6 +905,7 @@ router.post('/rewards/:id/redeem', auth, requireAuth, async (req, res) => {
       if (reward.stock !== null && reward.stock !== undefined) {
         await Reward.updateOne({ _id: reward._id }, { $inc: { stock: 1 } });
       }
+      if (userKey) await releaseSlot(userKey);
       if (e.code === 'INSUFFICIENT_POINTS') {
         return res.status(409).json({ message: 'not enough points' });
       }

@@ -43,15 +43,17 @@ class JobIngestionService {
 
     // Balance database by capping excess jobs from any single company (e.g. SpaceX) to 40
     try {
-      const spaceXJobs = await Job.find({ companyName: 'SpaceX' }).sort({ createdAt: -1 });
+      // imported jobs only (never an employer's), archived instead of deleted
+      const imported = { companyName: 'SpaceX', isExternal: true, postedBy: null, archivedAt: null };
+      const spaceXJobs = await Job.find(imported).sort({ createdAt: -1 });
       if (spaceXJobs.length > 40) {
         const toKeep = spaceXJobs.slice(0, 40).map(j => j._id);
-        const cleanupResult = await Job.deleteMany({
-          companyName: 'SpaceX',
-          _id: { $nin: toKeep }
-        });
-        if (cleanupResult.deletedCount > 0) {
-          console.log(`⏰ [Ingestion] Cleaned up ${cleanupResult.deletedCount} excess SpaceX jobs to restore feed balance.`);
+        const cleanupResult = await Job.updateMany(
+          { ...imported, _id: { $nin: toKeep } },
+          { $set: { active: false, archivedAt: new Date(), archivedReason: 'feed-balance' } }
+        );
+        if (cleanupResult.modifiedCount > 0) {
+          console.log(`⏰ [Ingestion] Archived ${cleanupResult.modifiedCount} excess imported SpaceX jobs to restore feed balance.`);
         }
       }
     } catch (err) {

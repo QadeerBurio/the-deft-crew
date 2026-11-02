@@ -52,6 +52,11 @@ const offerSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: "User"
   },
+  // "archived": replaced by a newer offer of the same brand. Hidden from students and closed to new
+  // claims, codes and scans; its claims and redemptions stay and still count in revenue, savings and
+  // the brand's history. Offers saved before this field existed have no status: read them as active.
+  status: { type: String, enum: ["active", "archived"], default: "active" },
+  archivedAt: { type: Date, default: null },
   
   university: {
     type: mongoose.Schema.Types.ObjectId,

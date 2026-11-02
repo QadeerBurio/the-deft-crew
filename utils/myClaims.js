@@ -25,7 +25,7 @@ async function myClaimedOfferIds(userId) {
   const id = validId(userId);
   if (!id) return new Set();
   const Offer = require("../models/Offer");
-  const rows = await Offer.find({ claimedBy: id }).select("_id").lean();
+  const rows = await Offer.find({ claimedBy: id, status: { $ne: "archived" } }).select("_id").lean();
   return new Set(rows.map((r) => String(r._id)));
 }
 

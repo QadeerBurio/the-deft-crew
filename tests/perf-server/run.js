@@ -50,6 +50,7 @@ const condOk = (val, cond) => {
   if (cond && typeof cond === "object" && !isOid(cond) && !(cond instanceof Date)) {
     return Object.entries(cond).every(([op, arg]) => {
       if (op === "$gt") return vals.some((v) => v > norm(arg));
+      if (op === "$ne") return !vals.includes(norm(arg));
       if (op === "$regex") return vals.some((v) => new RegExp(arg).test(v));
       throw new Error(`aggregate test: unsupported ${op}`);
     });

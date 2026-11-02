@@ -3,6 +3,7 @@ const router = express.Router();
 const multer = require("multer");
 const path = require("path");
 const Job = require("../models/Job");
+const { archiveJob } = require('../services/jobArchive');
 const JobApplication = require("../models/JobApplication");
 const Notification = require("../models/Notification");
 const User = require("../models/User");
@@ -178,7 +179,7 @@ router.get("/all", authMiddleware, isAdminOrEmployee, async (req, res) => {
         if (sort === "applications") sortOption = { totalApplications: -1 };
         if (sort === "views") sortOption = { views: -1 };
 
-        const jobs = await Job.find(query).sort(sortOption).populate('postedBy', 'name email');
+        const jobs = await Job.find({ ...query, archivedAt: null }).sort(sortOption).populate('postedBy', 'name email'); // archived = deleted
         
         const jobsWithCounts = await Promise.all(jobs.map(async (job) => {
             const appCount = await JobApplication.countDocuments({ jobId: job._id });
@@ -194,7 +195,7 @@ router.get("/all", authMiddleware, isAdminOrEmployee, async (req, res) => {
 // Get jobs posted by employee - MOVED BEFORE /:id routes
 router.get("/my-jobs", authMiddleware, async (req, res) => {
     try {
-        const jobs = await Job.find({ postedBy: req.userId }).sort({ createdAt: -1 });
+        const jobs = await Job.find({ postedBy: req.userId, archivedAt: null }).sort({ createdAt: -1 }); // archived = deleted
         const jobsWithCounts = await Promise.all(jobs.map(async (job) => {
             const appCount = await JobApplication.countDocuments({ jobId: job._id });
             return { ...job.toObject(), totalApplications: appCount };
@@ -214,6 +215,7 @@ router.put("/update/:id", authMiddleware, isAdminOrEmployee, async (req, res) =>
         if (req.user.role !== "admin" && job.postedBy.toString() !== req.userId) {
             return res.status(403).json({ message: "You can only edit your own jobs" });
         }
+        if (job.archivedAt) return res.status(410).json({ message: "This job was deleted" });
 
         const updatedJob = await Job.findByIdAndUpdate(
             req.params.id,
@@ -236,6 +238,7 @@ router.patch("/toggle/:id", authMiddleware, isAdminOrEmployee, async (req, res) 
         if (req.user.role !== "admin" && job.postedBy.toString() !== req.userId) {
             return res.status(403).json({ message: "You can only toggle your own jobs" });
         }
+        if (job.archivedAt) return res.status(410).json({ message: "This job was deleted" });
 
         job.active = !job.active;
         await job.save();
@@ -252,20 +255,14 @@ router.delete("/delete/:id", authMiddleware, isAdminOrEmployee, async (req, res)
         const job = await Job.findById(req.params.id);
         if (!job) return res.status(404).json({ message: "Job not found" });
         
-        if (req.user.role !== "admin" && job.postedBy.toString() !== req.userId) {
+        // String(): an imported job has no postedBy
+        if (req.user.role !== "admin" && String(job.postedBy) !== String(req.userId)) {
             return res.status(403).json({ message: "You can only delete your own jobs" });
         }
         
-        // Delete all applications and their resumes from Cloudinary
-        const applications = await JobApplication.find({ jobId: req.params.id });
-        for (const app of applications) {
-            if (app.resumePublicId) {
-                await cloudinary.uploader.destroy(app.resumePublicId, { resource_type: "raw" });
-            }
-        }
-        
-        await JobApplication.deleteMany({ jobId: req.params.id });
-        await Job.findByIdAndDelete(req.params.id);
+        // Archived, not deleted: the job leaves every list, but it and its applications (and the
+        // applicants' resume files) stay for the hiring history
+        await archiveJob(req.params.id, req.userId);
         res.json({ message: "Job deleted successfully" });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -353,8 +350,8 @@ router.get("/public/all", async (req, res) => {
 router.get("/public/job/:id", async (req, res) => {
     try {
         const job = await Job.findById(req.params.id);
-        if (!job) return res.status(404).json({ message: "Job not found" });
-        
+        if (!job || job.archivedAt) return res.status(404).json({ message: "Job not found" });
+
         const now = new Date();
         const isExpired = !job.active || (job.applicationDeadline && new Date(job.applicationDeadline) < now);
 

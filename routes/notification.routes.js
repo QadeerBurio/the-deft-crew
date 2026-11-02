@@ -136,11 +136,12 @@ router.post('/send', auth, async (req, res) => {
 
     const senderId = resolveUserId(req);
     if (!senderId) return res.status(401).json({ message: 'User ID required' });
+    // admins only (any signed-in user could push any text to any user)
+    const sender = mongoose.Types.ObjectId.isValid(String(senderId)) ? await User.findById(senderId).select('role').lean() : null;
+    if (sender?.role !== 'admin') return res.status(403).json({ message: 'Only admins can send notifications' });
 
     const resolvedMood = mood || 'sorted';
 
-    // TODO: authorize — only admins/system, or users with a relationship,
-    // should be able to send to arbitrary recipients.
     if (String(recipientId) === String(senderId)) {
       // optional: return res.status(400).json({ message: 'Cannot notify yourself' });
     }

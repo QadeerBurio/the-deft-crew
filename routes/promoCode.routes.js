@@ -144,6 +144,9 @@ router.post("/generate", auth, async (req, res) => {
         .status(404)
         .json({ success: false, message: "Offer not found" });
     }
+    if (offer.status === "archived") {
+      return res.status(410).json({ success: false, message: "This offer has ended" });
+    }
 
     const hasClaimed = (offer.claimedBy || []).some(
       (id) => id.toString() === studentId.toString()
@@ -468,12 +471,16 @@ router.post("/verify", auth, async (req, res) => {
     const savedAmount = Math.round(discountAmount);
     const finalAmount = Number(billAmount) - savedAmount;
 
-    await PromoCode.findByIdAndUpdate(promoCodeDoc._id, {
-      status: "used",
-      usedAt: new Date(),
-      usedBy: studentId,
-      $inc: { usedCount: 1 },
-    });
+    // only one verification wins: the code is marked used only if it is still active, and the
+    // redemption is written only by the request that marked it
+    const won = await PromoCode.findOneAndUpdate(
+      { _id: promoCodeDoc._id, status: "active" },
+      { $set: { status: "used", usedAt: new Date(), usedBy: studentId }, $inc: { usedCount: 1 } },
+      { new: true }
+    );
+    if (!won) {
+      return res.status(409).json({ success: false, message: "This promo code has already been used" });
+    }
 
     await Offer.findByIdAndUpdate(offerId, {
       $push: {
@@ -1069,13 +1076,15 @@ router.post("/confirm-redemption", auth, async (req, res) => {
       (Number(billAmount) * promoCodeDoc.discountPercentage) / 100;
     const savedAmount = Math.round(discountAmount);
 
-    await PromoCode.findByIdAndUpdate(promoCodeDoc._id, {
-      status: "used",
-      usedAt: new Date(),
-      usedBy: studentId,
-      externalAmount: Number(billAmount),
-      $inc: { usedCount: 1 },
-    });
+    // only one confirmation wins (see /verify)
+    const won = await PromoCode.findOneAndUpdate(
+      { _id: promoCodeDoc._id, status: "active" },
+      { $set: { status: "used", usedAt: new Date(), usedBy: studentId, externalAmount: Number(billAmount) }, $inc: { usedCount: 1 } },
+      { new: true }
+    );
+    if (!won) {
+      return res.status(409).json({ success: false, message: "This promo code has already been used", status: "used" });
+    }
 
     await Offer.findByIdAndUpdate(offerId, {
       $push: {

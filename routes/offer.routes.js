@@ -3,6 +3,11 @@ const mongoose = require("mongoose");
 const multer = require("multer");
 const Offer = require("../models/Offer");
 const User = require("../models/User");
+const RedemptionGuard = require("../models/RedemptionGuard");
+// archived offers (replaced by a newer one) are hidden from students and closed to new claims, codes
+// and scans; they stay in revenue, savings and the brand's history. No status = active (older offers).
+const NOT_ARCHIVED = { status: { $ne: "archived" } };
+const isArchived = (offer) => offer?.status === "archived";
 const auth = require("../middleware/auth.middleware");
 const Notification = require("../models/Notification");
 const Slider = require("../models/Slider");
@@ -49,7 +54,12 @@ router.post("/", auth, uploadOffer.single("image"), async (req, res) => {
       return res.status(403).json({ message: "Only brands allowed" });
     }
 
-    await Offer.deleteMany({ brand: req.userId });
+    // One active offer per brand: the previous one is archived, not deleted (it holds the brand's
+    // claims and redemptions, so revenue, savings and history stay)
+    await Offer.updateMany(
+      { brand: req.userId, status: { $ne: "archived" } },
+      { $set: { status: "archived", archivedAt: new Date() } }
+    );
 
     const offerData = {
       title: req.body.title,
@@ -100,8 +110,9 @@ setImmediate(async () => {
 router.put("/:offerId", auth, uploadOffer.single("image"), async (req, res) => {
   try {
     const offer = await Offer.findById(req.params.offerId);
-    
+
     if (!offer) return res.status(404).json({ message: "Offer not found" });
+    if (isArchived(offer)) return res.status(410).json({ message: "This offer has ended" });
     
     if (offer.brand.toString() !== req.userId) {
       return res.status(403).json({ message: "Unauthorized" });
@@ -147,7 +158,7 @@ router.get("/my-offers", auth, async (req, res) => {
       return res.status(403).json({ message: "Only brands allowed" });
     }
 
-    const offers = await Offer.find({ brand: req.userId })
+    const offers = await Offer.find({ brand: req.userId, ...NOT_ARCHIVED })
       .sort({ createdAt: -1 })
       .lean()
       .exec();
@@ -163,6 +174,7 @@ router.post("/claim/:offerId", auth, async (req, res) => {
   try {
     const offer = await Offer.findById(req.params.offerId);
     if (!offer) return res.status(404).json({ message: "Offer not found" });
+    if (isArchived(offer)) return res.status(410).json({ message: "This offer has ended" });
 
     // Check if already claimed
     if (offer.claimedBy.includes(req.userId)) {
@@ -202,7 +214,7 @@ router.get("/claimed", auth, async (req, res) => {
       }
     }
 
-    const claimedOffers = await Offer.find({ claimedBy: req.userId })
+    const claimedOffers = await Offer.find({ claimedBy: req.userId, ...NOT_ARCHIVED })
       .populate("brand", "name brandName logo websiteUrl city address isOnline isInStore")
       .lean()
       .exec();
@@ -275,19 +287,26 @@ router.post("/unclaim/:offerId", auth, async (req, res) => {
 // REDEEM: Finalize payment and remove from active claims
 router.post('/redeem-payment', auth, async (req, res) => {
   try {
-    // B7: only brand / employee / admin can call this
+    // only the brand that owns the offer (or an admin) can record a redemption on it
     const requester = await User.findById(req.userId).select('role').lean();
-    if (!requester || !['brand', 'employee', 'admin'].includes(requester.role)) {
-      return res.status(403).json({ message: 'Only the scanner side can redeem' });
+    if (!requester || !['brand', 'admin'].includes(requester.role)) {
+      return res.status(403).json({ message: 'Only the brand can redeem' });
     }
 
     const { offerId, userId, billAmount } = req.body;
     if (!offerId || !userId || !billAmount) {
       return res.status(400).json({ message: 'Missing required fields' });
     }
+    if (!mongoose.Types.ObjectId.isValid(String(offerId)) || !mongoose.Types.ObjectId.isValid(String(userId))) {
+      return res.status(400).json({ message: 'Invalid offer or student' });
+    }
 
     const offer = await Offer.findById(offerId);
     if (!offer) return res.status(404).json({ message: 'Offer not found' });
+    if (requester.role !== 'admin' && String(offer.brand) !== String(req.userId)) {
+      return res.status(403).json({ message: 'This offer belongs to another brand' });
+    }
+    if (isArchived(offer)) return res.status(410).json({ message: "This offer has ended" });
 
     // Server computes the saved amount (B7)
     const discount = Number(offer.discountPercentage) || 0;
@@ -303,29 +322,37 @@ router.post('/redeem-payment', auth, async (req, res) => {
       return r.student.toString() === userId && k === today;
     });
 
+    const capMessage = 'You have already used this discount 2 times today. Please try again tomorrow.';
     if (todayRedemptions.length >= 2) {
-      return res.status(400).json({
-        message: 'You have already used this discount 2 times today. Please try again tomorrow.',
-      });
+      return res.status(400).json({ message: capMessage });
+    }
+    // The 2-a-day cap, taken atomically: two simultaneous scans can't both pass it
+    const capKey = `pay:${userId}:${offer._id}:${today}`;
+    const gotSlot = await RedemptionGuard.takeSlot(capKey, 2, todayRedemptions.length, new Date(Date.now() + 3 * 24 * 60 * 60 * 1000));
+    if (!gotSlot) {
+      return res.status(400).json({ message: capMessage });
     }
 
-    offer.redemptions.push({
-      student: userId,
-      billAmount: bill,
-      savedAmount: computedSaved,
-      redeemedAt: new Date(),
-    });
-    const redemptionId = offer.redemptions[offer.redemptions.length - 1]?._id;
+    // atomic $push (a read-modify-save could drop a redemption written at the same moment)
+    const redemptionId = new mongoose.Types.ObjectId();
+    let updated;
+    try {
+      updated = await Offer.findByIdAndUpdate(
+        offer._id,
+        { $push: { redemptions: { _id: redemptionId, student: userId, billAmount: bill, savedAmount: computedSaved, redeemedAt: new Date() } } },
+        { new: true }
+      );
+    } catch (err) {
+      await RedemptionGuard.releaseSlot(capKey);
+      throw err;
+    }
 
-    const totalRedemptions = offer.redemptions.filter(
-      (r) => r.student.toString() === userId
+    const totalRedemptions = updated.redemptions.filter(
+      (r) => String(r.student) === String(userId)
     );
     if (totalRedemptions.length >= 2) {
-      offer.claimedBy = offer.claimedBy.filter(
-        (id) => id.toString() !== userId.toString()
-      );
+      await Offer.updateOne({ _id: offer._id }, { $pull: { claimedBy: userId } });
     }
-    await offer.save();
 
     // Redemption changes claimedBy + redemptions → clear every list that shows them
     await clearBrandCaches(offer.brand, userId);
@@ -371,7 +398,7 @@ router.post('/redeem-payment', auth, async (req, res) => {
 
     return res.json({
       message: 'Redemption successful! Voucher used.',
-      offer,
+      offer: updated,
       redemptionsUsed: totalRedemptions.length,
       redemptionsRemaining: 2 - totalRedemptions.length,
       savedAmount: computedSaved,
@@ -399,7 +426,7 @@ router.get("/brand/:brandId", auth, async (req, res) => {
       }
     }
 
-    const offers = await Offer.find({ brand: req.params.brandId })
+    const offers = await Offer.find({ brand: req.params.brandId, ...NOT_ARCHIVED })
       .populate("brand", "name logo category websiteUrl")
       .lean()
       .exec();
@@ -427,6 +454,7 @@ router.get("/summary", auth, async (req, res) => {
 
     if (!summaryMap) {
       const offers = await Offer.aggregate([
+        { $match: NOT_ARCHIVED },
         {
           $group: {
             _id: "$brand",
@@ -739,8 +767,9 @@ router.get("/images/all", auth, async (req, res) => {
   try {
     const { brandId, category, limit = 100 } = req.query;
     
-    const filter = { 
-      image: { $ne: null, $ne: '' }
+    const filter = {
+      image: { $ne: null, $ne: '' },
+      ...NOT_ARCHIVED,
     };
     
     if (brandId) filter.brand = brandId;
@@ -817,23 +846,36 @@ router.get("/images/all", auth, async (req, res) => {
 // POST - Student scans QR and sends data
 router.post("/scan-verify", auth, async (req, res) => {
   try {
-    const { studentId, name, rollNo, university, email, offerId, offerTitle, discountPercentage, brandId, brandName } = req.body;
-    
-    if (!studentId || !name || !offerId) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Missing required student information" 
-      });
+    // The student is whoever is signed in: their details come from their own account, never from the
+    // request body, and the brand comes from the offer (a student can't queue a scan for someone else).
+    if (req.isGuest || !mongoose.Types.ObjectId.isValid(String(req.userId))) {
+      return res.status(401).json({ success: false, message: "Sign in to use this discount" });
     }
-    
+    const { offerId } = req.body;
+    if (!offerId || !mongoose.Types.ObjectId.isValid(String(offerId))) {
+      return res.status(400).json({ success: false, message: "Missing required student information" });
+    }
+    const me = await User.findById(req.userId).select("name rollNo email university role").populate("university", "name").lean();
+    if (!me || me.role !== "student") {
+      return res.status(403).json({ success: false, message: "Only students can scan a discount" });
+    }
+
     const offer = await Offer.findById(offerId);
     if (!offer) {
-      return res.status(404).json({ 
-        success: false, 
-        message: "Offer not found" 
-      });
+      return res.status(404).json({ success: false, message: "Offer not found" });
     }
-    
+    if (isArchived(offer)) return res.status(410).json({ success: false, message: "This offer has ended" });
+    const brandDoc = await User.findById(offer.brand).select("brandName name").lean();
+    const studentId = String(me._id);
+    const name = me.name;
+    const rollNo = me.rollNo;
+    const email = me.email;
+    const university = me.university;
+    const brandId = String(offer.brand);
+    const brandName = brandDoc?.brandName || brandDoc?.name;
+    const offerTitle = offer.title;
+    const discountPercentage = offer.discountPercentage;
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     
@@ -956,6 +998,12 @@ router.get("/pending-scans", auth, async (req, res) => {
 router.post("/scan-processed", auth, async (req, res) => {
   try {
     const { studentId } = req.body;
+    // only the brand the scan was made for (or an admin) can close it
+    const requester = await User.findById(req.userId).select("role").lean();
+    if (!requester || !["brand", "admin"].includes(requester.role)) {
+      return res.status(403).json({ success: false, message: "Only the brand can close a scan" });
+    }
+    const mine = (scan) => requester.role === "admin" || scan.brandId === String(req.userId);
     
     if (!studentId) {
       return res.status(400).json({ success: false, message: "Student ID required" });
@@ -963,7 +1011,7 @@ router.post("/scan-processed", auth, async (req, res) => {
     
     let found = false;
     for (let i = 0; i < pendingScans.length; i++) {
-      if (pendingScans[i].studentId === studentId && pendingScans[i].status === 'pending') {
+      if (pendingScans[i].studentId === String(studentId) && pendingScans[i].status === 'pending' && mine(pendingScans[i])) {
         pendingScans[i].status = 'processed';
         processedScans.add(studentId);
         found = true;
@@ -988,11 +1036,12 @@ router.get("/can-scan/:offerId", auth, async (req, res) => {
     
     const offer = await Offer.findById(offerId);
     if (!offer) {
-      return res.status(404).json({ 
-        canScan: false, 
-        message: "Offer not found" 
+      return res.status(404).json({
+        canScan: false,
+        message: "Offer not found"
       });
     }
+    if (isArchived(offer)) return res.json({ canScan: false, message: "This offer has ended" });
     
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -1020,6 +1069,11 @@ router.get("/can-scan/:offerId", auth, async (req, res) => {
 // GET - Get a specific student by ID
 router.get("/student/:studentId", auth, async (req, res) => {
   try {
+    // a student's details: their own, or for an admin
+    if (String(req.params.studentId) !== String(req.userId)) {
+      const requester = mongoose.Types.ObjectId.isValid(String(req.userId)) ? await User.findById(req.userId).select("role").lean() : null;
+      if (requester?.role !== "admin") return res.status(403).json({ message: "Not allowed" });
+    }
     const user = await User.findById(req.params.studentId)
       .select('name email rollNo university')
       .populate('university', 'name')
@@ -1058,7 +1112,7 @@ router.get("/brandss", async (req, res) => {
       .exec();
 
     const offers = brands.length
-      ? await Offer.find({ brand: { $in: brands.map((b) => b._id) } })
+      ? await Offer.find({ brand: { $in: brands.map((b) => b._id) }, ...NOT_ARCHIVED })
           .select("brand title description discountPercentage category image isOnline isInStore location createdAt")
           .lean()
           .exec()
@@ -1101,11 +1155,11 @@ router.post("/generate-promo/:offerId", auth, async (req, res) => {
     const offer = await Offer.findById(offerId)
       .populate('brand', 'name')
       .lean();
-    
-    if (!offer) {
-      return res.status(404).json({ 
-        success: false, 
-        message: "Offer not found" 
+
+    if (!offer || isArchived(offer)) {
+      return res.status(offer ? 410 : 404).json({
+        success: false,
+        message: offer ? "This offer has ended" : "Offer not found"
       });
     }
     

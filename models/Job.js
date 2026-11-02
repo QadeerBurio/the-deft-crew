@@ -161,6 +161,12 @@ const JobSchema = new mongoose.Schema({
     lastFetchedAt: {
         type: Date
     },
+    // Archived instead of deleted: hidden everywhere (also active: false), but the job and its
+    // applications stay for the hiring history. archivedReason: "deleted" (by its employer or an admin),
+    // "outside-pakistan" (startup clean-up) or "feed-balance" (ingestion); both imported jobs only.
+    archivedAt: { type: Date, default: null },
+    archivedReason: { type: String, default: "" },
+    archivedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
     createdAt: { 
         type: Date, 
         default: Date.now 
