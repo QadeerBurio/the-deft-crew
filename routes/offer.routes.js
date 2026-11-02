@@ -4,6 +4,7 @@ const multer = require("multer");
 const Offer = require("../models/Offer");
 const User = require("../models/User");
 const RedemptionGuard = require("../models/RedemptionGuard");
+const { recordSafe } = require("../services/domainEvents");
 // archived offers (replaced by a newer one) are hidden from students and closed to new claims, codes
 // and scans; they stay in revenue, savings and the brand's history. No status = active (older offers).
 const NOT_ARCHIVED = { status: { $ne: "archived" } };
@@ -353,6 +354,10 @@ router.post('/redeem-payment', auth, async (req, res) => {
     if (totalRedemptions.length >= 2) {
       await Offer.updateOne({ _id: offer._id }, { $pull: { claimedBy: userId } });
     }
+    await recordSafe("offer.redeemed", String(redemptionId), {
+      actor: req.userId, subject: { kind: "Offer", id: offer._id },
+      data: { student: String(userId), billAmount: bill, savedAmount: computedSaved },
+    });
 
     // Redemption changes claimedBy + redemptions → clear every list that shows them
     await clearBrandCaches(offer.brand, userId);

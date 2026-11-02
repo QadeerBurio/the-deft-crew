@@ -5,6 +5,7 @@ const PromoCode = require("../models/PromoCode");
 const Offer = require("../models/Offer");
 const User = require("../models/User");
 const Notification = require("../models/Notification");
+const { recordSafe } = require("../services/domainEvents");
 const auth = require("../middleware/auth.middleware");
 const axios = require("axios");
 const BrandStoreConnection = require("../models/BrandStoreConnection");
@@ -493,6 +494,10 @@ router.post("/verify", auth, async (req, res) => {
           promoCodeId: promoCodeDoc._id,
         },
       },
+    });
+    await recordSafe("promo.redeemed", String(promoCodeDoc._id), {
+      actor: req.userId, subject: { kind: "PromoCode", id: promoCodeDoc._id },
+      data: { offer: String(offerId), student: String(studentId), billAmount: Number(billAmount), savedAmount },
     });
 
     const student = await User.findById(studentId).select("name");
@@ -1097,6 +1102,10 @@ router.post("/confirm-redemption", auth, async (req, res) => {
           promoCodeId: promoCodeDoc._id,
         },
       },
+    });
+    await recordSafe("promo.redeemed", String(promoCodeDoc._id), {
+      actor: req.userId, subject: { kind: "PromoCode", id: promoCodeDoc._id },
+      data: { offer: String(offerId), student: String(studentId), billAmount: Number(billAmount), savedAmount },
     });
 
     const student = await User.findById(studentId).select("name");

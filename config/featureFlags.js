@@ -23,6 +23,8 @@ const FLAGS = {
   // Meta App Events in the app (still only after the student allows it). META_EVENTS_ENABLED is the
   // older variable, still honoured when FLAG_META_EVENTS isn't set.
   metaEvents: { default: false, client: true, legacyEnv: "META_EVENTS_ENABLED" },
+  // writing DomainEvent records (services/domainEvents.js); off = recordOnce() writes nothing
+  domainEvents: { default: true, client: false },
 };
 
 const JOBS = {

@@ -11,6 +11,7 @@ const SavedItem = require('../models/SavedItem');
 const User = require('../models/User');
 const cfg = require('../config/engagement.config');
 const missions = require('../services/engagement/missions');
+const { recordSafe } = require('../services/domainEvents');
 const streakSvc = require('../services/engagement/streak');
 const drops = require('../services/engagement/drops');
 const { track } = require('../services/engagement');
@@ -179,6 +180,10 @@ router.post('/brand/redemptions/:id/use', auth, requireBrand, async (req, res) =
     if (!used) {
       return res.status(400).json({ message: 'already used', status: 'used' });
     }
+    await recordSafe('reward.used', String(redemption._id), {
+      actor: req.userId, subject: { kind: 'RewardRedemption', id: redemption._id },
+      data: { reward: String(redemption.reward) },
+    });
     redemption.status = used.status;
     redemption.usedAt = used.usedAt;
 
@@ -912,6 +917,11 @@ router.post('/rewards/:id/redeem', auth, requireAuth, async (req, res) => {
       }
       throw e;
     }
+
+    await recordSafe('reward.redeemed', String(redemption._id), {
+      actor: userId, subject: { kind: 'RewardRedemption', id: redemption._id },
+      data: { reward: String(reward._id), costPoints: reward.costPoints },
+    });
 
     // 7. return
     res.status(201).json({

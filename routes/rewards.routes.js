@@ -9,6 +9,7 @@ const EngagementProfile = require('../models/EngagementProfile');
 const { spend, refund } = require('../services/engagement/points');
 const { takeSlot, releaseSlot } = require('../models/RedemptionGuard');
 const { generateCode } = require('../services/engagement/rewardCodes');
+const { recordSafe } = require('../services/domainEvents');
 
 router.use(auth);
 
@@ -162,6 +163,11 @@ router.post('/:id/redeem', async (req, res) => {
       await release();
       throw e;
     }
+
+    await recordSafe('reward.redeemed', String(redemption._id), {
+      actor: userId, subject: { kind: 'RewardRedemption', id: redemption._id },
+      data: { reward: String(reward._id), costPoints: reward.costPoints },
+    });
 
     const updated = await EngagementProfile.findOne({ user: userId }).lean();
 
