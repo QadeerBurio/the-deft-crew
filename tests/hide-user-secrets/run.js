@@ -14,6 +14,9 @@ const OUT = process.argv[3];
 const reqS = Module.createRequire(path.join(SERVER, "server.js"));
 process.env.JWT_SECRET = "test-only";
 for (const k of ["SHOPIFY_CLIENT_SECRET", "SHOPIFY_WEBHOOK_SECRET", "WEBHOOK_SECRET", "MONGO_URI", "MONGODB_URI"]) delete process.env[k];
+// the brand's WooCommerce keys live sealed in BrandStoreConnection (utils/secretBox)
+process.env.STORE_CONNECT_ENABLED = "true";
+process.env.STORE_CREDENTIALS_KEY = require("crypto").randomBytes(32).toString("base64");
 
 // ---------- stubs (before any server file loads) ----------
 const mails = [];
@@ -46,6 +49,9 @@ const fakeHttp = (method) => async (url, a, b) => {
 };
 for (const m of ["get", "post", "put", "patch", "delete"]) axios[m] = fakeHttp(m);
 axios.request = async (cfg) => fakeHttp((cfg.method || "get").toLowerCase())(cfg.url, cfg.data, cfg);
+// the fake store's host resolves to a public address (utils/safeHttp checks it); nothing else resolves
+const dnsLookup = require("dns").promises.lookup;
+require("dns").promises.lookup = async (host, opts) => (host === "woo.example.test" ? [{ address: "93.184.216.34", family: 4 }] : dnsLookup(host, opts));
 
 const mongoose = reqS("mongoose");
 const fake = require("./fake-mongo");
@@ -66,7 +72,7 @@ const routes = {
 const push = reqS("./utils/pushNotification");
 
 // ---------- leak scanner ----------
-const HIDDEN = ["password", "webhookSecret", "wooConsumerKey", "wooConsumerSecret", "shopifyAccessToken", "shopifyClientId", "shopifyClientSecret", "shopifyWebhookSecret", "pushTokens", "idCardFront", "idCardBack", "livePicture"];
+const HIDDEN = ["password", "webhookSecret", "wooConsumerKey", "wooConsumerSecret", "shopifyAccessToken", "shopifyClientId", "shopifyClientSecret", "shopifyWebhookSecret", "pushTokens", "idCardFront", "idCardBack", "livePicture", "keyEnc", "secretEnc", "webhookSecretEnc", "stateHash"];
 const SECRET_VALUES = ["ck_SEEDKEY", "cs_SEEDSECRET", "whsec_SEED", "shpss_SEED", "shpat_SEED", "shpci_SEED", "shpcs_SEED", "ExponentPushToken[SEED", "kyc.test/", "$2a$", "$2b$"];
 function leaksIn(body) {
   const found = new Set();
@@ -77,6 +83,9 @@ function leaksIn(body) {
   try { walk(typeof body === "string" ? JSON.parse(body) : body); } catch { /* not JSON */ }
   const text = typeof body === "string" ? body : JSON.stringify(body);
   for (const s of SECRET_VALUES) if (text && text.includes(s)) found.add(`value:${s}`);
+  // any real-looking WooCommerce key or secret (ck_/cs_ + 40 hex) and any sealed value (utils/secretBox)
+  if (text && /c[ks]_[a-f0-9]{40}/.test(text)) found.add("value:woocommerce key");
+  if (text && /"v1:[A-Za-z0-9+/=]+:[A-Za-z0-9+/=]+:/.test(text)) found.add("value:sealed secret");
   return [...found];
 }
 const responses = [];
@@ -103,6 +112,8 @@ const hash = (p) => bcrypt.hashSync(p, 4);
 const kyc = { idCardFront: "https://kyc.test/front.jpg", idCardBack: "https://kyc.test/back.jpg", livePicture: "https://kyc.test/live.jpg" };
 const base = (id, role, name, email, extra = {}) => ({ _id: id, name, email, password: hash(PW[role] || PW.student), role, status: "Verified", accountStatus: "active", emailVerified: true, createdAt: now, updatedAt: now, pushTokens: [{ token: `ExponentPushToken[SEED-${name}]`, platform: "android", channels: "snd_v1", updatedAt: now }], ...kyc, ...extra });
 fake.seed("universities", [{ _id: ids.uni, name: "SZABIST", location: "Karachi" }]);
+const box = reqS("./utils/secretBox");
+fake.seed("brandstoreconnections", [{ _id: new mongoose.Types.ObjectId(), brand: ids.brand, platform: "woocommerce", storeUrl: "https://woo.example.test", status: "connected", keyEnc: box.seal("ck_SEEDKEY"), secretEnc: box.seal("cs_SEEDSECRET"), webhookStatus: "active" }]);
 fake.seed("users", [
   base(ids.admin, "admin", "Admin", "admin@test.local"),
   base(ids.student, "student", "Student One", "student@test.local", { university: ids.uni, referralCode: "STU001", phone: "03001111111" }),
