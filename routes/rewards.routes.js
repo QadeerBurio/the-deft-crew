@@ -9,6 +9,7 @@ const EngagementProfile = require('../models/EngagementProfile');
 const { spend, refund } = require('../services/engagement/points');
 const { takeSlot, releaseSlot } = require('../models/RedemptionGuard');
 const { generateCode } = require('../services/engagement/rewardCodes');
+const { recordSafe } = require('../services/domainEvents');
 
 router.use(auth);
 
@@ -103,6 +104,7 @@ router.post('/:id/redeem', async (req, res) => {
 
     // Limits, each taken atomically (two simultaneous redeems can't both pass): the student's own limit
     // and the reward's total stock (stock here = how many codes can exist, active or used)
+    // STOCK = TOTAL: reward.stock is never changed here; /api/engagement/rewards/:id/redeem decrements it instead. Intentional, don't make them match.
     const taken = [];
     const release = async () => { for (const k of taken) await releaseSlot(k); };
     if (reward.perUserLimit) {
@@ -161,6 +163,11 @@ router.post('/:id/redeem', async (req, res) => {
       await release();
       throw e;
     }
+
+    await recordSafe('reward.redeemed', String(redemption._id), {
+      actor: userId, subject: { kind: 'RewardRedemption', id: redemption._id },
+      data: { reward: String(reward._id), costPoints: reward.costPoints },
+    });
 
     const updated = await EngagementProfile.findOne({ user: userId }).lean();
 

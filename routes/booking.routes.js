@@ -7,7 +7,7 @@ const { track } = require('../services/engagement');
 // Create new booking
 router.post('/', authMiddleware, async (req, res) => {
   try {
-    console.log('Creating booking for user:', req.user.email);
+    console.log('Creating booking for user:', req.userId);
     
     const bookingData = {
       ...req.body,
@@ -38,7 +38,7 @@ router.post('/', authMiddleware, async (req, res) => {
 // Get user's bookings
 router.get('/my-bookings', authMiddleware, async (req, res) => {
   try {
-    console.log('Fetching bookings for user:', req.user.email);
+    console.log('Fetching bookings for user:', req.userId);
     console.log('User ID:', req.user._id);
     
     // Find bookings by either userId or customerEmail

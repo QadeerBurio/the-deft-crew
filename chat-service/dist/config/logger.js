@@ -6,6 +6,15 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.logger = void 0;
 const winston_1 = __importDefault(require("winston"));
 const path_1 = __importDefault(require("path"));
+// the server's log redaction (e-mails, phones, tokens, connection strings), also for the log files
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { redact } = require('../../../utils/logSafety');
+const redactFields = winston_1.default.format((info) => {
+    for (const k of Object.keys(info))
+        if (typeof info[k] === 'string')
+            info[k] = redact(info[k]);
+    return info;
+});
 // Resolve log folder relative to current working directory (project root)
 const logDirectory = path_1.default.resolve('logs');
 const levels = {
@@ -23,7 +32,7 @@ const colors = {
     debug: 'white',
 };
 winston_1.default.addColors(colors);
-const format = winston_1.default.format.combine(winston_1.default.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss:ms' }), winston_1.default.format.errors({ stack: true }), winston_1.default.format.splat(), winston_1.default.format.json());
+const format = winston_1.default.format.combine(winston_1.default.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss:ms' }), winston_1.default.format.errors({ stack: true }), winston_1.default.format.splat(), redactFields(), winston_1.default.format.json());
 const transports = [
     new winston_1.default.transports.Console({
         level: 'warn',

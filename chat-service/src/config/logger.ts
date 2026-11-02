@@ -1,5 +1,13 @@
 import winston from 'winston';
 import path from 'path';
+// the server's log redaction (e-mails, phones, tokens, connection strings), also for the log files
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { redact } = require('../../../utils/logSafety');
+
+const redactFields = winston.format((info) => {
+  for (const k of Object.keys(info)) if (typeof info[k] === 'string') info[k] = redact(info[k]);
+  return info;
+});
 
 // Resolve log folder relative to current working directory (project root)
 const logDirectory = path.resolve('logs');
@@ -26,6 +34,7 @@ const format = winston.format.combine(
   winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss:ms' }),
   winston.format.errors({ stack: true }),
   winston.format.splat(),
+  redactFields(),
   winston.format.json()
 );
 

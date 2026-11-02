@@ -97,8 +97,9 @@ async function sendSignupCode(user, { force = false } = {}) {
     expiresAt: new Date(Date.now() + OTP_TTL_MS),
   });
 
-  if (process.env.NODE_ENV !== "production") {
-    console.log(`🔑 [dev] sign-up code for ${user.email}: ${otp}`);
+  // local development only: LOG_DEV_CODES=true and not production (never set it on Railway)
+  if (process.env.LOG_DEV_CODES === "true" && process.env.NODE_ENV !== "production") {
+    console.log(`🔑 [dev] sign-up code for user ${user._id}: ${otp}`);
   }
 
   try {
@@ -852,8 +853,9 @@ async function forgotPasswordHandler(req, res) {
       expiresAt: new Date(Date.now() + OTP_TTL_MS),
     });
 
-    if (process.env.NODE_ENV !== "production") {
-      console.log(`🔑 [dev] OTP for ${user.email}: ${otp}`);
+    // local development only: LOG_DEV_CODES=true and not production (never set it on Railway)
+    if (process.env.LOG_DEV_CODES === "true" && process.env.NODE_ENV !== "production") {
+      console.log(`🔑 [dev] OTP for user ${user._id}: ${otp}`);
     }
 
     try {

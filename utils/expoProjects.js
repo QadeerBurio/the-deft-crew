@@ -16,6 +16,7 @@
 // Any other project: EXPO_ACCESS_TOKEN_<first 8 characters of its id, upper case>.
 // Without a token Expo only accepts the send while Enhanced Push Security is off.
 
+const { jobEnabled } = require('../config/featureFlags');
 const { Expo } = require('expo-server-sdk');
 
 const PROJECTS = [
@@ -90,6 +91,11 @@ function refusedWarning(projectId, source) {
  * goes to its project's client. Returns tickets in message order.
  */
 async function sendChunk(client, projectId, chunk, learned, depth = 0) {
+  // JOB_PUSHES=off (and staging by default): nothing is sent; tickets say so, tokens are left alone
+  if (!jobEnabled('pushes')) {
+    warnOnce('pushes-off', '[push] pushes are switched off here (JOB_PUSHES / staging): nothing is sent');
+    return errorTickets(chunk.length, 'PUSHES_OFF', 'pushes are switched off on this server');
+  }
   try {
     return await client.sendPushNotificationsAsync(chunk);
   } catch (err) {

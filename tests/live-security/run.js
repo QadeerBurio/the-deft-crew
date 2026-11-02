@@ -113,7 +113,7 @@ const express = reqS("express");
 const jwt = reqS("jsonwebtoken");
 const coll = (name) => reqS(`./models/${name}`).collection.collectionName;
 // models whose unique indexes the fake must know (loaded before seeding)
-for (const m of ["User", "Offer", "PromoCode", "Reward", "RewardRedemption", "EngagementProfile", "PointsLedger", "RedemptionGuard", "Job", "JobApplication", "Notification", "University"]) reqS(`./models/${m}`);
+for (const m of ["User", "Offer", "PromoCode", "Reward", "RewardRedemption", "EngagementProfile", "PointsLedger", "RedemptionGuard", "Job", "JobApplication", "Notification", "University", "PendingScan", "DomainEvent"]) reqS(`./models/${m}`);
 
 // ---------- app + leak scanner ----------
 const HIDDEN = ["password", "webhookSecret", "wooConsumerKey", "wooConsumerSecret", "shopifyAccessToken", "pushTokens", "idCardFront", "idCardBack", "livePicture"];

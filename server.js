@@ -1,3 +1,8 @@
+// First: everything written to the logs is redacted (e-mails, phones, tokens, connection strings) and
+// lines inside a request carry its id (utils/logSafety.js)
+const logSafety = require("./utils/logSafety");
+logSafety.install();
+
 const express = require("express");
 const cors = require("cors");
 require("dotenv").config();
@@ -18,6 +23,9 @@ const connectDB = require("./config/db");
 
 const app = express();
 const server = http.createServer(app);
+
+// every request gets an id: X-Request-Id response header, and [rid:<id>] on its log lines
+app.use(logSafety.requestId());
 
 const io = new Server(server, {
   cors: { origin: "*" }
@@ -57,60 +65,76 @@ app.use("/assets/dots",
 );
 
 // ---------------- DATABASE ----------------
+// Background jobs: each one can be switched off with JOB_<NAME>=off, all with BACKGROUND_JOBS=off, and
+// in staging all are off unless switched on by name (config/featureFlags.js)
+const { jobEnabled, describeJobs } = require("./config/featureFlags");
+
 connectDB().then(() => {
-  // Initialize Automated Event Ingestion Scheduler
-  const eventScheduler = require("./services/events/scheduler");
-  eventScheduler.initialize();
+  console.log(describeJobs());
+
+  // Automated event ingestion (hourly, plus a pass 10s after start)
+  if (jobEnabled("eventIngestion")) {
+    const eventScheduler = require("./services/events/scheduler");
+    eventScheduler.initialize();
+  }
 
   // social pushes (new posts / confessions / listings): sends the groups that are due, every minute
-  require("./services/socialPush").startScheduler();
+  if (jobEnabled("socialPush")) {
+    require("./services/socialPush").startScheduler();
+  }
 
-  // Imported jobs outside Pakistan leave the feed: archived (hidden, kept), never deleted, and never a
-  // job an employer posted (only isExternal imports with no postedBy). Applications stay with the job.
-  const Job = require("./models/Job");
-  const { archiveForeignImportedJobs } = require("./services/jobArchive");
-  archiveForeignImportedJobs().then((r) => {
-    console.log(`🧹 [Startup] Archived ${r.archived} imported jobs outside Pakistan (${r.checked} imported jobs checked; employer jobs are never touched).`);
-  }).catch(err => {
-    console.error("❌ [Startup] Failed to purge non-Pakistan jobs:", err);
-  });
-
-  // Patch existing admin/manual jobs to ensure flags exist
-  Job.updateMany({ isExternal: { $exists: false } }, { $set: { isExternal: false } }).exec();
-  Job.updateMany({ active: { $exists: false } }, { $set: { active: true } }).exec();
-  Job.updateMany(
-    { applicationDeadline: { $exists: false } },
-    { $set: { applicationDeadline: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000) } }
-  ).exec();
-
-  const jobIngestionService = require("./services/jobIngestionService");
-  jobIngestionService.cleanupExpiredJobs().then(count => {
-    if (count > 0) console.log(`⏰ [Startup] Cleaned up ${count} expired jobs.`);
-  }).catch(err => {
-    console.error("❌ [Startup] Failed to run expired jobs cleanup:", err);
-  });
-
-  // Schedule periodic cleanup every 6 hours
-  setInterval(() => {
-    jobIngestionService.cleanupExpiredJobs().catch(err => {
-      console.error("❌ [Periodic] Expired jobs cleanup failed:", err);
+  if (jobEnabled("jobCleanup")) {
+    // Imported jobs outside Pakistan leave the feed: archived (hidden, kept), never deleted, and never a
+    // job an employer posted (only isExternal imports with no postedBy). Applications stay with the job.
+    const Job = require("./models/Job");
+    const { archiveForeignImportedJobs } = require("./services/jobArchive");
+    archiveForeignImportedJobs().then((r) => {
+      console.log(`🧹 [Startup] Archived ${r.archived} imported jobs outside Pakistan (${r.checked} imported jobs checked; employer jobs are never touched).`);
+    }).catch(err => {
+      console.error("❌ [Startup] Failed to purge non-Pakistan jobs:", err);
     });
-  }, 6 * 60 * 60 * 1000);
 
+    // Patch existing admin/manual jobs to ensure flags exist
+    Job.updateMany({ isExternal: { $exists: false } }, { $set: { isExternal: false } }).exec();
+    Job.updateMany({ active: { $exists: false } }, { $set: { active: true } }).exec();
+    Job.updateMany(
+      { applicationDeadline: { $exists: false } },
+      { $set: { applicationDeadline: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000) } }
+    ).exec();
+
+    const jobIngestionService = require("./services/jobIngestionService");
+    jobIngestionService.cleanupExpiredJobs().then(count => {
+      if (count > 0) console.log(`⏰ [Startup] Cleaned up ${count} expired jobs.`);
+    }).catch(err => {
+      console.error("❌ [Startup] Failed to run expired jobs cleanup:", err);
+    });
+
+    // Schedule periodic cleanup every 6 hours
+    setInterval(() => {
+      jobIngestionService.cleanupExpiredJobs().catch(err => {
+        console.error("❌ [Periodic] Expired jobs cleanup failed:", err);
+      });
+    }, 6 * 60 * 60 * 1000);
+  }
+
+  // the chat database is connected either way (chat routes need it); its schedulers are switches
   const { connectDB: connectChatDB } = require("./chat-service/dist/config/db");
-  const { schedulerService } = require("./chat-service/dist/services/scheduler.service");
   connectChatDB().then(() => {
-    // Initialize engagement scheduler (drops, streaks, rollover)
-const engagementScheduler = require('./services/engagement/schedular');
-engagementScheduler.start();
-    schedulerService.initialize().catch((err) => {
-      console.error("❌ Failed to initialize sync scheduler:", err);
-    });
+    // Engagement scheduler (drops, streaks, rollover)
+    if (jobEnabled("engagementScheduler")) {
+      const engagementScheduler = require('./services/engagement/schedular');
+      engagementScheduler.start();
+    }
+    if (jobEnabled("chatSync")) {
+      const { schedulerService } = require("./chat-service/dist/services/scheduler.service");
+      schedulerService.initialize().catch((err) => {
+        console.error("❌ Failed to initialize sync scheduler:", err);
+      });
+    }
   }).catch((err) => {
     console.error("❌ Failed to connect to chat database:", err);
   });
 });
-
 
 // ==================== SHOPIFY WEBHOOKS ====================
 
