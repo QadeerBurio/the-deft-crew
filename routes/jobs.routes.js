@@ -677,65 +677,7 @@ router.get("/job/:jobId/applications", authMiddleware, async (req, res) => {
     }
 });
 
-// Update application status
-router.patch("/application/:id/status", authMiddleware, async (req, res) => {
-    try {
-        const { status, notes, interviewDate, interviewNotes, rating } = req.body;
-        const application = await JobApplication.findById(req.params.id).populate('jobId');
-        
-        if (!application) return res.status(404).json({ message: "Application not found" });
-        
-        const job = await Job.findById(application.jobId._id);
-        if (req.user.role !== "admin" && job.postedBy.toString() !== req.userId) {
-            return res.status(403).json({ message: "Only the job poster can update application status" });
-        }
-        
-        application.status = status;
-        if (notes) application.notes = notes;
-        if (interviewDate) application.interviewDate = new Date(interviewDate);
-        if (interviewNotes) application.interviewNotes = interviewNotes;
-        if (rating) application.rating = rating;
-        application.reviewedAt = Date.now();
-        application.lastUpdated = Date.now();
-        
-        await application.save();
-        
-        let statusMessage = "";
-        let icon = "information-circle";
-        switch(status) {
-            case "shortlisted":
-                statusMessage = "Congratulations! You've been shortlisted. We'll contact you soon for an interview.";
-                icon = "trophy";
-                break;
-            case "interview":
-                statusMessage = `Interview scheduled for ${new Date(interviewDate).toLocaleDateString()}. ${interviewNotes || "Please check your email for details."}`;
-                icon = "calendar";
-                break;
-            case "rejected":
-                statusMessage = "Thank you for your interest. We've decided to move forward with other candidates.";
-                icon = "alert-circle";
-                break;
-            case "hired":
-                statusMessage = "Congratulations! Welcome to the team! HR will contact you with onboarding details.";
-                icon = "checkmark-circle";
-                break;
-            default:
-                statusMessage = `Your application status has been updated to ${status}`;
-        }
-        
-        await Notification.create({
-            recipient: application.userId,
-            title: `Application Update - ${application.jobId.title}`,
-            description: statusMessage,
-            type: "Application Status",
-            icon: icon
-        });
-        
-        res.json({ message: "Application status updated", application });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
+// (PATCH /application/:id/status is defined once, above)
 
 // ==================== INTERVIEW MANAGEMENT ROUTES ====================
 
