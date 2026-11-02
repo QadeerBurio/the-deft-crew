@@ -1,6 +1,7 @@
 // routes/brands.js - VERIFY THIS IS CORRECT
 const express = require("express");
 const Offer = require("../models/Offer");
+const mongoose = require("mongoose");
 const User = require("../models/User");
 const Branch = require("../models/Branch");
 const auth = require("../middleware/auth.middleware");
@@ -325,6 +326,11 @@ router.get("/:brandId", auth, async (req, res) => {
 // ==========================================
 router.get("/:brandId/offers/details", auth, async (req, res) => {
   try {
+    // it lists the students who claimed (name, e-mail, roll number): the brand itself or an admin only
+    if (String(req.params.brandId) !== String(req.userId)) {
+      const requester = mongoose.Types.ObjectId.isValid(String(req.userId)) ? await User.findById(req.userId).select("role").lean() : null;
+      if (requester?.role !== "admin") return res.status(403).json({ success: false, message: "Not allowed" });
+    }
     const brand = await User.findOne({ 
       _id: req.params.brandId,
       role: "brand"

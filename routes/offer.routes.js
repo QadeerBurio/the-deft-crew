@@ -275,10 +275,10 @@ router.post("/unclaim/:offerId", auth, async (req, res) => {
 // REDEEM: Finalize payment and remove from active claims
 router.post('/redeem-payment', auth, async (req, res) => {
   try {
-    // B7: only brand / employee / admin can call this
+    // only the brand that owns the offer (or an admin) can record a redemption on it
     const requester = await User.findById(req.userId).select('role').lean();
-    if (!requester || !['brand', 'employee', 'admin'].includes(requester.role)) {
-      return res.status(403).json({ message: 'Only the scanner side can redeem' });
+    if (!requester || !['brand', 'admin'].includes(requester.role)) {
+      return res.status(403).json({ message: 'Only the brand can redeem' });
     }
 
     const { offerId, userId, billAmount } = req.body;
@@ -288,6 +288,9 @@ router.post('/redeem-payment', auth, async (req, res) => {
 
     const offer = await Offer.findById(offerId);
     if (!offer) return res.status(404).json({ message: 'Offer not found' });
+    if (requester.role !== 'admin' && String(offer.brand) !== String(req.userId)) {
+      return res.status(403).json({ message: 'This offer belongs to another brand' });
+    }
 
     // Server computes the saved amount (B7)
     const discount = Number(offer.discountPercentage) || 0;
@@ -817,23 +820,35 @@ router.get("/images/all", auth, async (req, res) => {
 // POST - Student scans QR and sends data
 router.post("/scan-verify", auth, async (req, res) => {
   try {
-    const { studentId, name, rollNo, university, email, offerId, offerTitle, discountPercentage, brandId, brandName } = req.body;
-    
-    if (!studentId || !name || !offerId) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Missing required student information" 
-      });
+    // The student is whoever is signed in: their details come from their own account, never from the
+    // request body, and the brand comes from the offer (a student can't queue a scan for someone else).
+    if (req.isGuest || !mongoose.Types.ObjectId.isValid(String(req.userId))) {
+      return res.status(401).json({ success: false, message: "Sign in to use this discount" });
     }
-    
+    const { offerId } = req.body;
+    if (!offerId || !mongoose.Types.ObjectId.isValid(String(offerId))) {
+      return res.status(400).json({ success: false, message: "Missing required student information" });
+    }
+    const me = await User.findById(req.userId).select("name rollNo email university role").populate("university", "name").lean();
+    if (!me || me.role !== "student") {
+      return res.status(403).json({ success: false, message: "Only students can scan a discount" });
+    }
+
     const offer = await Offer.findById(offerId);
     if (!offer) {
-      return res.status(404).json({ 
-        success: false, 
-        message: "Offer not found" 
-      });
+      return res.status(404).json({ success: false, message: "Offer not found" });
     }
-    
+    const brandDoc = await User.findById(offer.brand).select("brandName name").lean();
+    const studentId = String(me._id);
+    const name = me.name;
+    const rollNo = me.rollNo;
+    const email = me.email;
+    const university = me.university;
+    const brandId = String(offer.brand);
+    const brandName = brandDoc?.brandName || brandDoc?.name;
+    const offerTitle = offer.title;
+    const discountPercentage = offer.discountPercentage;
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     
@@ -956,6 +971,12 @@ router.get("/pending-scans", auth, async (req, res) => {
 router.post("/scan-processed", auth, async (req, res) => {
   try {
     const { studentId } = req.body;
+    // only the brand the scan was made for (or an admin) can close it
+    const requester = await User.findById(req.userId).select("role").lean();
+    if (!requester || !["brand", "admin"].includes(requester.role)) {
+      return res.status(403).json({ success: false, message: "Only the brand can close a scan" });
+    }
+    const mine = (scan) => requester.role === "admin" || scan.brandId === String(req.userId);
     
     if (!studentId) {
       return res.status(400).json({ success: false, message: "Student ID required" });
@@ -963,7 +984,7 @@ router.post("/scan-processed", auth, async (req, res) => {
     
     let found = false;
     for (let i = 0; i < pendingScans.length; i++) {
-      if (pendingScans[i].studentId === studentId && pendingScans[i].status === 'pending') {
+      if (pendingScans[i].studentId === String(studentId) && pendingScans[i].status === 'pending' && mine(pendingScans[i])) {
         pendingScans[i].status = 'processed';
         processedScans.add(studentId);
         found = true;
@@ -1020,6 +1041,11 @@ router.get("/can-scan/:offerId", auth, async (req, res) => {
 // GET - Get a specific student by ID
 router.get("/student/:studentId", auth, async (req, res) => {
   try {
+    // a student's details: their own, or for an admin
+    if (String(req.params.studentId) !== String(req.userId)) {
+      const requester = mongoose.Types.ObjectId.isValid(String(req.userId)) ? await User.findById(req.userId).select("role").lean() : null;
+      if (requester?.role !== "admin") return res.status(403).json({ message: "Not allowed" });
+    }
     const user = await User.findById(req.params.studentId)
       .select('name email rollNo university')
       .populate('university', 'name')
