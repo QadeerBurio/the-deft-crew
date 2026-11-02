@@ -3,6 +3,7 @@ const mongoose = require("mongoose");
 const multer = require("multer");
 const Offer = require("../models/Offer");
 const User = require("../models/User");
+const RedemptionGuard = require("../models/RedemptionGuard");
 const auth = require("../middleware/auth.middleware");
 const Notification = require("../models/Notification");
 const Slider = require("../models/Slider");
@@ -285,6 +286,9 @@ router.post('/redeem-payment', auth, async (req, res) => {
     if (!offerId || !userId || !billAmount) {
       return res.status(400).json({ message: 'Missing required fields' });
     }
+    if (!mongoose.Types.ObjectId.isValid(String(offerId)) || !mongoose.Types.ObjectId.isValid(String(userId))) {
+      return res.status(400).json({ message: 'Invalid offer or student' });
+    }
 
     const offer = await Offer.findById(offerId);
     if (!offer) return res.status(404).json({ message: 'Offer not found' });
@@ -306,29 +310,37 @@ router.post('/redeem-payment', auth, async (req, res) => {
       return r.student.toString() === userId && k === today;
     });
 
+    const capMessage = 'You have already used this discount 2 times today. Please try again tomorrow.';
     if (todayRedemptions.length >= 2) {
-      return res.status(400).json({
-        message: 'You have already used this discount 2 times today. Please try again tomorrow.',
-      });
+      return res.status(400).json({ message: capMessage });
+    }
+    // The 2-a-day cap, taken atomically: two simultaneous scans can't both pass it
+    const capKey = `pay:${userId}:${offer._id}:${today}`;
+    const gotSlot = await RedemptionGuard.takeSlot(capKey, 2, todayRedemptions.length, new Date(Date.now() + 3 * 24 * 60 * 60 * 1000));
+    if (!gotSlot) {
+      return res.status(400).json({ message: capMessage });
     }
 
-    offer.redemptions.push({
-      student: userId,
-      billAmount: bill,
-      savedAmount: computedSaved,
-      redeemedAt: new Date(),
-    });
-    const redemptionId = offer.redemptions[offer.redemptions.length - 1]?._id;
+    // atomic $push (a read-modify-save could drop a redemption written at the same moment)
+    const redemptionId = new mongoose.Types.ObjectId();
+    let updated;
+    try {
+      updated = await Offer.findByIdAndUpdate(
+        offer._id,
+        { $push: { redemptions: { _id: redemptionId, student: userId, billAmount: bill, savedAmount: computedSaved, redeemedAt: new Date() } } },
+        { new: true }
+      );
+    } catch (err) {
+      await RedemptionGuard.releaseSlot(capKey);
+      throw err;
+    }
 
-    const totalRedemptions = offer.redemptions.filter(
-      (r) => r.student.toString() === userId
+    const totalRedemptions = updated.redemptions.filter(
+      (r) => String(r.student) === String(userId)
     );
     if (totalRedemptions.length >= 2) {
-      offer.claimedBy = offer.claimedBy.filter(
-        (id) => id.toString() !== userId.toString()
-      );
+      await Offer.updateOne({ _id: offer._id }, { $pull: { claimedBy: userId } });
     }
-    await offer.save();
 
     // Redemption changes claimedBy + redemptions → clear every list that shows them
     await clearBrandCaches(offer.brand, userId);
@@ -374,7 +386,7 @@ router.post('/redeem-payment', auth, async (req, res) => {
 
     return res.json({
       message: 'Redemption successful! Voucher used.',
-      offer,
+      offer: updated,
       redemptionsUsed: totalRedemptions.length,
       redemptionsRemaining: 2 - totalRedemptions.length,
       savedAmount: computedSaved,
