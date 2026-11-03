@@ -122,6 +122,11 @@ connectDB().then(() => {
     require("./services/career/careerOutboxJob").start();
   }
 
+  // Surprise Box: expired holds, closed listings, no-shows, pickup reminders, notifications, every minute (FLAG_SURPLUS_BOXES)
+  if (jobEnabled("surplusSweep")) {
+    require("./services/surplus/sweep").start();
+  }
+
   // the chat database is connected either way (chat routes need it); its schedulers are switches
   const { connectDB: connectChatDB } = require("./chat-service/dist/config/db");
   connectChatDB().then(() => {
@@ -272,6 +277,7 @@ app.use('/api/admin/engagement', require('./routes/adminEngagement.routes'));
 app.use('/api/rewards', require('./routes/rewards.routes'));
 app.use('/api/loyalty', require('./routes/loyalty.routes')); // brand loyalty (FLAG_LOYALTY_V2)
 app.use('/api/career', require('./routes/career.routes')); // hiring timeline (FLAG_CAREER_TIMELINE)
+app.use('/api/surplus', require('./routes/surplus.routes')); // Surprise Box (FLAG_SURPLUS_BOXES)
 
 // 🆕 admin crew
 app.use('/api/admin/crew', require('./routes/adminCrew.routes'));
