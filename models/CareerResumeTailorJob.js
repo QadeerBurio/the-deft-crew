@@ -15,6 +15,9 @@ const schema = new mongoose.Schema({
     title: { type: String, default: "" },
     descriptionHash: { type: String, default: "" },
   },
+  // the job's requirements, read once when the request is made (jobRequirements.requirementsFor):
+  // { hash, title, excerpt, requirements, skills, injectionFlags }. Relevance context, never evidence.
+  jobSnapshot: { type: mongoose.Schema.Types.Mixed, default: null },
   status: { type: String, enum: ["queued", "running", "succeeded", "failed"], default: "queued" },
   attempts: { type: Number, default: 0 },
   startedAt: { type: Date, default: null },
