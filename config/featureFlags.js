@@ -25,14 +25,14 @@ const FLAGS = {
   metaEvents: { default: false, client: true, public: true, legacyEnv: "META_EVENTS_ENABLED" },
   // writing DomainEvent records (services/domainEvents.js); off = recordOnce() writes nothing
   domainEvents: { default: true, client: false },
+  // AI Resume Studio (routes/careerResume.routes.js, services/resumeStudio/). Off = the old resume
+  // routes behave exactly as before. The employer needs it too to see an attached snapshot, e.g.
+  // FLAG_RESUME_STUDIO_V2="ids:<test student id>,<test employer id>". Per user only (/api/app/flags/me).
+  resumeStudioV2: { default: false, client: true },
   // Brand loyalty (routes/loyalty.routes.js, services/loyalty.js). A loyalty credit or discount needs it
   // on for BOTH the brand and the student, e.g. FLAG_LOYALTY_V2="ids:<test brand id>,<test student id>".
   // Per user only: listed by /api/app/flags/me, not by the public /api/app/flags.
   loyaltyV2: { default: false, client: true },
-  // AI Resume Studio (routes/careerResume.routes.js, services/resumeStudio/). Off = the old resume
-  // routes behave exactly as before. The employer needs it too to see an attached snapshot, e.g.
-  // FLAG_RESUME_STUDIO_V2="ids:<test student id>,<test employer id>". Per user only, like loyaltyV2.
-  resumeStudioV2: { default: false, client: true },
 };
 
 const JOBS = {

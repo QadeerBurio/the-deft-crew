@@ -247,6 +247,7 @@ app.use("/api/app", require("./routes/appFlags.routes")); // public app switches
 app.use("/api/jobs", require("./routes/jobs.routes"));
 app.use("/api/traveler", require("./routes/traveler.routes"));
 app.use("/api/resume", require("./routes/resume.routes"));
+app.use('/api/career/resume', require('./routes/careerResume.routes')); // AI Resume Studio, before /api/career (FLAG_RESUME_STUDIO_V2)
 app.use("/api/brand-approval", require("./routes/brandApproval.routes"));
 app.use("/api/promo-codes", require("./routes/promoCode.routes"));
 app.use("/api/shopify-app", require("./routes/shopifyApp.routes"));
@@ -265,7 +266,6 @@ app.use('/api/engagement', require('./routes/engagement.routes'));
 app.use('/api/admin/engagement', require('./routes/adminEngagement.routes'));
 app.use('/api/rewards', require('./routes/rewards.routes'));
 app.use('/api/loyalty', require('./routes/loyalty.routes')); // brand loyalty (FLAG_LOYALTY_V2)
-app.use('/api/career/resume', require('./routes/careerResume.routes')); // AI Resume Studio (FLAG_RESUME_STUDIO_V2)
 
 // 🆕 admin crew
 app.use('/api/admin/crew', require('./routes/adminCrew.routes'));
