@@ -42,6 +42,7 @@ const JOBS = {
   engagementScheduler: "engagement/schedular: daily drops, streak reminders, rollover, weekly reset (cron)",
   chatSync: "chat-service scheduler: database sync sweeps",
   pushes: "every Expo push (utils/expoProjects.js); off = nothing reaches a phone",
+  careerOutbox: "career/careerOutboxJob: hiring-timeline notifications (retries, interview reminders), every 5 minutes",
 };
 
 const envName = (prefix, name) => `${prefix}_${name.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toUpperCase()}`;

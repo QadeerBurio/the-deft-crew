@@ -102,8 +102,8 @@ const providers = {
     const gateway = require("../engagement/pushGateway");
     const r = await gateway.send(row.recipient, { type: "job", pref: "jobsScholarships", essential: true, title: row.payload.title, body: row.payload.body, data: row.payload.data });
     if (r?.sent) return { status: "sent" };
-    // quiet hours: try again later; no profile / switched off by the student: nothing to send
-    if (r?.reason === "quiet_hours") return { status: "retry", error: "quiet_hours" };
+    // quiet hours: held back until later (not a failure); no profile / switched off by the student: nothing to send
+    if (r?.reason === "quiet_hours") return { status: "defer", error: "quiet_hours" };
     return { status: "skipped", error: r?.reason || "not sent" };
   },
   async inapp(row) {
@@ -142,7 +142,10 @@ async function deliver(rowId, now = new Date()) {
     ? { status: "sent", sentAt: now, lastError: "" }
     : r.status === "skipped"
       ? { status: "skipped", lastError: String(r.error || "").slice(0, 200) }
-      : { status: "failed", lastError: String(r.error || "").slice(0, 200), nextAttemptAt: new Date(now.getTime() + backoff(row.attempts)) };
+      : r.status === "defer"
+        // held back (quiet hours): try again in 30 minutes; doesn't use up an attempt
+        ? { status: "pending", lastError: String(r.error || ""), nextAttemptAt: new Date(now.getTime() + 30 * MIN), attempts: row.attempts - 1 }
+        : { status: "failed", lastError: String(r.error || "").slice(0, 200), nextAttemptAt: new Date(now.getTime() + backoff(row.attempts)) };
   await CareerNotificationOutbox.updateOne({ _id: row._id }, { $set: update });
   return { ...row, ...update };
 }

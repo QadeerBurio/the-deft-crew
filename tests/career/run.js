@@ -517,6 +517,48 @@ const applyBody = (who) => ({ fullName: `${who} full name`, email: `${who}@test.
   r = await call("GET", `/api/career/admin/analytics?from=${encodeURIComponent(new Date(Date.now() + 864e5).toISOString())}`, { tok: T.admin });
   check("a range in the future: nothing counted", r.status === 200 && r.json.data.counts.applications === 0);
 
+  console.log("── 15. the outbox job (JOB_CAREER_OUTBOX)");
+  const flagsMod = reqS("./config/featureFlags");
+  const withEnv = (vars, fn) => { const old = {}; for (const [k, v] of Object.entries(vars)) { old[k] = process.env[k]; if (v == null) delete process.env[k]; else process.env[k] = v; } try { return fn(); } finally { for (const [k, v] of Object.entries(old)) { if (v == null) delete process.env[k]; else process.env[k] = v; } } };
+  check("production: on by default", flagsMod.jobEnabled("careerOutbox") === true);
+  check("staging: off (APP_ENV or Railway's environment name)", withEnv({ APP_ENV: "staging" }, () => !flagsMod.jobEnabled("careerOutbox")) && withEnv({ RAILWAY_ENVIRONMENT_NAME: "staging" }, () => !flagsMod.jobEnabled("careerOutbox")));
+  check("staging + JOB_CAREER_OUTBOX=on: on; production + BACKGROUND_JOBS=off: off", withEnv({ APP_ENV: "staging", JOB_CAREER_OUTBOX: "on" }, () => flagsMod.jobEnabled("careerOutbox")) && withEnv({ BACKGROUND_JOBS: "off" }, () => !flagsMod.jobEnabled("careerOutbox")));
+  const serverSrc = require("fs").readFileSync(path.join(SERVER, "server.js"), "utf8").replace(/\r\n/g, "\n");
+  check("server.js starts it only behind its switch", /if \(jobEnabled\("careerOutbox"\)\) \{\n\s+require\("\.\/services\/career\/careerOutboxJob"\)\.start\(\);/.test(serverSrc));
+  const job7 = reqS("./services/career/careerOutboxJob");
+  const gateway = reqS("./services/engagement/pushGateway");
+  const realSend = gateway.send;
+  const realInapp2 = notif.providers.inapp;
+  ids.J7 = oid();
+  fake.seed(coll("Job"), [job(ids.J7, ids.E1, "QA engineer")]);
+  await call("POST", `/api/jobs/apply/${ids.J7}`, { tok: T.S1, body: applyBody("S1") });
+  ctx.A7 = rows("JobApplication", (a) => same(a.userId, ids.S1) && same(a.jobId, ids.J7))[0]._id;
+  let failNext = true;
+  notif.providers.inapp = async (row) => { if (failNext) { failNext = false; throw new Error("provider down"); } return realInapp2(row); };
+  gateway.send = async () => ({ sent: false, reason: "quiet_hours" });
+  r = await call("POST", `/api/career/applications/${ctx.A7}/events`, { tok: T.E1, body: { type: "SHORTLISTED", version: 1 } });
+  const shortEv = events(ctx.A7).find((e) => e.type === "SHORTLISTED");
+  const rowOf = (ch) => outbox((o) => same(o.event, shortEv._id) && o.channel === ch)[0];
+  check("shortlisted: in-app failed (attempt 1), push held back by quiet hours (pending, no attempt used)", r.status === 201 && rowOf("inapp").status === "failed" && rowOf("inapp").attempts === 1 && rowOf("push").status === "pending" && rowOf("push").attempts === 0 && rowOf("push").lastError === "quiet_hours", `${rowOf("inapp")?.status}/${rowOf("inapp")?.attempts} ${rowOf("push")?.status}/${rowOf("push")?.attempts}`);
+  const evCount = rows("CareerApplicationEvent").length;
+  let out = await job7.tick(new Date());
+  check("a tick right away: nothing due yet (backoff), nothing re-sent", rowOf("inapp").status === "failed" && rowOf("inapp").attempts === 1, JSON.stringify(out));
+  for (let i = 1; i <= 8; i++) await job7.tick(new Date(Date.now() + i * 31 * 60e3)); // 4 hours of quiet-hours ticks
+  check("quiet hours all night: the push keeps waiting without using up its attempts", rowOf("push").status === "pending" && rowOf("push").attempts === 0, `${rowOf("push").status}/${rowOf("push").attempts}`);
+  check("…meanwhile the failed in-app row was retried by the job and delivered (attempt 2)", rowOf("inapp").status === "sent" && rowOf("inapp").attempts === 2);
+  gateway.send = async () => ({ sent: true });
+  out = await job7.tick(new Date(Date.now() + 5 * 3600e3));
+  check("quiet hours over: the next tick delivers the push", rowOf("push").status === "sent", JSON.stringify(out));
+  check("…and no timeline event was written by any of it", rows("CareerApplicationEvent").length === evCount && events(ctx.A7).filter((e) => e.type === "SHORTLISTED").length === 1);
+  check("…exactly one in-app notification for the shortlist", rows("Notification", (n) => n.metadata?.careerOutboxId === String(rowOf("inapp")._id)).length === 1);
+  const both = await Promise.all([job7.tick(new Date(Date.now() + 6 * 3600e3)), job7.tick(new Date(Date.now() + 6 * 3600e3))]);
+  check("two ticks at the same moment: the second one stands aside", both.some((x) => x.skipped === "already running"), JSON.stringify(both));
+  const t1 = job7.start({ intervalMs: 60 * 60e3 });
+  const t2 = job7.start({ intervalMs: 60 * 60e3 });
+  check("start() runs one timer (a second start reuses it); stop() clears it", t1 === t2 && (job7.stop(), true));
+  gateway.send = realSend;
+  notif.providers.inapp = realInapp2;
+
   // @@MORE@@
 
   // ---------- leak scan ----------

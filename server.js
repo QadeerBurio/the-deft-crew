@@ -117,6 +117,11 @@ connectDB().then(() => {
     }, 6 * 60 * 60 * 1000);
   }
 
+  // hiring-timeline notifications: retries and interview reminders every 5 minutes (FLAG_CAREER_TIMELINE)
+  if (jobEnabled("careerOutbox")) {
+    require("./services/career/careerOutboxJob").start();
+  }
+
   // the chat database is connected either way (chat routes need it); its schedulers are switches
   const { connectDB: connectChatDB } = require("./chat-service/dist/config/db");
   connectChatDB().then(() => {
