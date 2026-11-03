@@ -110,9 +110,9 @@ const RULES = {
   // completed needs the candidate's acceptance and the slot to have started; the employer records it
   INTERVIEW_COMPLETED: { roles: ["employer"], ok: (s, now) => s.stage === "interview" && s.interview.status === "accepted" && started(s, now), internal: true },
   CANDIDATE_NO_SHOW_REPORTED: { roles: ["employer"], ok: (s, now) => s.stage === "interview" && s.interview.status === "accepted" && started(s, now), internal: true },
-  EMPLOYER_NO_SHOW_REPORTED: { roles: ["candidate"], ok: (s, now) => s.stage === "interview" && s.interview.status === "accepted" && started(s, now) },
+  EMPLOYER_NO_SHOW_REPORTED: { roles: ["candidate"], ok: (s, now) => s.stage === "interview" && s.interview.status === "accepted" && started(s, now), internal: true },
   // the candidate disputes a recorded completion or a no-show report (never auto-penalised)
-  INTERVIEW_DISPUTED: { roles: ["candidate"], ok: (s) => ["completed", "candidate_no_show_reported"].includes(s.interview.status) && s.stage !== "withdrawn" },
+  INTERVIEW_DISPUTED: { roles: ["candidate"], ok: (s) => ["completed", "candidate_no_show_reported"].includes(s.interview.status) && s.stage !== "withdrawn", internal: true },
   OFFER_SENT: { roles: ["employer"], ok: (s) => ["shortlisted", "interview", "offer"].includes(s.stage) && OPEN_OFFER.has(s.offer.status), internal: true },
   OFFER_WITHDRAWN: { roles: ["employer"], ok: (s) => s.stage === "offer" && s.offer.status === "sent", internal: true },
   OFFER_ACCEPTED: { roles: ["candidate"], ok: (s) => s.stage === "offer" && s.offer.status === "sent", internal: true },

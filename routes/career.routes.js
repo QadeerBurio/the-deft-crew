@@ -7,6 +7,12 @@
 //   POST /applications/:id/events          { type, version, note, internalNote } — review, shortlist, reject,
 //                                          withdraw, disputes, no-show reports; interviews / offers have routes
 //   GET  /employers/me/applications        employer: applicants of my jobs, by stage (Kanban)
+//   POST /interviews                       employer: { applicationId, version, startsAt, durationMinutes,
+//                                          timezone (Asia/Karachi), mode, meetingLink | location, note }
+//   POST /interviews/:id/reschedule|cancel employer
+//   POST /interviews/:id/respond           candidate: accept | decline | reschedule | employer_no_show | dispute
+//   POST /interviews/:id/complete          employer: completed | candidate_no_show
+//   GET  /interviews/:id, /interviews/:id/ics   either side (.ics: stable UID, SEQUENCE per change)
 const express = require("express");
 const auth = require("../middleware/auth.middleware");
 const User = require("../models/User");
@@ -14,6 +20,7 @@ const Job = require("../models/Job");
 const JobApplication = require("../models/JobApplication");
 const CareerApplicationEvent = require("../models/CareerApplicationEvent");
 const timeline = require("../services/career/careerTimelineService");
+const interviews = require("../services/career/careerInterviewService");
 
 const router = express.Router();
 const { CareerError, isId } = timeline;
@@ -84,7 +91,8 @@ router.get("/applications/me", auth, role("student"), handle(async (req, res) =>
 
 router.get("/applications/:id/timeline", auth, handle(async (req, res) => {
   const ctx = await timeline.contextFor(req.params.id, req.userId);
-  ok(req, res, await timeline.timeline(ctx));
+  const t = await timeline.timeline(ctx);
+  ok(req, res, { ...t, interviewDetails: ctx.external ? null : await interviews.latestFor(ctx.app._id) });
 }));
 
 router.post("/applications/:id/events", auth, handle(async (req, res) => {
@@ -139,6 +147,32 @@ router.get("/employers/me/applications", auth, role("employee", "admin"), handle
       };
     }),
   });
+}));
+
+// ---------- interviews ----------
+const ivReply = (req, res) => (out) => ok(req, res, out, out.duplicate ? 200 : 201);
+
+router.post("/interviews", auth, handle(async (req, res) => {
+  const ctx = await timeline.contextFor(req.body?.applicationId, req.userId);
+  ivReply(req, res)(await interviews.schedule(ctx, req.body || {}, idemKey(req)));
+}));
+router.post("/interviews/:id/reschedule", auth, handle(async (req, res) => ivReply(req, res)(await interviews.reschedule(req.params.id, req.userId, req.body || {}, idemKey(req)))));
+router.post("/interviews/:id/cancel", auth, handle(async (req, res) => ivReply(req, res)(await interviews.cancel(req.params.id, req.userId, req.body || {}, idemKey(req)))));
+router.post("/interviews/:id/respond", auth, handle(async (req, res) => ivReply(req, res)(await interviews.respond(req.params.id, req.userId, req.body || {}, idemKey(req)))));
+router.post("/interviews/:id/complete", auth, handle(async (req, res) => ivReply(req, res)(await interviews.complete(req.params.id, req.userId, req.body || {}, idemKey(req)))));
+
+router.get("/interviews/:id", auth, handle(async (req, res) => {
+  const { iv } = await interviews.load(req.params.id, req.userId);
+  ok(req, res, interviews.view(iv));
+}));
+
+// the calendar file (Add to calendar); the same UID every time, a higher SEQUENCE after each change
+router.get("/interviews/:id/ics", auth, handle(async (req, res) => {
+  const { iv, ctx } = await interviews.load(req.params.id, req.userId);
+  res.set("Content-Type", "text/calendar; charset=utf-8");
+  res.set("Content-Disposition", `attachment; filename="interview-${iv._id}.ics"`);
+  res.set("Cache-Control", "private, no-store");
+  res.send(interviews.ics(iv, { jobTitle: ctx.job?.title, company: ctx.job?.companyName }));
 }));
 
 module.exports = router;

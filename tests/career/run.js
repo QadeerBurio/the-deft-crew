@@ -293,6 +293,68 @@ const applyBody = (who) => ({ fullName: `${who} full name`, email: `${who}@test.
   r = await call("POST", `/api/career/applications/${ctx.A1}/events`, { tok: T.S1, body: { type: "WITHDRAWN", version: 4 } });
   check("a rejected application can't be withdrawn (closed): 409", r.status === 409 && r.json?.error?.code === "INVALID_TRANSITION", r.text);
 
+  console.log("── 9. interviews: scheduled is not completed");
+  await call("POST", `/api/jobs/apply/${ids.J3}`, { tok: T.S2, body: applyBody("S2") });
+  await call("POST", `/api/jobs/apply/${ids.J3}`, { tok: T.S1, body: applyBody("S1") });
+  ctx.A2 = rows("JobApplication", (a) => same(a.userId, ids.S2) && same(a.jobId, ids.J3))[0]._id;
+  ctx.A3 = rows("JobApplication", (a) => same(a.userId, ids.S1) && same(a.jobId, ids.J3))[0]._id;
+  const ver = async (id, tok = T.E1) => (await call("GET", `/api/career/applications/${id}/timeline`, { tok })).json.data.version;
+  r = await call("POST", `/api/career/applications/${ctx.A2}/events`, { tok: T.E1, body: { type: "SHORTLISTED", version: 1 } });
+  check("A2 shortlisted", r.status === 201, r.text.slice(0, 120));
+  const inHours = (h) => new Date(Date.now() + h * 3600e3).toISOString();
+  const slot = { startsAt: inHours(48), durationMinutes: 45, timezone: "Asia/Karachi", mode: "online", meetingLink: "https://meet.example.test/abc", note: "bring your portfolio" };
+  r = await call("POST", "/api/career/interviews", { tok: T.S2, body: { applicationId: String(ctx.A2), version: 2, ...slot } });
+  check("a candidate can't schedule (403)", r.status === 403, r.status);
+  r = await call("POST", "/api/career/interviews", { tok: T.E2, body: { applicationId: String(ctx.A2), version: 2, ...slot } });
+  check("employer B can't schedule for employer A's applicant (404)", r.status === 404, r.status);
+  r = await call("POST", "/api/career/interviews", { tok: T.E1, body: { applicationId: String(ctx.A2), version: 2, ...slot, startsAt: inHours(-1) } });
+  check("a time in the past → 400", r.status === 400 && r.json?.error?.code === "INVALID_TIME", r.text);
+  r = await call("POST", "/api/career/interviews", { tok: T.E1, body: { applicationId: String(ctx.A2), version: 2, ...slot, meetingLink: "" } });
+  check("online without a meeting link → 400", r.status === 400 && r.json?.error?.code === "LINK_REQUIRED", r.text);
+  rs = await Promise.all([1, 2].map(() => call("POST", "/api/career/interviews", { tok: T.E1, body: { applicationId: String(ctx.A2), version: 2, ...slot }, headers: { "idempotency-key": "iv-a2-1" } })));
+  const ivs = () => rows("CareerInterview", (i) => same(i.application, ctx.A2));
+  check("schedule sent twice with the same key → one interview, one INTERVIEW_INVITED", ivs().length === 1 && events(ctx.A2).filter((e) => e.type === "INTERVIEW_INVITED").length === 1 && rs.every((x) => x.status === 201 || x.status === 200), statuses(rs));
+  const iv = ivs()[0];
+  check("…the meeting link is saved (it was dropped before), old status 'interview', old interviewDate set", iv.meetingLink === slot.meetingLink && appDoc(ctx.A2).status === "interview" && new Date(appDoc(ctx.A2).interviewDate).toISOString() === new Date(slot.startsAt).toISOString());
+  r = await call("GET", `/api/career/interviews/${iv._id}/ics`, { tok: T.S2 });
+  check(".ics: text/calendar, stable UID, SEQUENCE:0, REQUEST, UTC times, link", r.status === 200 && /text\/calendar/.test(r.headers["content-type"]) && r.text.includes(`UID:career-interview-${iv._id}@thedeftcrew.com`) && r.text.includes("SEQUENCE:0") && r.text.includes("METHOD:REQUEST") && /DTSTART:\d{8}T\d{6}Z/.test(r.text) && r.text.includes("https://meet.example.test/abc") && r.text.includes("\r\n"), r.text.slice(0, 200));
+  r = await call("GET", `/api/career/interviews/${iv._id}/ics`, { tok: T.E2 });
+  check(".ics for someone else's interview → 404", r.status === 404, r.status);
+  r = await call("POST", `/api/career/applications/${ctx.A3}/events`, { tok: T.E1, body: { type: "SHORTLISTED", version: 1 } });
+  r = await call("POST", "/api/career/interviews", { tok: T.E1, body: { applicationId: String(ctx.A3), version: 2, ...slot, startsAt: new Date(new Date(slot.startsAt).getTime() + 15 * 60e3).toISOString() } });
+  check("another interview overlapping the same employer's slot → 409 SLOT_CONFLICT", r.status === 409 && r.json?.error?.code === "SLOT_CONFLICT", r.text);
+  r = await call("POST", `/api/career/interviews/${iv._id}/reschedule`, { tok: T.E1, body: { version: await ver(ctx.A2), ...slot, startsAt: inHours(72) } });
+  check("reschedule → 201; history kept; sequence 1", r.status === 201 && ivs()[0].calendarSequence === 1 && ivs()[0].history.length === 1, r.text.slice(0, 160));
+  r = await call("GET", `/api/career/interviews/${iv._id}/ics`, { tok: T.S2 });
+  check("…the new .ics: same UID, SEQUENCE:1 (replaces the old slot)", r.text.includes(`UID:career-interview-${iv._id}@thedeftcrew.com`) && r.text.includes("SEQUENCE:1"), r.text.slice(0, 120));
+  r = await call("POST", `/api/career/interviews/${iv._id}/respond`, { tok: T.E1, body: { version: await ver(ctx.A2), response: "accept" } });
+  check("the employer can't answer for the candidate (403)", r.status === 403, r.status);
+  r = await call("POST", `/api/career/interviews/${iv._id}/respond`, { tok: T.S2, body: { version: await ver(ctx.A2, T.S2), response: "accept" } });
+  check("the candidate accepts → 201, interview accepted, .ics CONFIRMED", r.status === 201 && ivs()[0].status === "accepted" && (await call("GET", `/api/career/interviews/${iv._id}/ics`, { tok: T.S2 })).text.includes("STATUS:CONFIRMED"), r.text.slice(0, 160));
+  r = await call("POST", `/api/career/interviews/${iv._id}/complete`, { tok: T.E1, body: { version: await ver(ctx.A2) } });
+  check("recording 'completed' before the interview starts → 409 (scheduled ≠ completed)", r.status === 409 && r.json?.error?.code === "INVALID_TRANSITION" && !events(ctx.A2).some((e) => e.type === "INTERVIEW_COMPLETED"), r.text);
+  // the interview time comes: move the slot into the past
+  const past = new Date(Date.now() - 2 * 3600e3);
+  for (const e of events(ctx.A2)) if (e.metadata?.startsAt) e.metadata.startsAt = past;
+  ivs()[0].startsAt = past; ivs()[0].endsAt = new Date(past.getTime() + 45 * 60e3);
+  r = await call("POST", `/api/career/interviews/${iv._id}/complete`, { tok: T.S2, body: { version: await ver(ctx.A2, T.S2) } });
+  check("the candidate can't record it completed (403)", r.status === 403, r.status);
+  r = await call("POST", `/api/career/interviews/${iv._id}/complete`, { tok: T.E1, body: { version: await ver(ctx.A2), note: "thanks for coming", internalNote: "strong" } });
+  check("after it started, the employer records it → completed, stage still interview", r.status === 201 && ivs()[0].status === "completed" && r.json.data.state === "interview", r.text.slice(0, 160));
+  r = await call("POST", `/api/career/interviews/${iv._id}/respond`, { tok: T.S2, body: { version: await ver(ctx.A2, T.S2), response: "dispute" } });
+  check("a dispute without a reason → 400", r.status === 400 && r.json?.error?.code === "REASON_REQUIRED", r.text);
+  r = await call("POST", `/api/career/interviews/${iv._id}/respond`, { tok: T.S2, body: { version: await ver(ctx.A2, T.S2), response: "dispute", message: "the interviewer never joined" } });
+  check("the candidate disputes the recorded completion → 201, interview disputed", r.status === 201 && ivs()[0].status === "disputed" && events(ctx.A2).slice(-1)[0].type === "INTERVIEW_DISPUTED", r.text.slice(0, 160));
+  r = await call("GET", `/api/career/applications/${ctx.A2}/timeline`, { tok: T.S2 });
+  check("timeline: interview details (link, time zone), no internal note for the candidate", r.json.data.interviewDetails?.meetingLink === slot.meetingLink && r.json.data.interviewDetails.timezone === "Asia/Karachi" && !r.text.includes("strong"), r.text.slice(0, 200));
+  r = await call("POST", "/api/career/interviews", { tok: T.E1, body: { applicationId: String(ctx.A3), version: await ver(ctx.A3), ...slot, startsAt: inHours(120) } });
+  const iv3 = rows("CareerInterview", (i) => same(i.application, ctx.A3))[0];
+  check("A3: interview scheduled", r.status === 201 && iv3?.status === "invited", r.text.slice(0, 120));
+  r = await call("POST", `/api/career/applications/${ctx.A3}/events`, { tok: T.S1, body: { type: "WITHDRAWN", version: await ver(ctx.A3, T.S1) } });
+  const iv3b = rows("CareerInterview", (i) => same(i.application, ctx.A3))[0];
+  check("the candidate withdraws → the pending interview is cancelled; its .ics becomes CANCEL", r.status === 201 && iv3b.status === "cancelled" && iv3b.active === false && (await call("GET", `/api/career/interviews/${iv3._id}/ics`, { tok: T.S1 })).text.includes("METHOD:CANCEL"), r.text.slice(0, 120));
+  check("…and the old status shows it closed (rejected; the old enum has no 'withdrawn')", appDoc(ctx.A3).status === "rejected");
+
   // @@MORE@@
 
   // ---------- leak scan ----------
