@@ -29,6 +29,10 @@ const FLAGS = {
   // on for BOTH the brand and the student, e.g. FLAG_LOYALTY_V2="ids:<test brand id>,<test student id>".
   // Per user only: listed by /api/app/flags/me, not by the public /api/app/flags.
   loyaltyV2: { default: false, client: true },
+  // Hiring timeline, interviews, offers, verified hires (routes/career.routes.js, services/career/).
+  // Needs it on for BOTH the job's employer and the candidate, e.g.
+  // FLAG_CAREER_TIMELINE="ids:<employer id>,<student id>". Per user only (/api/app/flags/me).
+  careerTimeline: { default: false, client: true },
 };
 
 const JOBS = {

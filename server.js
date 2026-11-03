@@ -265,6 +265,7 @@ app.use('/api/engagement', require('./routes/engagement.routes'));
 app.use('/api/admin/engagement', require('./routes/adminEngagement.routes'));
 app.use('/api/rewards', require('./routes/rewards.routes'));
 app.use('/api/loyalty', require('./routes/loyalty.routes')); // brand loyalty (FLAG_LOYALTY_V2)
+app.use('/api/career', require('./routes/career.routes')); // hiring timeline (FLAG_CAREER_TIMELINE)
 
 // 🆕 admin crew
 app.use('/api/admin/crew', require('./routes/adminCrew.routes'));

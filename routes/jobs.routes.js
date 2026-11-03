@@ -13,6 +13,7 @@ const { getHybridRecommendations, getSimilarJobs } = require('../services/recomm
 const { analyseSkillGap, validateApplication } = require('../services/skillGapService');
 const { importJobsFromFile } = require("../services/jobs/csvJobImporter");
 const { track } = require('../services/engagement');
+const careerLegacy = require('../services/career/legacyAdapter'); // FLAG_CAREER_TIMELINE pilot
 
 // Configure Multer for Job CSV & XLSX files
 const uploadJobCsvMulter = multer({
@@ -493,6 +494,7 @@ router.post("/apply/:jobId", authMiddleware, uploadResume.single('resume'), asyn
 
         const application = new JobApplication(applicationData);
         await application.save();
+        await careerLegacy.recordApplied(application._id); // FLAG_CAREER_TIMELINE pilot only
         await Job.findByIdAndUpdate(jobId, { $inc: { totalApplications: 1 } });
 
         // Log apply interaction
@@ -566,6 +568,12 @@ router.patch("/application/:id/status", authMiddleware, async (req, res) => {
         const job = await Job.findById(application.jobId._id);
         if (req.user.role !== "admin" && job.postedBy.toString() !== req.userId) {
             return res.status(403).json({ message: "Only the job poster can update application status" });
+        }
+        // FLAG_CAREER_TIMELINE: a pilot application changes through its timeline ("hired" only on a verified hire)
+        if (careerLegacy.managed(job, application)) {
+            const r = await careerLegacy.statusChange({ applicationId: application._id, actorId: req.userId, status, note: notes });
+            if (!r.ok) return res.status(r.status).json({ message: r.message, code: r.code });
+            return res.json({ message: "Application status updated", application: await JobApplication.findById(application._id) });
         }
         
         application.status = status;
@@ -749,6 +757,8 @@ router.post("/interviews/schedule", authMiddleware, async (req, res) => {
         if (req.user.role !== "admin" && job.postedBy.toString() !== req.userId) {
             return res.status(403).json({ message: "You don't have permission to schedule interviews for this job" });
         }
+        // FLAG_CAREER_TIMELINE: pilot applications use the new interview scheduler (/api/career)
+        if (careerLegacy.managed(job, application)) return res.status(409).json(careerLegacy.interviewRefusal);
         
         // Update application with interview details
         application.interviewDate = new Date(interviewDate);
@@ -806,6 +816,8 @@ router.put("/interviews/reschedule/:id", authMiddleware, async (req, res) => {
         if (req.user.role !== "admin" && job.postedBy.toString() !== req.userId) {
             return res.status(403).json({ message: "You don't have permission to reschedule this interview" });
         }
+        // FLAG_CAREER_TIMELINE: pilot applications use the new interview scheduler (/api/career)
+        if (careerLegacy.managed(job, application)) return res.status(409).json(careerLegacy.interviewRefusal);
         
         application.interviewDate = new Date(interviewDate);
         if (interviewNotes) application.interviewNotes = interviewNotes;
@@ -852,6 +864,8 @@ router.delete("/interviews/cancel/:id", authMiddleware, async (req, res) => {
         if (req.user.role !== "admin" && job.postedBy.toString() !== req.userId) {
             return res.status(403).json({ message: "You don't have permission to cancel this interview" });
         }
+        // FLAG_CAREER_TIMELINE: pilot applications use the new interview scheduler (/api/career)
+        if (careerLegacy.managed(job, application)) return res.status(409).json(careerLegacy.interviewRefusal);
         
         const oldInterviewDate = application.interviewDate;
         
@@ -894,6 +908,8 @@ router.patch("/interviews/complete/:id", authMiddleware, async (req, res) => {
         if (req.user.role !== "admin" && job.postedBy.toString() !== req.userId) {
             return res.status(403).json({ message: "You don't have permission to complete this interview" });
         }
+        // FLAG_CAREER_TIMELINE: pilot applications use the new interview scheduler (/api/career)
+        if (careerLegacy.managed(job, application)) return res.status(409).json(careerLegacy.interviewRefusal);
         
         application.interviewNotes = feedback || application.interviewNotes;
         if (rating) application.rating = rating;
@@ -981,17 +997,24 @@ router.patch("/candidates/bulk-status", authMiddleware, async (req, res) => {
         const applications = await JobApplication.find({ _id: { $in: candidateIds } }).populate('jobId');
         
         // Check permissions for each application
+        const pilot = new Set(); // FLAG_CAREER_TIMELINE applications: through their timelines
         for (const app of applications) {
             const job = await Job.findById(app.jobId._id);
             if (req.user.role !== "admin" && job.postedBy.toString() !== req.userId) {
                 return res.status(403).json({ message: `You don't have permission to update candidate ${app.fullName}` });
             }
+            if (careerLegacy.managed(job, app)) pilot.add(String(app._id));
         }
+        for (const id of pilot) {
+            const r = await careerLegacy.statusChange({ applicationId: id, actorId: req.userId, status, note: notes });
+            if (!r.ok) return res.status(r.status).json({ message: r.message, code: r.code });
+        }
+        const others = applications.filter((a) => !pilot.has(String(a._id)));
         
         // Update all applications
         await JobApplication.updateMany(
-            { _id: { $in: candidateIds } },
-            { 
+            { _id: { $in: others.map((a) => a._id) } },
+            {
                 status: status, 
                 notes: notes || "",
                 reviewedAt: Date.now(),
@@ -999,8 +1022,8 @@ router.patch("/candidates/bulk-status", authMiddleware, async (req, res) => {
             }
         );
         
-        // Send notifications to candidates
-        for (const app of applications) {
+        // Send notifications to candidates (pilot ones are notified by the timeline)
+        for (const app of others) {
             let statusMessage = "";
             switch(status) {
                 case "shortlisted":
