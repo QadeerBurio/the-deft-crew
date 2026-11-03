@@ -1,5 +1,15 @@
 const express = require('express');
 const router = express.Router();
+
+// Resume Studio (FLAG_RESUME_STUDIO_V2) students don't see simulated hiring verdicts, HR scorecards or
+// percentile ranks in any /api/resume reply, and get "insufficient information" instead of made-up scores
+// when the AI didn't answer. Flag off: replies unchanged.
+const studioOn = (req) => !req.isGuest && !!req.userId && flagEnabled('resumeStudioV2', { id: String(req.userId), role: req.user?.role });
+router.use((req, res, next) => {
+  const json = res.json.bind(res);
+  res.json = (body) => json(studioOn(req) && body && typeof body === 'object' ? withoutVerdicts(body) : body);
+  next();
+});
 const Resume = require('../models/Resume');
 const User   = require('../models/User');
 const auth = require('../middleware/auth.middleware');
@@ -12,7 +22,8 @@ const { triggerCareerProfileEnrichment } = require('../services/careerProfileSer
 const { invalidateCacheForResume }        = require('../services/skillGapService');
 const { tailorResume }                   = require('../services/resumeTailorService');
 const { generateResumePDF }              = require('../services/pdfService');
-const { optimizeParsedResume }          = require('../services/resumeIntelligenceService');
+const { optimizeParsedResume, withoutVerdicts } = require('../services/resumeIntelligenceService');
+const { isEnabled: flagEnabled } = require('../config/featureFlags');
 const OpenAI = require('openai');
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -414,7 +425,7 @@ router.post('/upload',
     const optStart = Date.now();
     try {
       console.log(`[${new Date().toISOString()}] 🧠 AI processing started: optimizing parsed resume...`);
-      optimizedData = await optimizeParsedResume(parsedData);
+      optimizedData = await optimizeParsedResume(parsedData, { honest: studioOn(req) });
       console.log(`[${new Date().toISOString()}] 🟢 AI optimization completed in ${Date.now() - optStart}ms`);
     } catch (optErr) {
       console.error(`[${new Date().toISOString()}] ❌ Resume optimization error after ${Date.now() - optStart}ms:`, optErr);
@@ -1521,7 +1532,7 @@ router.post('/:id/ai-optimize', auth, rejectGuest, async (req, res) => {
 
     // Run the Master AI Resume Intelligence Engine
     const { optimizeParsedResume } = require('../services/resumeIntelligenceService');
-    const optimizedData = await optimizeParsedResume(resumeForAI);
+    const optimizedData = await optimizeParsedResume(resumeForAI, { honest: studioOn(req) });
 
     // Update resume with AI-optimized content
     resume.careerLevel = optimizedData.careerLevel || resume.careerLevel;
@@ -1653,7 +1664,7 @@ router.get('/:id/ai-pdf', auth, async (req, res) => {
       };
 
       const { optimizeParsedResume } = require('../services/resumeIntelligenceService');
-      const optimizedData = await optimizeParsedResume(resumeForAI);
+      const optimizedData = await optimizeParsedResume(resumeForAI, { honest: studioOn(req) });
 
       // Update resume with AI-optimized content
       resume.optimizedSummary = optimizedData.optimizedSummary || resume.professionalSummary?.summary;

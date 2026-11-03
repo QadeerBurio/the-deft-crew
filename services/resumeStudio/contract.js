@@ -1,6 +1,6 @@
 // services/resumeStudio/contract.js
 // The AI instruction contract for resume tailoring (handoff PART B 6.2, verbatim) and the prompt built
-// around it. Used by the Resume Studio (services/resumeStudio/tailorWorker.js) and by the old tailoring
+// around it. Used by the Resume Studio (services/resumeStudio/tailor.js) and by the old tailoring
 // path (services/resumeTailorService.js). The job description and the resume are passed as data inside
 // delimited JSON, never as instructions.
 
