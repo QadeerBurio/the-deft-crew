@@ -7,6 +7,10 @@
 //     pending / interview (the interview scheduler sets that)
 //   - the old interview routes are refused: interviews of pilot applications go through /api/career
 const timeline = require("./careerTimelineService");
+// the services that react to timeline events (interview cancels, offer / outcome writes, notifications)
+require("./careerInterviewService");
+require("./careerOfferService");
+require("./careerNotificationService");
 
 const STATUS_EVENT = { reviewed: "REVIEWED", shortlisted: "SHORTLISTED", rejected: "REJECTED" };
 

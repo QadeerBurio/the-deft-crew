@@ -437,6 +437,44 @@ const applyBody = (who) => ({ fullName: `${who} full name`, email: `${who}@test.
   r = await call("POST", "/api/career/offers", { tok: T.E2, body: { applicationId: String(ids.Ae2), version: await ver(ids.Ae2, T.E2), title: "Designer", expiresAt: inHours(48) } });
   check("…the employer can send a new offer", r.status === 201, r.text.slice(0, 120));
 
+  console.log("── 13. notifications: outbox, retries never repeat the event");
+  const outbox = (f = () => true) => rows("CareerNotificationOutbox", f);
+  const notif = reqS("./services/career/careerNotificationService");
+  const invited = events(ctx.A2).find((e) => e.type === "INTERVIEW_INVITED");
+  const invRows = outbox((o) => same(o.event, invited._id));
+  check("an interview invite queued push + in-app for the candidate only", invRows.length === 2 && invRows.every((o) => same(o.recipient, ids.S2)) && invRows.map((o) => o.channel).sort().join() === "inapp,push", invRows.map((o) => o.channel).join());
+  check("…in-app delivered as a Notification without its own push; push through the gateway (no device here: skipped)", invRows.find((o) => o.channel === "inapp").status === "sent" && rows("Notification", (n) => n.metadata?.careerOutboxId === String(invRows.find((o) => o.channel === "inapp")._id) && n.metadata.skipPush === true).length === 1 && ["sent", "skipped"].includes(invRows.find((o) => o.channel === "push").status), invRows.map((o) => `${o.channel}:${o.status}:${o.lastError}`).join());
+  check("…the texts name the job and company, no e-mail or phone", invRows.every((o) => o.payload.body.includes("Frontend dev") && !/@|0300/.test(JSON.stringify(o.payload))));
+  check("REVIEWED queues nothing (no message for it)", outbox((o) => o.eventType === "REVIEWED").length === 0);
+  check("HIRE_CONFIRMED notified both sides", new Set(outbox((o) => o.eventType === "HIRE_CONFIRMED" && same(o.application, ctx.A4)).map((o) => String(o.recipient))).size === 2);
+  // the in-app provider fails once
+  const realInapp = notif.providers.inapp;
+  let failOnce = true;
+  notif.providers.inapp = async (row) => { if (failOnce) { failOnce = false; throw new Error("provider down"); } return realInapp(row); };
+  const offE2b = rows("CareerOffer", (o) => same(o.application, ids.Ae2) && o.status === "sent")[0];
+  r = await call("POST", `/api/career/offers/${offE2b._id}/respond`, { tok: T.S1, body: { version: await ver(ids.Ae2, T.S1), response: "accept" } });
+  const acc = events(ids.Ae2).find((e) => e.type === "OFFER_ACCEPTED");
+  let accRow = outbox((o) => same(o.event, acc._id) && o.channel === "inapp")[0];
+  check("the offer is accepted; the employer's in-app notification failed (attempt 1, retry later)", r.status === 201 && accRow?.status === "failed" && accRow.attempts === 1 && accRow.lastError === "provider down", JSON.stringify(accRow && { s: accRow.status, a: accRow.attempts }));
+  const evBefore = rows("CareerApplicationEvent").length;
+  const later = new Date(Date.now() + 3 * 3600e3);
+  await notif.drain({ now: later });
+  accRow = outbox((o) => same(o.event, acc._id) && o.channel === "inapp")[0];
+  check("the retry delivers it (attempt 2); no timeline event written again", accRow.status === "sent" && accRow.attempts === 2 && rows("CareerApplicationEvent").length === evBefore && events(ids.Ae2).filter((e) => e.type === "OFFER_ACCEPTED").length === 1);
+  check("…exactly one in-app notification for it", rows("Notification", (n) => n.metadata?.careerOutboxId === String(accRow._id)).length === 1);
+  const requeued = await notif.enqueue(acc, { job: { title: "Designer", companyName: "Other Co" } });
+  await notif.drain({ now: later });
+  check("processing the same event again queues nothing new (event + recipient + channel is unique)", requeued === 0 && outbox((o) => same(o.event, acc._id)).length === 1);
+  notif.providers.inapp = async () => { throw new Error("still down"); };
+  r = await call("POST", `/api/career/applications/${ctx.A2}/events`, { tok: T.E1, body: { type: "REJECTED", version: await ver(ctx.A2) } });
+  const stuck = outbox((o) => o.eventType === "REJECTED" && same(o.application, ctx.A2) && o.channel === "inapp")[0];
+  for (let i = 0; i < 8; i++) await notif.drain({ now: new Date(Date.now() + (i + 1) * 2 * 3600e3) });
+  const stuckAfter = stuck ? outbox((o) => same(o._id, stuck._id))[0] : null;
+  check("a delivery that keeps failing stops after 5 attempts (no endless retries); the rejection itself stands", r.status === 201 && stuckAfter?.status === "failed" && stuckAfter.attempts === notif.MAX_ATTEMPTS && appDoc(ctx.A2).status === "rejected", stuckAfter && `${stuckAfter.status} ${stuckAfter.attempts}`);
+  notif.providers.inapp = realInapp;
+  r = await call("POST", "/api/career/admin/outbox/drain", { tok: T.S1 });
+  check("only an admin can drain the outbox (403)", r.status === 403, r.status);
+
   // @@MORE@@
 
   // ---------- leak scan ----------

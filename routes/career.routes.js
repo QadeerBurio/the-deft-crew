@@ -20,6 +20,7 @@
 //   GET  /offers/:id                       either side
 //   GET  /outcomes/me, PATCH /outcomes/:id candidate: "Hired / Interviewed via TDC", private by default
 //   Disputes: POST /applications/:id/events HIRE_DISPUTED (candidate, 7 days) / HIRE_REVOKED (admin), with a reason
+//   POST /admin/outbox/drain               admin: deliver notifications that are due (also runs after each event)
 const express = require("express");
 const auth = require("../middleware/auth.middleware");
 const User = require("../models/User");
@@ -29,6 +30,7 @@ const CareerApplicationEvent = require("../models/CareerApplicationEvent");
 const timeline = require("../services/career/careerTimelineService");
 const interviews = require("../services/career/careerInterviewService");
 const offers = require("../services/career/careerOfferService");
+const notifications = require("../services/career/careerNotificationService");
 
 const router = express.Router();
 const { CareerError, isId } = timeline;
@@ -201,6 +203,11 @@ router.get("/outcomes/me", auth, role("student"), handle(async (req, res) => {
 router.patch("/outcomes/:id", auth, role("student"), handle(async (req, res) => {
   if (!timeline.flagOn(req.userId, "student")) return fail(req, res, 404, "CAREER_OFF", "Not available");
   ok(req, res, await offers.setVisibility(req.params.id, req.userId, req.body?.visibility));
+}));
+
+router.post("/admin/outbox/drain", auth, role("admin"), handle(async (req, res) => {
+  const done = await notifications.drain({ limit: 100 });
+  ok(req, res, { delivered: done.filter((r) => r.status === "sent").length, failed: done.filter((r) => r.status === "failed").length, skipped: done.filter((r) => r.status === "skipped").length });
 }));
 
 // the calendar file (Add to calendar); the same UID every time, a higher SEQUENCE after each change
