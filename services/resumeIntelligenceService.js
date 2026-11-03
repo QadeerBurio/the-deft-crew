@@ -18,13 +18,17 @@ function getOpenAI() {
  * @param {Object} parsedData 
  * @returns {Promise<Object>} optimizedResumeJSON
  */
-async function optimizeParsedResume(parsedData) {
+// fallback results (no key / service error), told apart from a real answer without changing their shape
+const FALLBACKS = new WeakSet();
+const fallback = (obj) => { FALLBACKS.add(obj); return obj; };
+
+async function optimizeLegacy(parsedData) {
   try {
     console.log('🧠 Master AI Resume Intelligence Engine: Running pipeline...');
     
     if (!process.env.OPENAI_API_KEY) {
       console.log('⚠️ [Resume Intelligence] OpenAI API Key missing. Skipping optimization.');
-      return {
+      return fallback({
         ...parsedData,
         careerLevel: 'Mid Level',
         industry: 'General',
@@ -87,7 +91,7 @@ async function optimizeParsedResume(parsedData) {
         optimizedProjects: parsedData.projects || [],
         optimizedSkills: parsedData.skills || [],
         hrRecommendations: ['Add OpenAI API key to unlock full AI enhancement.']
-      };
+      });
     }
 
     const client = getOpenAI();
@@ -257,7 +261,7 @@ Provide the response in the exact JSON format defined below (do not wrap in mark
   } catch (error) {
     console.error('❌ Master AI Resume Intelligence Engine error:', error);
     // Return graceful fallback matching schema
-    return {
+    return fallback({
       ...parsedData,
       careerLevel: 'Mid Level',
       industry: 'General',
@@ -320,10 +324,51 @@ Provide the response in the exact JSON format defined below (do not wrap in mark
       optimizedProjects: parsedData.projects || [],
       optimizedSkills: parsedData.skills || [],
       hrRecommendations: [`Failed to run AI enhancement: ${error.message}`]
-    };
+    });
   }
 }
 
+// Simulated hiring verdicts (HR shortlist, manager, department head), HR scorecards and percentile
+// ranks are not shown to students with Resume Studio (FLAG_RESUME_STUDIO_V2): a model can't know them.
+const VERDICT_KEYS = ['hiringDecision', 'hrScorecard', 'industryBenchmarking'];
+
+/**
+ * @param parsedData the parsed resume
+ * @param options.honest (FLAG_RESUME_STUDIO_V2) without an answer from the model, scores are null with
+ *   scoreStatus "insufficient_information" instead of made-up 50s / 40s. The verdict keys stay in the
+ *   result (the routes merge and save them, schema unchanged) and withoutVerdicts() hides them from the
+ *   student's replies. Off: exactly the old result.
+ */
+async function optimizeParsedResume(parsedData, options = {}) {
+  const result = await optimizeLegacy(parsedData);
+  if (!options.honest || !result || typeof result !== 'object') return result;
+  const out = { ...result };
+  if (FALLBACKS.has(result)) {
+    out.scoreStatus = 'insufficient_information';
+    out.keywordMatchPercentage = null;
+    out.resumeScores = { atsScore: null, recruiterScore: null, contentQuality: null, keywordStrength: null, formattingScore: null, impactScore: null, overallHiringScore: null };
+    out.prioritizedImprovementPlan = [];
+    out.hrRecommendations = [];
+  } else {
+    out.scoreStatus = 'ai_estimate';
+  }
+  return out;
+}
+
+// deep copy of a reply without the verdict keys (and percentileRank wherever it appears)
+function withoutVerdicts(body) {
+  const strip = (v) => {
+    if (Array.isArray(v)) return v.map(strip);
+    if (!v || typeof v !== 'object') return v;
+    const o = {};
+    for (const [k, x] of Object.entries(v)) if (!VERDICT_KEYS.includes(k) && k !== 'percentileRank') o[k] = strip(x);
+    return o;
+  };
+  return strip(JSON.parse(JSON.stringify(body)));
+}
+
 module.exports = {
-  optimizeParsedResume
+  optimizeParsedResume,
+  withoutVerdicts,
+  VERDICT_KEYS
 };
