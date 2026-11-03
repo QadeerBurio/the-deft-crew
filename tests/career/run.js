@@ -475,6 +475,48 @@ const applyBody = (who) => ({ fullName: `${who} full name`, email: `${who}@test.
   r = await call("POST", "/api/career/admin/outbox/drain", { tok: T.S1 });
   check("only an admin can drain the outbox (403)", r.status === 403, r.status);
 
+  console.log("── 14. analytics, from events only");
+  ids.J6 = oid();
+  fake.seed(coll("Job"), [job(ids.J6, ids.E1, "Support lead")]);
+  await call("POST", `/api/jobs/apply/${ids.J6}`, { tok: T.S2, body: applyBody("S2") });
+  ctx.A6 = rows("JobApplication", (a) => same(a.userId, ids.S2) && same(a.jobId, ids.J6))[0]._id;
+  await call("POST", `/api/career/applications/${ctx.A6}/events`, { tok: T.E1, body: { type: "SHORTLISTED", version: 1 } });
+  await call("POST", "/api/career/offers", { tok: T.E1, body: { applicationId: String(ctx.A6), version: 2, title: "Support lead", expiresAt: inHours(72) } });
+  const off6 = rows("CareerOffer", (o) => same(o.application, ctx.A6))[0];
+  await call("POST", `/api/career/offers/${off6._id}/respond`, { tok: T.S2, body: { version: await ver(ctx.A6, T.S2), response: "accept" } });
+  r = await call("POST", `/api/career/offers/${off6._id}/confirm-hire`, { tok: T.E1, body: { version: await ver(ctx.A6) } });
+  check("A6: a hire that stands", r.status === 201 && appDoc(ctx.A6).status === "hired");
+  r = await call("GET", "/api/career/employers/me/analytics", { tok: T.E1 });
+  const a1 = r.json?.data;
+  // independent count from the raw events of employer A
+  const mineEv = rows("CareerApplicationEvent", (e) => same(e.employer, ids.E1));
+  const apps1 = [...new Set(mineEv.map((e) => String(e.application)))];
+  const evOf = (id) => mineEv.filter((e) => String(e.application) === id).sort((x, y) => x.seq - y.seq);
+  const lastI = (l, t) => l.map((e) => e.type).lastIndexOf(t);
+  const want = {
+    applications: apps1.length,
+    verifiedHires: apps1.filter((id) => { const l = evOf(id); const h = lastI(l, "HIRE_CONFIRMED"); return h >= 0 && h > Math.max(lastI(l, "HIRE_DISPUTED"), lastI(l, "HIRE_REVOKED")); }).length,
+    interviewsCompleted: apps1.filter((id) => { const l = evOf(id); return lastI(l, "INTERVIEW_COMPLETED") > lastI(l, "INTERVIEW_DISPUTED"); }).length,
+    offersAccepted: apps1.filter((id) => evOf(id).some((e) => e.type === "OFFER_ACCEPTED")).length,
+    disputes: mineEv.filter((e) => ["INTERVIEW_DISPUTED", "HIRE_DISPUTED", "HIRE_REVOKED"].includes(e.type)).length,
+  };
+  check("employer A's funnel matches its events (applications, verified hires, completed interviews, accepted offers, disputes)", r.status === 200 && ["applications", "verifiedHires", "interviewsCompleted", "offersAccepted", "disputes"].every((k) => a1.counts[k] === want[k]), `${JSON.stringify(want)} vs ${JSON.stringify(a1?.counts)}`);
+  check("…3 accepted offers but only 1 verified hire (one disputed, one revoked)", a1.counts.offersAccepted === 3 && a1.counts.verifiedHires === 1, JSON.stringify(a1?.counts));
+  check("…the interview that was disputed doesn't count as completed; scheduled ones neither", a1.counts.interviewsCompleted === 1 && a1.counts.interviewsInvited >= 3, JSON.stringify(a1?.counts));
+  check("…the pre-pilot application is counted as joined later, not submitted", a1.counts.joinedPilotLater >= 1 && a1.counts.submitted === a1.counts.applications - a1.counts.joinedPilotLater);
+  check("…median response times are hours (numbers)", typeof a1.medianHours.firstEmployerResponse === "number" && typeof a1.medianHours.toVerifiedHire === "number", JSON.stringify(a1?.medianHours));
+  r = await call("GET", "/api/career/employers/me/analytics", { tok: T.E2 });
+  check("employer B's funnel holds only B's applications", r.status === 200 && r.json.data.counts.applications === new Set(rows("CareerApplicationEvent", (e) => same(e.employer, ids.E2)).map((e) => String(e.application))).size && r.json.data.counts.verifiedHires === 0, JSON.stringify(r.json?.data?.counts));
+  r = await call("GET", "/api/career/employers/me/analytics", { tok: T.S1 });
+  check("a student can't read employer analytics (403)", r.status === 403, r.status);
+  const adminAudits = rows("DomainEvent", (e) => e.type === "career.admin.access").length;
+  r = await call("GET", "/api/career/admin/analytics", { tok: T.admin });
+  check("admin: everything, and the read is audited", r.status === 200 && r.json.data.counts.applications === new Set(rows("CareerApplicationEvent").map((e) => String(e.application))).size && rows("DomainEvent", (e) => e.type === "career.admin.access").length === adminAudits + 1, JSON.stringify(r.json?.data?.counts));
+  r = await call("GET", "/api/career/admin/analytics", { tok: T.E1 });
+  check("an employer can't read admin analytics (403)", r.status === 403, r.status);
+  r = await call("GET", `/api/career/admin/analytics?from=${encodeURIComponent(new Date(Date.now() + 864e5).toISOString())}`, { tok: T.admin });
+  check("a range in the future: nothing counted", r.status === 200 && r.json.data.counts.applications === 0);
+
   // @@MORE@@
 
   // ---------- leak scan ----------

@@ -21,6 +21,8 @@
 //   GET  /outcomes/me, PATCH /outcomes/:id candidate: "Hired / Interviewed via TDC", private by default
 //   Disputes: POST /applications/:id/events HIRE_DISPUTED (candidate, 7 days) / HIRE_REVOKED (admin), with a reason
 //   POST /admin/outbox/drain               admin: deliver notifications that are due (also runs after each event)
+//   GET  /employers/me/analytics           employer: my funnel; GET /admin/analytics admin: all (audited)
+//                                          ?from&to (applications whose timeline started then), from events only
 const express = require("express");
 const auth = require("../middleware/auth.middleware");
 const User = require("../models/User");
@@ -31,6 +33,8 @@ const timeline = require("../services/career/careerTimelineService");
 const interviews = require("../services/career/careerInterviewService");
 const offers = require("../services/career/careerOfferService");
 const notifications = require("../services/career/careerNotificationService");
+const analytics = require("../services/career/careerAnalyticsService");
+const { recordSafe } = require("../services/domainEvents");
 
 const router = express.Router();
 const { CareerError, isId } = timeline;
@@ -203,6 +207,24 @@ router.get("/outcomes/me", auth, role("student"), handle(async (req, res) => {
 router.patch("/outcomes/:id", auth, role("student"), handle(async (req, res) => {
   if (!timeline.flagOn(req.userId, "student")) return fail(req, res, 404, "CAREER_OFF", "Not available");
   ok(req, res, await offers.setVisibility(req.params.id, req.userId, req.body?.visibility));
+}));
+
+// ---------- analytics ----------
+function range(req) {
+  const from = req.query.from ? new Date(req.query.from) : null;
+  const to = req.query.to ? new Date(req.query.to) : null;
+  if ((from && Number.isNaN(from.getTime())) || (to && Number.isNaN(to.getTime()))) throw new CareerError(400, "INVALID_DATE", "from / to must be dates");
+  return { from, to };
+}
+router.get("/employers/me/analytics", auth, role("employee", "admin"), handle(async (req, res) => {
+  if (!timeline.flagOn(req.userId, "employee")) return fail(req, res, 404, "CAREER_OFF", "The hiring timeline is not available for your account yet");
+  ok(req, res, await analytics.funnel({ employerId: req.userId, ...range(req) }));
+}));
+router.get("/admin/analytics", auth, role("admin"), handle(async (req, res) => {
+  const r = range(req);
+  if (req.query.employerId && !isId(req.query.employerId)) return fail(req, res, 400, "INVALID_ID", "Invalid employer id");
+  await recordSafe("career.admin.access", `${req.userId}:analytics:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`, { actor: req.userId, subject: { kind: "CareerAnalytics", id: null }, data: { action: "read:analytics", employerId: req.query.employerId || null } });
+  ok(req, res, await analytics.funnel({ employerId: req.query.employerId || null, ...r }));
 }));
 
 router.post("/admin/outbox/drain", auth, role("admin"), handle(async (req, res) => {
