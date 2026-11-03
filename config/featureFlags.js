@@ -8,7 +8,7 @@
 //     off | false                   nobody
 //     25%                           a stable 25% of signed-in users (same users every time, per flag)
 //     roles:admin,brand             these roles
-//     users:<id>,<id>               these user ids
+//     users:<id>,<id>               these user ids (ids:<id>,<id> is the same rule)
 //   e.g. FLAG_META_EVENTS="roles:admin;10%". A missing or unreadable value uses the flag's default.
 //   GET /api/app/flags/me returns the "client" flags for the signed-in user (routes/appFlags.routes.js).
 //
@@ -22,9 +22,13 @@ const crypto = require("crypto");
 const FLAGS = {
   // Meta App Events in the app (still only after the student allows it). META_EVENTS_ENABLED is the
   // older variable, still honoured when FLAG_META_EVENTS isn't set.
-  metaEvents: { default: false, client: true, legacyEnv: "META_EVENTS_ENABLED" },
+  metaEvents: { default: false, client: true, public: true, legacyEnv: "META_EVENTS_ENABLED" },
   // writing DomainEvent records (services/domainEvents.js); off = recordOnce() writes nothing
   domainEvents: { default: true, client: false },
+  // Brand loyalty (routes/loyalty.routes.js, services/loyalty.js). A loyalty credit or discount needs it
+  // on for BOTH the brand and the student, e.g. FLAG_LOYALTY_V2="ids:<test brand id>,<test student id>".
+  // Per user only: listed by /api/app/flags/me, not by the public /api/app/flags.
+  loyaltyV2: { default: false, client: true },
 };
 
 const JOBS = {
@@ -52,6 +56,7 @@ function ruleMatches(flag, rule, user) {
   if (pct) return !!user?.id && bucket(flag, user.id) < Number(pct[1]);
   if (lower.startsWith("roles:")) return !!user?.role && r.slice(6).split(",").map((x) => x.trim()).includes(user.role);
   if (lower.startsWith("users:")) return !!user?.id && r.slice(6).split(",").map((x) => x.trim()).includes(String(user.id));
+  if (lower.startsWith("ids:")) return !!user?.id && r.slice(4).split(",").map((x) => x.trim()).includes(String(user.id));
   return null; // unreadable
 }
 
@@ -70,6 +75,11 @@ function isEnabled(flag, user = null) {
 /** The client flags for one user, for GET /api/app/flags/me */
 function clientFlags(user = null) {
   return Object.fromEntries(Object.keys(FLAGS).filter((k) => FLAGS[k].client).map((k) => [k, isEnabled(k, user)]));
+}
+
+/** The public flags (no user), for GET /api/app/flags: only flags marked public */
+function publicFlags() {
+  return Object.fromEntries(Object.keys(FLAGS).filter((k) => FLAGS[k].client && FLAGS[k].public).map((k) => [k, isEnabled(k, null)]));
 }
 
 const isStaging = () => [process.env.APP_ENV, process.env.RAILWAY_ENVIRONMENT_NAME].some((v) => String(v || "").trim().toLowerCase() === "staging");
@@ -91,4 +101,4 @@ function describeJobs() {
   return `[jobs] ${isStaging() ? "staging" : "production"}: on ${on.join(", ") || "none"}; off ${off.join(", ") || "none"}`;
 }
 
-module.exports = { FLAGS, JOBS, isEnabled, clientFlags, jobEnabled, describeJobs, isStaging, envName };
+module.exports = { FLAGS, JOBS, isEnabled, clientFlags, publicFlags, jobEnabled, describeJobs, isStaging, envName };

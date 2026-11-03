@@ -5,6 +5,8 @@ const Offer = require("../models/Offer");
 const User = require("../models/User");
 const RedemptionGuard = require("../models/RedemptionGuard");
 const { recordSafe } = require("../services/domainEvents");
+const loyalty = require("../services/loyalty");
+const Branch = require("../models/Branch");
 // archived offers (replaced by a newer one) are hidden from students and closed to new claims, codes
 // and scans; they stay in revenue, savings and the brand's history. No status = active (older offers).
 const NOT_ARCHIVED = { status: { $ne: "archived" } };
@@ -306,8 +308,18 @@ router.post('/redeem-payment', auth, async (req, res) => {
     }
     if (isArchived(offer)) return res.status(410).json({ message: "This offer has ended" });
 
+    // optional branch: it must be one of the offer's brand's branches (brand A can't record at brand B's)
+    const branchId = req.body.branchId || null;
+    if (branchId && (!mongoose.Types.ObjectId.isValid(String(branchId)) || !(await Branch.exists({ _id: branchId, brand: offer.brand })))) {
+      return res.status(403).json({ message: 'This branch belongs to another brand' });
+    }
+
+    // Loyalty (FLAG_LOYALTY_V2, services/loyalty.js): the student's tier % replaces the offer's; it is the
+    // same % pending-scans and /api/loyalty/quotes showed the brand before confirming
+    const quote = await loyalty.quoteFor({ brandId: offer.brand, studentId: userId, offerId: offer._id, branchId });
+
     // Server computes the saved amount (B7)
-    const discount = Number(offer.discountPercentage) || 0;
+    const discount = quote.applies ? quote.discountPct : Number(offer.discountPercentage) || 0;
     const bill = Number(billAmount);
     const computedSaved = Math.round((bill * discount) / 100);
 
@@ -355,6 +367,8 @@ router.post('/redeem-payment', auth, async (req, res) => {
       actor: req.userId, subject: { kind: "Offer", id: offer._id },
       data: { student: String(userId), billAmount: bill, savedAmount: computedSaved },
     });
+    // one loyalty visit for this verified redemption (exactly once; never fails the redemption)
+    const loyaltyResult = quote.applies ? await loyalty.creditSafe(redemptionId, { source: 'redeem-payment', branchId, actor: req.userId, discountPct: discount }) : null;
 
     // Redemption changes claimedBy + redemptions → clear every list that shows them
     await clearBrandCaches(offer.brand, userId);
@@ -401,6 +415,7 @@ router.post('/redeem-payment', auth, async (req, res) => {
       redemptionsUsed: totalRedemptions.length,
       redemptionsRemaining: 2 - totalRedemptions.length,
       savedAmount: computedSaved,
+      ...(quote.applies ? { loyalty: { discountPct: discount, tierName: quote.tierName, credited: !!loyaltyResult?.credited, reason: loyaltyResult?.reason || quote.reason || '', visitNumber: loyaltyResult?.visitNumber ?? null, progress: loyaltyResult?.progress || null } } : {}),
     });
   } catch (err) {
     console.error('Error in redeem-payment:', err);
@@ -990,7 +1005,16 @@ router.get("/pending-scans", auth, async (req, res) => {
       redemptionsUsed: scan.redemptionsUsed || 0,
       maxRedemptions: scan.maxRedemptions || 2
     }));
-    
+
+    // Loyalty (FLAG_LOYALTY_V2): show the student's tier and use its % (redeem-payment applies the same)
+    for (const s of formattedScans) {
+      const q = await loyalty.quoteFor({ brandId: req.userId, studentId: s.studentId, offerId: s.offerId });
+      if (!q.applies) continue;
+      s.offerDiscountPercentage = s.discountPercentage;
+      s.discountPercentage = q.discountPct;
+      s.loyalty = { tierName: q.tierName, discountPct: q.discountPct, visits: q.visits, nextVisitNumber: q.nextVisitNumber, nextTier: q.nextTier, visitsBeforeNextTier: q.visitsBeforeNextTier, countsAsVisit: q.countsAsVisit };
+    }
+
     res.json(formattedScans);
   } catch (err) {
     console.error("Error fetching pending scans:", err);

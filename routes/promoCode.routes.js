@@ -1,11 +1,13 @@
 // routes/promoCode.routes.js
 const express = require("express");
+const mongoose = require("mongoose");
 const router = express.Router();
 const PromoCode = require("../models/PromoCode");
 const Offer = require("../models/Offer");
 const User = require("../models/User");
 const Notification = require("../models/Notification");
 const { recordSafe } = require("../services/domainEvents");
+const loyalty = require("../services/loyalty");
 const auth = require("../middleware/auth.middleware");
 const axios = require("axios");
 const BrandStoreConnection = require("../models/BrandStoreConnection");
@@ -467,8 +469,11 @@ router.post("/verify", auth, async (req, res) => {
       });
     }
 
+    // Loyalty (FLAG_LOYALTY_V2): the student's tier % replaces the code's
+    const quote = await loyalty.quoteFor({ brandId: offer.brand, studentId, offerId: offer._id });
+    const loyaltyPct = quote.applies ? quote.discountPct : promoCodeDoc.discountPercentage;
     const discountAmount =
-      (Number(billAmount) * promoCodeDoc.discountPercentage) / 100;
+      (Number(billAmount) * loyaltyPct) / 100;
     const savedAmount = Math.round(discountAmount);
     const finalAmount = Number(billAmount) - savedAmount;
 
@@ -483,9 +488,11 @@ router.post("/verify", auth, async (req, res) => {
       return res.status(409).json({ success: false, message: "This promo code has already been used" });
     }
 
+    const redemptionId = new mongoose.Types.ObjectId();
     await Offer.findByIdAndUpdate(offerId, {
       $push: {
         redemptions: {
+          _id: redemptionId,
           student: studentId,
           billAmount: Number(billAmount),
           savedAmount,
@@ -521,6 +528,8 @@ router.post("/verify", auth, async (req, res) => {
     });
 
     // 🚫 engagement hook removed here — only /confirm-redemption awards points
+    // one loyalty visit for this verified redemption
+    const loyaltyResult = quote.applies ? await loyalty.creditSafe(redemptionId, { source: "promo-verify", actor: req.userId, discountPct: loyaltyPct }) : null;
 
     res.json({
       success: true,
@@ -530,12 +539,13 @@ router.post("/verify", auth, async (req, res) => {
         offer: {
           id: offer._id,
           title: offer.title,
-          discountPercentage: promoCodeDoc.discountPercentage,
+          discountPercentage: loyaltyPct,
         },
         billAmount: Number(billAmount),
         savedAmount,
         finalAmount,
         promoCode: promoCodeDoc.code,
+        ...(quote.applies ? { loyalty: { discountPct: loyaltyPct, tierName: quote.tierName, credited: !!loyaltyResult?.credited, reason: loyaltyResult?.reason || quote.reason || "", visitNumber: loyaltyResult?.visitNumber ?? null, progress: loyaltyResult?.progress || null } } : {}),
       },
     });
   } catch (err) {
@@ -969,8 +979,11 @@ router.post("/brand-verify", auth, async (req, res) => {
     const student = await User.findById(studentId).select(
       "name email rollNo university"
     );
+    // Loyalty (FLAG_LOYALTY_V2): the tier % confirm-redemption will apply
+    const quote = await loyalty.quoteFor({ brandId: offer.brand, studentId, offerId: offer._id });
+    const loyaltyPct = quote.applies ? quote.discountPct : promoCodeDoc.discountPercentage;
     const discountAmount =
-      (Number(billAmount) * promoCodeDoc.discountPercentage) / 100;
+      (Number(billAmount) * loyaltyPct) / 100;
     const savedAmount = Math.round(discountAmount);
     const finalAmount = Number(billAmount) - savedAmount;
 
@@ -991,7 +1004,7 @@ router.post("/brand-verify", auth, async (req, res) => {
         offer: {
           id: offer._id,
           title: offer.title,
-          discountPercentage: promoCodeDoc.discountPercentage,
+          discountPercentage: loyaltyPct,
         },
         promoCode: {
           code: promoCodeDoc.code,
@@ -1002,8 +1015,9 @@ router.post("/brand-verify", auth, async (req, res) => {
           billAmount: Number(billAmount),
           savedAmount,
           finalAmount,
-          discountPercentage: promoCodeDoc.discountPercentage,
+          discountPercentage: loyaltyPct,
         },
+        ...(quote.applies ? { loyalty: { tierName: quote.tierName, discountPct: quote.discountPct, visits: quote.visits, nextVisitNumber: quote.nextVisitNumber, nextTier: quote.nextTier, visitsBeforeNextTier: quote.visitsBeforeNextTier, countsAsVisit: quote.countsAsVisit } } : {}),
       },
     });
   } catch (err) {
@@ -1076,9 +1090,16 @@ router.post("/confirm-redemption", auth, async (req, res) => {
         .status(404)
         .json({ success: false, message: "Offer not found" });
     }
+    // the code's own offer, of this brand (the redemption is written into this offer)
+    if (String(offer._id) !== String(promoCodeDoc.offer) || String(offer.brand) !== String(brandId)) {
+      return res.status(403).json({ success: false, message: "This promo code is not valid for this offer" });
+    }
 
+    // Loyalty (FLAG_LOYALTY_V2): the student's tier % replaces the code's (brand-verify showed the same)
+    const quote = await loyalty.quoteFor({ brandId: offer.brand, studentId, offerId: offer._id });
+    const loyaltyPct = quote.applies ? quote.discountPct : promoCodeDoc.discountPercentage;
     const discountAmount =
-      (Number(billAmount) * promoCodeDoc.discountPercentage) / 100;
+      (Number(billAmount) * loyaltyPct) / 100;
     const savedAmount = Math.round(discountAmount);
 
     // only one confirmation wins (see /verify)
@@ -1091,9 +1112,11 @@ router.post("/confirm-redemption", auth, async (req, res) => {
       return res.status(409).json({ success: false, message: "This promo code has already been used", status: "used" });
     }
 
+    const redemptionId = new mongoose.Types.ObjectId();
     await Offer.findByIdAndUpdate(offerId, {
       $push: {
         redemptions: {
+          _id: redemptionId,
           student: studentId,
           billAmount: Number(billAmount),
           savedAmount,
@@ -1140,6 +1163,9 @@ router.post("/confirm-redemption", auth, async (req, res) => {
       console.error("[engagement] promo deal hook failed:", e.message);
     }
 
+    // one loyalty visit for this verified redemption
+    const loyaltyResult = quote.applies ? await loyalty.creditSafe(redemptionId, { source: "promo-confirm", actor: req.userId, discountPct: loyaltyPct }) : null;
+
     res.json({
       success: true,
       message: "Promo code redeemed successfully!",
@@ -1151,6 +1177,7 @@ router.post("/confirm-redemption", auth, async (req, res) => {
           savedAmount,
           promoCode: promoCodeDoc.code,
         },
+        ...(quote.applies ? { loyalty: { discountPct: loyaltyPct, tierName: quote.tierName, credited: !!loyaltyResult?.credited, reason: loyaltyResult?.reason || quote.reason || "", visitNumber: loyaltyResult?.visitNumber ?? null, progress: loyaltyResult?.progress || null } } : {}),
       },
     });
   } catch (err) {

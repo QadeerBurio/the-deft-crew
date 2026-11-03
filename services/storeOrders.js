@@ -5,6 +5,8 @@
 const PromoCode = require("../models/PromoCode");
 const Offer = require("../models/Offer");
 const Notification = require("../models/Notification");
+const mongoose = require("mongoose");
+const { creditSafe } = require("./loyalty");
 
 const PAID = new Set(["processing", "completed"]);
 const MAX_AMOUNT = 10000000;
@@ -29,10 +31,12 @@ async function recordWooOrder(brandId, order) {
     );
     if (!marked) continue;
     if (promo.offer) {
+      const redemptionId = new mongoose.Types.ObjectId();
       await Offer.updateOne(
         { _id: promo.offer },
-        { $push: { redemptions: { student: promo.student, billAmount, savedAmount, redeemedAt: new Date(), promoCode: promo.code, promoCodeId: promo._id, source: "webhook", externalOrderId: orderId } } }
+        { $push: { redemptions: { _id: redemptionId, student: promo.student, billAmount, savedAmount, redeemedAt: new Date(), promoCode: promo.code, promoCodeId: promo._id, source: "webhook", externalOrderId: orderId } } }
       );
+      await creditSafe(redemptionId, { source: "woo-webhook" }); // a loyalty visit (FLAG_LOYALTY_V2)
     }
     try {
       await Notification.create({ recipient: promo.student, title: "✅ Promo Code Used!", description: `Your promo code ${promo.code} was confirmed at ${promo.brandName}! You saved Rs. ${savedAmount}.`, type: "System", icon: "checkmark-circle" });

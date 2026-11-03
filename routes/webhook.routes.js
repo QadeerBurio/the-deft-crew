@@ -1,4 +1,6 @@
 const express = require("express");
+const mongoose = require("mongoose");
+const { creditSafe } = require("../services/loyalty");
 const router = express.Router();
 const PromoCode = require("../models/PromoCode");
 const User = require("../models/User");
@@ -123,10 +125,12 @@ router.post("/confirm", confirmLimit, async (req, res) => {
         if (!marked) return res.json({ success: true, alreadyUsed: true, message: "Promo code already confirmed" });
 
         if (promoCodeDoc.offer) {
+            const redemptionId = new mongoose.Types.ObjectId();
             await Offer.updateOne(
                 { _id: promoCodeDoc.offer },
-                { $push: { redemptions: { student: promoCodeDoc.student, billAmount, savedAmount, redeemedAt: new Date(), promoCode: promoCodeDoc.code, promoCodeId: promoCodeDoc._id, source: "webhook", externalOrderId: orderId } } }
+                { $push: { redemptions: { _id: redemptionId, student: promoCodeDoc.student, billAmount, savedAmount, redeemedAt: new Date(), promoCode: promoCodeDoc.code, promoCodeId: promoCodeDoc._id, source: "webhook", externalOrderId: orderId } } }
             );
+            await creditSafe(redemptionId, { source: "webhook-confirm" }); // a loyalty visit (FLAG_LOYALTY_V2)
         }
 
         try {
@@ -268,7 +272,9 @@ router.post("/shopify/confirm", async (req, res) => {
           source: "shopify_webhook",
           externalOrderId: orderIdStr
         });
+        const pushed = offer.redemptions[offer.redemptions.length - 1];
         await offer.save();
+        await creditSafe(pushed._id, { source: "shopify-webhook" }); // a loyalty visit (FLAG_LOYALTY_V2)
       }
     }
 
