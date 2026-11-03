@@ -109,7 +109,13 @@ The timeline projects onto the existing status field, so old screens stay consis
 - **Email:** only when a mail provider is already configured, and only for interviews, offers and hires.
 - **The text:** names the job and company, never salary or contact details.
 - **Retries:** with backoff, at most 5 attempts. A retry never writes the business event again.
-  `POST /api/career/admin/outbox/drain` delivers whatever is due.
+  The background job `careerOutbox` (`JOB_CAREER_OUTBOX`: on in production, off in staging) delivers
+  what's due every 5 minutes; `POST /api/career/admin/outbox/drain` does the same on demand.
+- **Quiet hours:** a push is held back 30 minutes at a time, without using up an attempt.
+- **Interview reminders:** 24 hours and 1 hour before an **accepted** interview, queued by the same job.
+  The candidate gets push and in-app; the employer gets in-app. Each reminder is queued once per slot,
+  and a moved interview gets fresh ones. A reminder is never delivered after the interview starts, or
+  for an interview that was cancelled, declined or moved since it was queued.
 - **Calendar file:** interviews have a `.ics` at `GET /api/career/interviews/:id/ics`. The UID is
   stable and `SEQUENCE` goes up on every change, so calendars replace the old slot. A cancelled or
   declined interview gets `METHOD:CANCEL`.

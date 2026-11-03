@@ -601,6 +601,59 @@ const applyBody = (who) => ({ fullName: `${who} full name`, email: `${who}@test.
   const r2 = await call("GET", `/api/jobs/candidates/${ids.Agone}`, { tok: T.S2 });
   check("candidate detail with a missing job: 403 for an employer, 200 for the candidate", r.status === 403 && r2.status === 200, `${r.status} ${r2.status}`);
 
+  console.log("── 17. interview reminders, 24 h and 1 h before (through the outbox)");
+  const reminderRows = (ivId, kind) => outbox((o) => o.kind === "reminder" && same(o.interview, ivId) && (!kind || o.eventType === `INTERVIEW_REMINDER_${kind}`));
+  ids.J8 = oid();
+  fake.seed(coll("Job"), [job(ids.J8, ids.E1, "Mobile dev")]);
+  for (const who of ["S1", "S2"]) await call("POST", `/api/jobs/apply/${ids.J8}`, { tok: T[who], body: applyBody(who) });
+  ctx.A8 = rows("JobApplication", (a) => same(a.userId, ids.S1) && same(a.jobId, ids.J8))[0]._id;
+  ctx.A9 = rows("JobApplication", (a) => same(a.userId, ids.S2) && same(a.jobId, ids.J8))[0]._id;
+  const T0 = Date.now();
+  const slot8 = { ...slot, startsAt: new Date(T0 + 20 * 3600e3).toISOString() };
+  const slot9 = { ...slot, startsAt: new Date(T0 + 21 * 3600e3).toISOString(), meetingLink: "https://meet.example.test/nine" };
+  for (const [a, s, tok] of [[ctx.A8, slot8, T.S1], [ctx.A9, slot9, T.S2]]) {
+    await call("POST", `/api/career/applications/${a}/events`, { tok: T.E1, body: { type: "SHORTLISTED", version: 1 } });
+    await call("POST", "/api/career/interviews", { tok: T.E1, body: { applicationId: String(a), version: 2, ...s } });
+  }
+  const iv8 = rows("CareerInterview", (i) => same(i.application, ctx.A8))[0];
+  const iv9 = rows("CareerInterview", (i) => same(i.application, ctx.A9))[0];
+  await call("POST", `/api/career/interviews/${iv8._id}/respond`, { tok: T.S1, body: { version: await ver(ctx.A8, T.S1), response: "accept" } });
+  // iv9 stays "invited" (not accepted)
+  const evBeforeRem = rows("CareerApplicationEvent").length;
+  gateway.send = async () => ({ sent: true });
+  await job7.tick(new Date(T0));
+  check("20 h before: 24 h reminders queued for the accepted interview: candidate push + in-app, employer in-app", reminderRows(iv8._id, "24H").length === 3 && reminderRows(iv8._id, "24H").filter((o) => same(o.recipient, ids.S1)).map((o) => o.channel).sort().join() === "inapp,push" && reminderRows(iv8._id, "24H").some((o) => same(o.recipient, ids.E1) && o.channel === "inapp"), reminderRows(iv8._id).map((o) => `${o.channel}:${o.status}`).join());
+  check("…delivered on the same tick; the text has the job, company, Karachi time; no e-mail / phone", reminderRows(iv8._id, "24H").every((o) => o.status === "sent") && reminderRows(iv8._id, "24H").every((o) => o.payload.body.includes("Mobile dev") && /Asia\/Karachi/.test(o.payload.body) && !/@|0300/.test(JSON.stringify(o.payload))));
+  check("an interview not accepted yet gets no reminder", reminderRows(iv9._id).length === 0);
+  await job7.tick(new Date(T0 + 5 * 60e3));
+  await job7.tick(new Date(T0 + 3 * 3600e3));
+  check("later ticks queue nothing new for it (one 24 h reminder per slot); no event written", reminderRows(iv8._id, "24H").length === 3 && rows("CareerApplicationEvent").length === evBeforeRem);
+  const saved = process.env.FLAG_CAREER_TIMELINE;
+  process.env.FLAG_CAREER_TIMELINE = `ids:${ids.E1},${ids.E2}`; // the students leave the pilot
+  await job7.tick(new Date(T0 + 19.5 * 3600e3));
+  check("outside the pilot: no 1 h reminder", reminderRows(iv8._id, "1H").length === 0);
+  process.env.FLAG_CAREER_TIMELINE = saved;
+  gateway.send = async () => ({ sent: false, reason: "quiet_hours" });
+  await job7.tick(new Date(T0 + 19.4 * 3600e3)); // 36 minutes before
+  const push1h = () => reminderRows(iv8._id, "1H").find((o) => o.channel === "push");
+  check("in the last hour: 1 h reminders queued; the in-app ones delivered, the push held back by quiet hours", reminderRows(iv8._id, "1H").length === 3 && reminderRows(iv8._id, "1H").filter((o) => o.channel === "inapp").every((o) => o.status === "sent") && push1h().status === "pending" && push1h().lastError === "quiet_hours", reminderRows(iv8._id, "1H").map((o) => `${o.channel}:${o.status}:${o.lastError}`).join());
+  gateway.send = async () => ({ sent: true });
+  await job7.tick(new Date(T0 + 20.2 * 3600e3)); // after the start
+  check("quiet hours end after the interview started: the push is dropped (expired), never sent late", push1h().status === "skipped" && push1h().lastError === "expired", `${push1h().status} ${push1h().lastError}`);
+  // iv9: accepted, reminders queued while quiet hours hold the push, then the employer cancels
+  await call("POST", `/api/career/interviews/${iv9._id}/respond`, { tok: T.S2, body: { version: await ver(ctx.A9, T.S2), response: "accept" } });
+  gateway.send = async () => ({ sent: false, reason: "quiet_hours" });
+  await job7.tick(new Date(T0 + 1 * 3600e3));
+  const push9 = () => reminderRows(iv9._id, "24H").find((o) => o.channel === "push");
+  check("A9 accepted: its 24 h push reminder waits for quiet hours to end", push9()?.status === "pending", push9() && push9().status);
+  r = await call("POST", `/api/career/interviews/${iv9._id}/cancel`, { tok: T.E1, body: { version: await ver(ctx.A9) } });
+  gateway.send = async () => ({ sent: true });
+  await job7.tick(new Date(T0 + 2 * 3600e3));
+  check("the employer cancels: the waiting reminder is dropped ('interview changed'), not sent", r.status === 201 && push9().status === "skipped" && push9().lastError === "interview changed", push9() && `${push9().status} ${push9().lastError}`);
+  check("reminders never write timeline events", rows("CareerApplicationEvent", (e) => /REMINDER/.test(e.type)).length === 0);
+  check("dueKind: 24 h window (1 h, 24 h], 1 h window (0, 1 h], nothing outside", reqS("./services/career/careerReminderService").dueKind(25 * 3600e3) === null && reqS("./services/career/careerReminderService").dueKind(2 * 3600e3) === "24h" && reqS("./services/career/careerReminderService").dueKind(30 * 60e3) === "1h" && reqS("./services/career/careerReminderService").dueKind(-1) === null);
+  gateway.send = realSend;
+
   // @@MORE@@
 
   // ---------- leak scan ----------

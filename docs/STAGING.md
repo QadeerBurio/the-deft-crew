@@ -110,6 +110,7 @@ Each job starts only if `jobEnabled()` in `config/featureFlags.js` allows it. Th
 | `engagementScheduler` | `JOB_ENGAGEMENT_SCHEDULER=on` | Daily drop, streak reminders, rollover and weekly reset (cron). |
 | `chatSync` | `JOB_CHAT_SYNC=on` | The chat service's database sync sweeps. |
 | `pushes` | `JOB_PUSHES=on` | **Every** Expo push. While off, nothing reaches a phone: push tickets say `PUSHES_OFF` and tokens are kept. |
+| `careerOutbox` | `JOB_CAREER_OUTBOX=on` | Every 5 minutes: hiring-timeline notification retries and 24 h / 1 h interview reminders (only does anything for `FLAG_CAREER_TIMELINE` applications). |
 
 **What is not a job.** Job ingestion from the Adzuna, JSearch and Greenhouse feeds has no schedule; it runs only when an admin presses
 "ingest" in the portal. E-mail is sent as part of requests (sign-up codes, tickets), so it follows the
@@ -118,7 +119,7 @@ mail settings above, not a switch.
 **Checking it.** The first log line after the database connects lists what runs:
 
 ```
-[jobs] staging: on none; off eventIngestion, socialPush, jobCleanup, engagementScheduler, chatSync, pushes
+[jobs] staging: on none; off eventIngestion, socialPush, jobCleanup, engagementScheduler, chatSync, pushes, careerOutbox
 ```
 
 To test one job, set its variable to `on` and redeploy. The line then lists it under `on`. Remove the

@@ -134,7 +134,11 @@ async function deliver(rowId, now = new Date()) {
   if (!row) return null;
   let r;
   try {
-    r = await providers[row.channel](row);
+    // never late: past its deadline (a reminder: the interview start), or a reminder for an interview
+    // that was cancelled, declined or moved since it was queued
+    if (row.expiresAt && now >= new Date(row.expiresAt)) r = { status: "skipped", error: "expired" };
+    else if (row.kind === "reminder" && !(await require("./careerReminderService").stillValid(row))) r = { status: "skipped", error: "interview changed" };
+    else r = await providers[row.channel](row);
   } catch (err) {
     r = { status: "retry", error: err.message };
   }
