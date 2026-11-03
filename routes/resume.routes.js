@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const Resume = require('../models/Resume');
 const User   = require('../models/User');
+const ResumeCreationLock = require('../models/ResumeCreationLock');
 const auth = require('../middleware/auth.middleware');
 const path = require('path');
 const fs = require('fs');
@@ -37,12 +38,57 @@ const rejectGuest = (req, res, next) => {
 // ============================================================
 const MAX_LIFETIME_RESUME_CREATIONS = 2;
 
+// Race-safe: the count and the creation run under a per-user lock (models/ResumeCreationLock), held until
+// the response is sent. A second request at the same moment waits for it, then counts again, so two
+// simultaneous creations can't end at 3 resumes.
+const LOCK_TTL_MS = 60 * 1000;
+const LOCK_WAIT_MS = 8000;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function acquireResumeLock(userId) {
+  const key = `resume-create:${userId}`;
+  const token = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const deadline = Date.now() + LOCK_WAIT_MS;
+  for (;;) {
+    try {
+      await ResumeCreationLock.create({ key, token, expiresAt: new Date(Date.now() + LOCK_TTL_MS) });
+      return { key, token };
+    } catch (err) {
+      if (err?.code !== 11000) throw err;
+    }
+    // a holder that died: take its expired lock over
+    const taken = await ResumeCreationLock.findOneAndUpdate(
+      { key, expiresAt: { $lt: new Date() } },
+      { $set: { token, expiresAt: new Date(Date.now() + LOCK_TTL_MS) } },
+      { new: true }
+    );
+    if (taken) return { key, token };
+    if (Date.now() > deadline) return null;
+    await sleep(150);
+  }
+}
+
 const checkResumeLimit = async (req, res, next) => {
+  let lock = null;
+  let released = false;
+  const release = () => {
+    if (released || !lock) return;
+    released = true;
+    ResumeCreationLock.deleteOne({ key: lock.key, token: lock.token }).catch(() => {});
+  };
   try {
+    lock = await acquireResumeLock(req.user._id);
+    if (!lock) {
+      return res.status(409).json({ success: false, code: 'RESUME_CREATION_BUSY', error: 'Another resume is being created right now. Try again in a moment.', message: 'Another resume is being created right now. Try again in a moment.' });
+    }
+    // held until the request is answered (the resume is created inside it)
+    res.on('finish', release);
+    res.on('close', release);
+
     // ✅ Count actual resumes in DB (source of truth)
     const liveCount = await Resume.countDocuments({ user: req.user._id });
 
     if (liveCount >= MAX_LIFETIME_RESUME_CREATIONS) {
+      release();
       return res.status(403).json({
         success: false,
         code: 'RESUME_CREATION_LIMIT_REACHED',
@@ -54,6 +100,7 @@ const checkResumeLimit = async (req, res, next) => {
     }
     next();
   } catch (error) {
+    release();
     res.status(500).json({ success: false, error: error.message });
   }
 };

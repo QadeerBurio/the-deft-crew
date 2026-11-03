@@ -22,6 +22,14 @@ const formatDateRange = (start, end, current) => {
   return `${startStr} - ${endStr}`;
 };
 
+// a profile link as https://..., shown without the protocol (e.g. linkedin.com/in/sana)
+const fullUrl = (u) => {
+  const t = String(u || '').trim();
+  if (!t) return '';
+  return /^https?:\/\//i.test(t) ? t : `https://${t.replace(/^\/+/, '')}`;
+};
+const shownUrl = (u) => fullUrl(u).replace(/^https?:\/\/(www\.)?/i, '').replace(/\/$/, '');
+
 /**
  * Renders the resume object into a PDF and pipes it to the response stream
  * @param {Object} resume 
@@ -56,6 +64,23 @@ function generateResumePDF(resume, res) {
   const FONT_REGULAR = 'Helvetica';
   const FONT_BOLD = 'Helvetica-Bold';
   const FONT_ITALIC = 'Helvetica-Oblique';
+
+  // Helper: a bullet drawn as a small dot (the standard PDF fonts can't encode "•": it extracted as "?")
+  const drawBullet = (x, y) => {
+    doc.save().circle(x, y + 4.3, 1.25).fill(TEXT_COLOR).restore();
+  };
+
+  // Helper: the muted line under an entry's heading, dates first, so they read right after the entry
+  // (a right-aligned date column is read out of order by text extraction and ATS parsers)
+  const drawMeta = (parts, { italic = false } = {}) => {
+    const text = parts.filter(Boolean).join('  |  ');
+    if (!text) return;
+    doc.moveDown(0.15);
+    doc.fillColor(MUTED_COLOR)
+       .font(italic ? FONT_ITALIC : FONT_REGULAR)
+       .fontSize(8.5)
+       .text(text, 36, doc.y);
+  };
 
   // Helper: Draw Section Title
   const drawSectionTitle = (title) => {
@@ -102,19 +127,33 @@ function generateResumePDF(resume, res) {
   if (personalInfo?.phone) contactParts.push(personalInfo.phone);
   const loc = personalInfo?.location || targetJob?.location || [personalInfo?.city, personalInfo?.state, personalInfo?.country].filter(Boolean).join(', ') || (Array.isArray(workExperience) && workExperience[0] ? workExperience[0].location : '');
   if (loc) contactParts.push(loc);
-  if (personalInfo?.linkedin) {
-    let cleanLi = personalInfo.linkedin.replace(/^(https?:\/\/)?(www\.)?linkedin\.com\/in\//, 'li/');
-    contactParts.push(cleanLi);
-  }
-  if (personalInfo?.github) {
-    let cleanGh = personalInfo.github.replace(/^(https?:\/\/)?(www\.)?github\.com\//, 'gh/');
-    contactParts.push(cleanGh);
-  }
+  // LinkedIn / GitHub: the full address, clickable
+  const contactLinks = [personalInfo?.linkedin, personalInfo?.github].map(fullUrl).filter(Boolean);
 
   doc.fillColor(TEXT_COLOR)
      .font(FONT_REGULAR)
-     .fontSize(8.5)
-     .text(contactParts.join('  |  '), { align: 'center' });
+     .fontSize(8.5);
+  const contactItems = [...contactParts.map((t) => ({ t })), ...contactLinks.map((u) => ({ t: shownUrl(u), link: u }))];
+  const contactLine = contactItems.map((c) => c.t).join('  |  ');
+  if (contactItems.length) {
+    const lineWidth = doc.widthOfString(contactLine);
+    const fitsOneLine = lineWidth <= 523;
+    let x = fitsOneLine ? 36 + (523 - lineWidth) / 2 : 36;
+    const y = doc.y;
+    if (fitsOneLine) {
+      contactItems.forEach((c, i) => {
+        const piece = (i > 0 ? '  |  ' : '') + c.t;
+        const sepW = i > 0 ? doc.widthOfString('  |  ') : 0;
+        doc.fillColor(TEXT_COLOR).text(piece, x, y, { lineBreak: false });
+        if (c.link) doc.link(x + sepW, y, doc.widthOfString(c.t), 10, c.link);
+        x += doc.widthOfString(piece);
+      });
+      doc.text('', 36, y + 11);
+    } else {
+      doc.text(contactParts.join('  |  '), { align: 'center' });
+      contactLinks.forEach((u) => doc.fillColor(TEXT_COLOR).text(shownUrl(u), { align: 'center', link: u }));
+    }
+  }
 
   // --- SUMMARY SECTION ---
   if (professionalSummary?.summary) {
@@ -145,20 +184,9 @@ function generateResumePDF(resume, res) {
          .fillColor(TEXT_COLOR)
          .font(FONT_REGULAR)
          .text(` @ ${work.company || 'Company'}`, { continued: false });
-         
-      doc.fillColor(MUTED_COLOR)
-         .font(FONT_REGULAR)
-         .fontSize(9)
-         .text(dateText, 36, startY, { align: 'right' });
 
-      // Subheader: Location (italic)
-      if (work.location) {
-        doc.moveDown(0.15);
-        doc.fillColor(MUTED_COLOR)
-           .font(FONT_ITALIC)
-           .fontSize(8.5)
-           .text(work.location);
-      }
+      // Subheader: dates, then location (italic)
+      drawMeta([dateText, work.location], { italic: true });
 
       // Main description (if any)
       if (work.description) {
@@ -175,11 +203,12 @@ function generateResumePDF(resume, res) {
         doc.moveDown(0.2);
         work.achievements.forEach(ach => {
           if (ach && ach.trim()) {
+            const bulletY = doc.y;
+            drawBullet(48.5, bulletY);
             doc.fillColor(TEXT_COLOR)
                .font(FONT_REGULAR)
                .fontSize(9)
-               .text('•', 46, doc.y, { continued: true })
-               .text(` ${ach.trim()}`, 54, doc.y, { align: 'justify', width: 505 });
+               .text(ach.trim(), 54, bulletY, { align: 'justify', width: 505 });
             doc.moveDown(0.1);
           }
         });
@@ -210,10 +239,7 @@ function generateResumePDF(resume, res) {
          .font(FONT_REGULAR)
          .text(` - ${schoolText}`, { continued: false });
 
-      doc.fillColor(MUTED_COLOR)
-         .font(FONT_REGULAR)
-         .fontSize(9)
-         .text(dateText, 36, startY, { align: 'right' });
+      drawMeta([dateText]);
 
       let details = [];
       if (edu.gpa) details.push(`GPA: ${edu.gpa}`);
@@ -245,12 +271,7 @@ function generateResumePDF(resume, res) {
          .fontSize(10)
          .text(nameText, 36, startY);
 
-      if (dateText) {
-        doc.fillColor(MUTED_COLOR)
-           .font(FONT_REGULAR)
-           .fontSize(9)
-           .text(dateText, 36, startY, { align: 'right' });
-      }
+      drawMeta([dateText]);
 
       // Tech Stack
       if (proj.technologies && proj.technologies.length > 0) {
@@ -279,7 +300,8 @@ function generateResumePDF(resume, res) {
         doc.fillColor(PRIMARY_COLOR)
            .font(FONT_REGULAR)
            .fontSize(8.5)
-           .text(`Link: ${links.join(' | ')}`);
+           .text('Link: ', 36, doc.y, { continued: true });
+        links.forEach((l, i) => doc.text(`${i > 0 ? ' | ' : ''}${l}`, { continued: i < links.length - 1, link: fullUrl(l) }));
       }
     });
   }
@@ -291,19 +313,21 @@ function generateResumePDF(resume, res) {
     // Group skills by category
     const categorized = {};
     skills.forEach(s => {
-      const cat = s.category || 'General Skills';
+      const name = String(typeof s === 'string' ? s : (s?.name || '')).trim();
+      if (!name) return; // an empty skill drew an empty line that didn't move down: the next one overlapped
+      const cat = (typeof s === 'object' && s?.category) || 'General Skills';
       if (!categorized[cat]) categorized[cat] = [];
-      categorized[cat].push(s.name);
+      categorized[cat].push(name);
     });
 
     Object.keys(categorized).forEach((cat, idx) => {
       if (idx > 0) doc.moveDown(0.4);
-      
+
       const skillLine = categorized[cat].join(', ');
       doc.fillColor(TEXT_COLOR)
          .font(FONT_BOLD)
          .fontSize(9)
-         .text(`${cat}: `, { continued: true })
+         .text(`${cat}: `, 36, doc.y, { continued: true })
          .font(FONT_REGULAR)
          .text(skillLine);
     });
@@ -326,13 +350,9 @@ function generateResumePDF(resume, res) {
          .fontSize(9)
          .text(nameText, 36, startY, { continued: true })
          .font(FONT_REGULAR)
-         .text(orgText, { continued: false });
-
+         .text(orgText, { continued: !!dateText });
       if (dateText) {
-        doc.fillColor(MUTED_COLOR)
-           .font(FONT_REGULAR)
-           .fontSize(9)
-           .text(dateText, 36, startY, { align: 'right' });
+        doc.fillColor(MUTED_COLOR).text(`  |  ${dateText}`, { continued: false });
       }
     });
   }
