@@ -14,6 +14,9 @@ const { analyseSkillGap, validateApplication } = require('../services/skillGapSe
 const { importJobsFromFile } = require("../services/jobs/csvJobImporter");
 const { track } = require('../services/engagement');
 const careerLegacy = require('../services/career/legacyAdapter'); // FLAG_CAREER_TIMELINE pilot
+// may this user manage this job's applicants? an admin, or the job's own poster. An imported job has no
+// poster: only an admin (before, job.postedBy.toString() crashed with a 500 on those)
+const ownsJob = (req, job) => req.user?.role === "admin" || (!!job?.postedBy && String(job.postedBy) === String(req.userId));
 
 // Configure Multer for Job CSV & XLSX files
 const uploadJobCsvMulter = multer({
@@ -73,7 +76,7 @@ router.post("/add", authMiddleware, isAdminOrEmployee, async (req, res) => {
             responsibilities, benefits, experienceLevel, minExperience,
             education, skills, active, featured, urgent, applicationDeadline,
             companyName, companyWebsite
-        } = req.body;
+        } = req.body || {}; // Express 5: no body = undefined
 
         if (!title || !department || !location || !type || !salary || !email || !description) {
             return res.status(400).json({ error: "Missing required job fields" });
@@ -213,7 +216,7 @@ router.put("/update/:id", authMiddleware, isAdminOrEmployee, async (req, res) =>
         const job = await Job.findById(req.params.id);
         if (!job) return res.status(404).json({ message: "Job not found" });
         
-        if (req.user.role !== "admin" && job.postedBy.toString() !== req.userId) {
+        if (!ownsJob(req, job)) {
             return res.status(403).json({ message: "You can only edit your own jobs" });
         }
         if (job.archivedAt) return res.status(410).json({ message: "This job was deleted" });
@@ -236,7 +239,7 @@ router.patch("/toggle/:id", authMiddleware, isAdminOrEmployee, async (req, res) 
         const job = await Job.findById(req.params.id);
         if (!job) return res.status(404).json({ message: "Job not found" });
         
-        if (req.user.role !== "admin" && job.postedBy.toString() !== req.userId) {
+        if (!ownsJob(req, job)) {
             return res.status(403).json({ message: "You can only toggle your own jobs" });
         }
         if (job.archivedAt) return res.status(410).json({ message: "This job was deleted" });
@@ -451,7 +454,7 @@ router.post("/apply/:jobId", authMiddleware, uploadResume.single('resume'), asyn
             fullName, email, phone, address, city, country, coverLetter, portfolioUrl,
             linkedInUrl, githubUrl, currentCompany, currentPosition,
             yearsOfExperience, expectedSalary, noticePeriod, availableFrom, workAuthorization
-        } = req.body;
+        } = req.body || {}; // Express 5: no body = undefined
 
         const job = await Job.findOne({ _id: jobId, active: true });
         if (!job) return res.status(404).json({ message: "Job not found" });
@@ -560,13 +563,14 @@ try {
 // Update application status
 router.patch("/application/:id/status", authMiddleware, async (req, res) => {
     try {
-        const { status, notes, interviewDate, interviewNotes, rating } = req.body;
+        const { status, notes, interviewDate, interviewNotes, rating } = req.body || {}; // Express 5: no body = undefined
         const application = await JobApplication.findById(req.params.id).populate('jobId');
         
         if (!application) return res.status(404).json({ message: "Application not found" });
         
-        const job = await Job.findById(application.jobId._id);
-        if (req.user.role !== "admin" && job.postedBy.toString() !== req.userId) {
+        const job = await Job.findById(application.jobId?._id);
+        if (!job) return res.status(404).json({ message: "Job not found" });
+        if (!ownsJob(req, job)) {
             return res.status(403).json({ message: "Only the job poster can update application status" });
         }
         // FLAG_CAREER_TIMELINE: a pilot application changes through its timeline ("hired" only on a verified hire)
@@ -649,7 +653,7 @@ router.get("/resume/:applicationId", authMiddleware, async (req, res) => {
         if (!application) return res.status(404).json({ message: "Application not found" });
         
         const job = await Job.findById(application.jobId);
-        if (req.user.role !== "admin" && job.postedBy.toString() !== req.userId && application.userId.toString() !== req.userId) {
+        if (!ownsJob(req, job) && application.userId.toString() !== req.userId) {
             return res.status(403).json({ message: "Access denied" });
         }
         
@@ -668,7 +672,7 @@ router.get("/job/:jobId/applications", authMiddleware, async (req, res) => {
         const job = await Job.findById(req.params.jobId);
         if (!job) return res.status(404).json({ message: "Job not found" });
         
-        if (req.user.role !== "admin" && job.postedBy.toString() !== req.userId) {
+        if (!ownsJob(req, job)) {
             return res.status(403).json({ message: "Access denied" });
         }
         
@@ -741,7 +745,7 @@ router.get("/interviews/upcoming", authMiddleware, async (req, res) => {
 // Schedule an interview
 router.post("/interviews/schedule", authMiddleware, async (req, res) => {
     try {
-        const { applicationId, interviewDate, interviewNotes, meetingLink } = req.body;
+        const { applicationId, interviewDate, interviewNotes, meetingLink } = req.body || {}; // Express 5: no body = undefined
         
         if (!applicationId || !interviewDate) {
             return res.status(400).json({ message: "Application ID and interview date are required" });
@@ -753,8 +757,9 @@ router.post("/interviews/schedule", authMiddleware, async (req, res) => {
         }
         
         // Check permission
-        const job = await Job.findById(application.jobId._id);
-        if (req.user.role !== "admin" && job.postedBy.toString() !== req.userId) {
+        const job = await Job.findById(application.jobId?._id);
+        if (!job) return res.status(404).json({ message: "Job not found" });
+        if (!ownsJob(req, job)) {
             return res.status(403).json({ message: "You don't have permission to schedule interviews for this job" });
         }
         // FLAG_CAREER_TIMELINE: pilot applications use the new interview scheduler (/api/career)
@@ -800,7 +805,7 @@ router.post("/interviews/schedule", authMiddleware, async (req, res) => {
 // Reschedule an interview
 router.put("/interviews/reschedule/:id", authMiddleware, async (req, res) => {
     try {
-        const { interviewDate, interviewNotes, meetingLink } = req.body;
+        const { interviewDate, interviewNotes, meetingLink } = req.body || {}; // Express 5: no body = undefined
         const application = await JobApplication.findById(req.params.id).populate('jobId');
         
         if (!application) {
@@ -812,8 +817,9 @@ router.put("/interviews/reschedule/:id", authMiddleware, async (req, res) => {
         }
         
         // Check permission
-        const job = await Job.findById(application.jobId._id);
-        if (req.user.role !== "admin" && job.postedBy.toString() !== req.userId) {
+        const job = await Job.findById(application.jobId?._id);
+        if (!job) return res.status(404).json({ message: "Job not found" });
+        if (!ownsJob(req, job)) {
             return res.status(403).json({ message: "You don't have permission to reschedule this interview" });
         }
         // FLAG_CAREER_TIMELINE: pilot applications use the new interview scheduler (/api/career)
@@ -860,8 +866,9 @@ router.delete("/interviews/cancel/:id", authMiddleware, async (req, res) => {
         }
         
         // Check permission
-        const job = await Job.findById(application.jobId._id);
-        if (req.user.role !== "admin" && job.postedBy.toString() !== req.userId) {
+        const job = await Job.findById(application.jobId?._id);
+        if (!job) return res.status(404).json({ message: "Job not found" });
+        if (!ownsJob(req, job)) {
             return res.status(403).json({ message: "You don't have permission to cancel this interview" });
         }
         // FLAG_CAREER_TIMELINE: pilot applications use the new interview scheduler (/api/career)
@@ -896,7 +903,7 @@ router.delete("/interviews/cancel/:id", authMiddleware, async (req, res) => {
 // Mark interview as completed
 router.patch("/interviews/complete/:id", authMiddleware, async (req, res) => {
     try {
-        const { feedback, rating } = req.body;
+        const { feedback, rating } = req.body || {}; // Express 5: no body = undefined
         const application = await JobApplication.findById(req.params.id).populate('jobId');
         
         if (!application) {
@@ -904,8 +911,9 @@ router.patch("/interviews/complete/:id", authMiddleware, async (req, res) => {
         }
         
         // Check permission
-        const job = await Job.findById(application.jobId._id);
-        if (req.user.role !== "admin" && job.postedBy.toString() !== req.userId) {
+        const job = await Job.findById(application.jobId?._id);
+        if (!job) return res.status(404).json({ message: "Job not found" });
+        if (!ownsJob(req, job)) {
             return res.status(403).json({ message: "You don't have permission to complete this interview" });
         }
         // FLAG_CAREER_TIMELINE: pilot applications use the new interview scheduler (/api/career)
@@ -973,8 +981,8 @@ router.get("/candidates/:id", authMiddleware, async (req, res) => {
         }
         
         // Check permission
-        const job = await Job.findById(candidate.jobId._id);
-        if (req.user.role !== "admin" && job.postedBy.toString() !== req.userId && candidate.userId.toString() !== req.userId) {
+        const job = await Job.findById(candidate.jobId?._id);
+        if (!ownsJob(req, job) && candidate.userId.toString() !== req.userId) {
             return res.status(403).json({ message: "Access denied" });
         }
         
@@ -988,7 +996,7 @@ router.get("/candidates/:id", authMiddleware, async (req, res) => {
 // Bulk update candidate statuses
 router.patch("/candidates/bulk-status", authMiddleware, async (req, res) => {
     try {
-        const { candidateIds, status, notes } = req.body;
+        const { candidateIds, status, notes } = req.body || {}; // Express 5: no body = undefined
         
         if (!candidateIds || !candidateIds.length) {
             return res.status(400).json({ message: "No candidates selected" });
@@ -999,8 +1007,9 @@ router.patch("/candidates/bulk-status", authMiddleware, async (req, res) => {
         // Check permissions for each application
         const pilot = new Set(); // FLAG_CAREER_TIMELINE applications: through their timelines
         for (const app of applications) {
-            const job = await Job.findById(app.jobId._id);
-            if (req.user.role !== "admin" && job.postedBy.toString() !== req.userId) {
+            const job = await Job.findById(app.jobId?._id);
+            if (!job) return res.status(404).json({ message: `The job of candidate ${app.fullName} no longer exists` });
+            if (!ownsJob(req, job)) {
                 return res.status(403).json({ message: `You don't have permission to update candidate ${app.fullName}` });
             }
             if (careerLegacy.managed(job, app)) pilot.add(String(app._id));
@@ -1520,7 +1529,7 @@ router.delete('/bookmarks/:jobId', authMiddleware, async (req, res) => {
 router.post('/:jobId/interactions', authMiddleware, async (req, res) => {
     try {
         const { jobId } = req.params;
-        const { interactionType } = req.body;
+        const { interactionType } = req.body || {}; // Express 5: no body = undefined
 
         if (!['view', 'ignore', 'dismiss'].includes(interactionType)) {
             return res.status(400).json({ message: 'Invalid interaction type' });
@@ -1600,7 +1609,7 @@ router.get('/:jobId/skill-gap', authMiddleware, async (req, res) => {
 router.post('/:jobId/skill-gap/refresh', authMiddleware, async (req, res) => {
   try {
     const { jobId } = req.params;
-    const { resumeId } = req.body;
+    const { resumeId } = req.body || {}; // Express 5: no body = undefined
 
     const Resume = require('../models/Resume');
     let targetResumeId = resumeId;
@@ -1629,7 +1638,7 @@ router.post('/:jobId/skill-gap/refresh', authMiddleware, async (req, res) => {
 router.post('/:jobId/validate-application', authMiddleware, async (req, res) => {
   try {
     const { jobId } = req.params;
-    const { resumeId } = req.body;
+    const { resumeId } = req.body || {}; // Express 5: no body = undefined
 
     const Resume = require('../models/Resume');
     let targetResumeId = resumeId;

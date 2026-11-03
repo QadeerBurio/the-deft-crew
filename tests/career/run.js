@@ -559,6 +559,48 @@ const applyBody = (who) => ({ fullName: `${who} full name`, email: `${who}@test.
   gateway.send = realSend;
   notif.providers.inapp = realInapp2;
 
+  console.log("── 16. old job routes: imported jobs without a poster, missing jobs (403 / 404, never 500)");
+  const in2days = new Date(Date.now() + 2 * 864e5).toISOString();
+  const noPoster = [
+    ["PATCH", `/api/jobs/application/${ids.Aext}/status`, { status: "shortlisted" }],
+    ["GET", `/api/jobs/job/${ids.JX}/applications`],
+    ["POST", "/api/jobs/interviews/schedule", { applicationId: String(ids.Aext), interviewDate: in2days }],
+    ["PUT", `/api/jobs/interviews/reschedule/${ids.Aext}`, { interviewDate: in2days }],
+    ["DELETE", `/api/jobs/interviews/cancel/${ids.Aext}`],
+    ["PATCH", `/api/jobs/interviews/complete/${ids.Aext}`],
+    ["GET", `/api/jobs/candidates/${ids.Aext}`],
+    ["PATCH", "/api/jobs/candidates/bulk-status", { candidateIds: [String(ids.Aext)], status: "rejected" }],
+    ["GET", `/api/jobs/resume/${ids.Aext}`],
+    ["PUT", `/api/jobs/update/${ids.JX}`, { title: "x" }],
+    ["PATCH", `/api/jobs/toggle/${ids.JX}`],
+  ];
+  const got = [];
+  for (const [m, u, b] of noPoster) got.push([m, u, (await call(m, u, { tok: T.E1, body: b })).status]);
+  check("an employer on an imported job (no poster): every old route answers 403, none 500", got.every((g) => g[2] === 403), got.map((g) => `${g[0]} ${g[1].replace(/\/api\/jobs/, "")} ${g[2]}`).join(" | "));
+  check("…and nothing changed (status still pending)", appDoc(ids.Aext).status === "pending");
+  r = await call("GET", `/api/jobs/candidates/${ids.Aext}`, { tok: T.S1 });
+  check("the candidate still sees their own application on it (200)", r.status === 200, r.status);
+  r = await call("GET", `/api/jobs/resume/${ids.Aext}`, { tok: T.S1 });
+  check("…and their resume link: 404 'no resume uploaded' (not 500)", r.status === 404, r.status);
+  r = await call("PATCH", `/api/jobs/application/${ids.Aext}/status`, { tok: T.admin, body: { status: "reviewed" } });
+  check("an admin can still manage it (200)", r.status === 200 && appDoc(ids.Aext).status === "reviewed", r.status);
+  ids.Agone = oid();
+  fake.seed(coll("JobApplication"), [application(ids.Agone, oid(), "S2")]); // its job document is gone
+  const gone = [
+    ["PATCH", `/api/jobs/application/${ids.Agone}/status`, { status: "shortlisted" }],
+    ["POST", "/api/jobs/interviews/schedule", { applicationId: String(ids.Agone), interviewDate: in2days }],
+    ["PUT", `/api/jobs/interviews/reschedule/${ids.Agone}`, { interviewDate: in2days }],
+    ["DELETE", `/api/jobs/interviews/cancel/${ids.Agone}`],
+    ["PATCH", `/api/jobs/interviews/complete/${ids.Agone}`],
+    ["PATCH", "/api/jobs/candidates/bulk-status", { candidateIds: [String(ids.Agone)], status: "rejected" }],
+  ];
+  const got2 = [];
+  for (const who of ["E1", "admin"]) for (const [m, u, b] of gone) got2.push([who, m, u, (await call(m, u, { tok: T[who], body: b })).status]);
+  check("an application whose job no longer exists: 404 for the employer and the admin, none 500", got2.every((g) => g[3] === 404), got2.map((g) => `${g[0]} ${g[1]} ${g[2].replace(/\/api\/jobs/, "")} ${g[3]}`).join(" | "));
+  r = await call("GET", `/api/jobs/candidates/${ids.Agone}`, { tok: T.E1 });
+  const r2 = await call("GET", `/api/jobs/candidates/${ids.Agone}`, { tok: T.S2 });
+  check("candidate detail with a missing job: 403 for an employer, 200 for the candidate", r.status === 403 && r2.status === 200, `${r.status} ${r2.status}`);
+
   // @@MORE@@
 
   // ---------- leak scan ----------
