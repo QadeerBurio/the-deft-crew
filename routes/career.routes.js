@@ -13,6 +13,13 @@
 //   POST /interviews/:id/respond           candidate: accept | decline | reschedule | employer_no_show | dispute
 //   POST /interviews/:id/complete          employer: completed | candidate_no_show
 //   GET  /interviews/:id, /interviews/:id/ics   either side (.ics: stable UID, SEQUENCE per change)
+//   POST /offers                           employer: { applicationId, version, title, terms, expiresAt }
+//   POST /offers/:id/respond               candidate: accept | decline
+//   POST /offers/:id/withdraw              employer
+//   POST /offers/:id/confirm-hire          employer, after the candidate accepted: a verified hire
+//   GET  /offers/:id                       either side
+//   GET  /outcomes/me, PATCH /outcomes/:id candidate: "Hired / Interviewed via TDC", private by default
+//   Disputes: POST /applications/:id/events HIRE_DISPUTED (candidate, 7 days) / HIRE_REVOKED (admin), with a reason
 const express = require("express");
 const auth = require("../middleware/auth.middleware");
 const User = require("../models/User");
@@ -21,6 +28,7 @@ const JobApplication = require("../models/JobApplication");
 const CareerApplicationEvent = require("../models/CareerApplicationEvent");
 const timeline = require("../services/career/careerTimelineService");
 const interviews = require("../services/career/careerInterviewService");
+const offers = require("../services/career/careerOfferService");
 
 const router = express.Router();
 const { CareerError, isId } = timeline;
@@ -92,7 +100,11 @@ router.get("/applications/me", auth, role("student"), handle(async (req, res) =>
 router.get("/applications/:id/timeline", auth, handle(async (req, res) => {
   const ctx = await timeline.contextFor(req.params.id, req.userId);
   const t = await timeline.timeline(ctx);
-  ok(req, res, { ...t, interviewDetails: ctx.external ? null : await interviews.latestFor(ctx.app._id) });
+  ok(req, res, {
+    ...t,
+    interviewDetails: ctx.external ? null : await interviews.latestFor(ctx.app._id),
+    offerDetails: ctx.external ? null : await offers.latestFor(ctx.app._id),
+  });
 }));
 
 router.post("/applications/:id/events", auth, handle(async (req, res) => {
@@ -100,6 +112,10 @@ router.post("/applications/:id/events", auth, handle(async (req, res) => {
   const { type, version, note, internalNote } = req.body || {};
   if (!timeline.GENERIC_EVENTS.includes(type)) {
     return fail(req, res, 400, "NOT_A_GENERIC_EVENT", `Use the interview / offer routes for ${type || "this"}; allowed here: ${timeline.GENERIC_EVENTS.join(", ")}`);
+  }
+  // a dispute or a correction says why
+  if (["HIRE_DISPUTED", "HIRE_REVOKED"].includes(type) && String(note || "").trim().length < 5) {
+    return fail(req, res, 400, "REASON_REQUIRED", "Give a reason (at least 5 characters)");
   }
   const out = await timeline.append(ctx, {
     type,
@@ -164,6 +180,27 @@ router.post("/interviews/:id/complete", auth, handle(async (req, res) => ivReply
 router.get("/interviews/:id", auth, handle(async (req, res) => {
   const { iv } = await interviews.load(req.params.id, req.userId);
   ok(req, res, interviews.view(iv));
+}));
+
+// ---------- offers and outcomes ----------
+router.post("/offers", auth, handle(async (req, res) => {
+  const ctx = await timeline.contextFor(req.body?.applicationId, req.userId);
+  ivReply(req, res)(await offers.send(ctx, req.body || {}, idemKey(req)));
+}));
+router.post("/offers/:id/respond", auth, handle(async (req, res) => ivReply(req, res)(await offers.respond(req.params.id, req.userId, req.body || {}, idemKey(req)))));
+router.post("/offers/:id/withdraw", auth, handle(async (req, res) => ivReply(req, res)(await offers.withdraw(req.params.id, req.userId, req.body || {}, idemKey(req)))));
+router.post("/offers/:id/confirm-hire", auth, handle(async (req, res) => ivReply(req, res)(await offers.confirmHire(req.params.id, req.userId, req.body || {}, idemKey(req)))));
+router.get("/offers/:id", auth, handle(async (req, res) => {
+  const { offer } = await offers.load(req.params.id, req.userId);
+  ok(req, res, offers.view(offer));
+}));
+router.get("/outcomes/me", auth, role("student"), handle(async (req, res) => {
+  if (!timeline.flagOn(req.userId, "student")) return ok(req, res, { enabled: false, outcomes: [] });
+  ok(req, res, { enabled: true, outcomes: await offers.myOutcomes(req.userId) });
+}));
+router.patch("/outcomes/:id", auth, role("student"), handle(async (req, res) => {
+  if (!timeline.flagOn(req.userId, "student")) return fail(req, res, 404, "CAREER_OFF", "Not available");
+  ok(req, res, await offers.setVisibility(req.params.id, req.userId, req.body?.visibility));
 }));
 
 // the calendar file (Add to calendar); the same UID every time, a higher SEQUENCE after each change

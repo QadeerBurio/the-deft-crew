@@ -181,6 +181,10 @@ async function stateOf(ctx, now = new Date()) {
   return { events, state: fold(events, ctx.app.status, now) };
 }
 
+// ---------- per-event writes inside the event's transaction (offers / outcomes register here) ----------
+const sideEffects = {};
+const registerSideEffect = (type, fn) => { (sideEffects[type] = sideEffects[type] || []).push(fn); };
+
 // ---------- after-commit listeners (notifications subscribe here) ----------
 const listeners = [];
 const onEvent = (fn) => listeners.push(fn);
@@ -271,6 +275,7 @@ async function append(ctx, { type, expectedVersion, idempotencyKey = null, metad
       const [e] = await CareerApplicationEvent.create([row], { session });
       const ev = e.toObject();
       if (sideEffect) await sideEffect(session, ev);
+      for (const fn of sideEffects[type] || []) await fn(session, ev, ctx);
       // compatibility adapter: the existing status follows the stage ("hired" only on a verified hire)
       const after = fold([...events, ev], ctx.app.status, now);
       const legacy = LEGACY_STATUS[after.stage];
@@ -379,6 +384,7 @@ module.exports = {
   timeline,
   viewEvent,
   onEvent,
+  registerSideEffect,
   auditAdmin,
   isId,
 };

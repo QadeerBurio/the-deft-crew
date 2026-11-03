@@ -355,6 +355,88 @@ const applyBody = (who) => ({ fullName: `${who} full name`, email: `${who}@test.
   check("the candidate withdraws → the pending interview is cancelled; its .ics becomes CANCEL", r.status === 201 && iv3b.status === "cancelled" && iv3b.active === false && (await call("GET", `/api/career/interviews/${iv3._id}/ics`, { tok: T.S1 })).text.includes("METHOD:CANCEL"), r.text.slice(0, 120));
   check("…and the old status shows it closed (rejected; the old enum has no 'withdrawn')", appDoc(ctx.A3).status === "rejected");
 
+  console.log("── 10. offers and verified hires");
+  ids.J5 = oid();
+  fake.seed(coll("Job"), [job(ids.J5, ids.E1, "Data analyst")]);
+  await call("POST", `/api/jobs/apply/${ids.J5}`, { tok: T.S1, body: applyBody("S1") });
+  await call("POST", `/api/jobs/apply/${ids.J5}`, { tok: T.S2, body: applyBody("S2") });
+  ctx.A4 = rows("JobApplication", (a) => same(a.userId, ids.S1) && same(a.jobId, ids.J5))[0]._id;
+  ctx.A5 = rows("JobApplication", (a) => same(a.userId, ids.S2) && same(a.jobId, ids.J5))[0]._id;
+  // A4: shortlist → interview → accepted → (time passes) → completed
+  await call("POST", `/api/career/applications/${ctx.A4}/events`, { tok: T.E1, body: { type: "SHORTLISTED", version: 1 } });
+  r = await call("POST", "/api/career/interviews", { tok: T.E1, body: { applicationId: String(ctx.A4), version: 2, ...slot, startsAt: inHours(200) } });
+  const iv4 = rows("CareerInterview", (i) => same(i.application, ctx.A4))[0];
+  await call("POST", `/api/career/interviews/${iv4._id}/respond`, { tok: T.S1, body: { version: await ver(ctx.A4, T.S1), response: "accept" } });
+  for (const e of events(ctx.A4)) if (e.metadata?.startsAt) e.metadata.startsAt = past;
+  iv4.startsAt = past; iv4.endsAt = new Date(past.getTime() + 45 * 60e3);
+  r = await call("POST", `/api/career/interviews/${iv4._id}/complete`, { tok: T.E1, body: { version: await ver(ctx.A4) } });
+  const outcome = (appId, type) => rows("CareerOutcome", (o) => same(o.application, appId) && o.outcomeType === type)[0];
+  check("interview completed → a private 'Interviewed via TDC' outcome (employer-recorded)", r.status === 201 && outcome(ctx.A4, "interviewed")?.verificationLevel === "employer-recorded" && outcome(ctx.A4, "interviewed").visibility === "private", r.text.slice(0, 120));
+  const offerBody = (version, extra = {}) => ({ applicationId: String(ctx.A4), version, title: "Junior data analyst", terms: "Full time, starts 1 December", expiresAt: inHours(24 * 7), ...extra });
+  r = await call("POST", "/api/career/offers", { tok: T.S1, body: offerBody(await ver(ctx.A4)) });
+  check("a candidate can't send an offer (403)", r.status === 403, r.status);
+  r = await call("POST", "/api/career/offers", { tok: T.E2, body: offerBody(await ver(ctx.A4)) });
+  check("employer B can't send an offer to employer A's applicant (404)", r.status === 404, r.status);
+  r = await call("POST", "/api/career/offers", { tok: T.E1, body: offerBody(await ver(ctx.A4), { expiresAt: inHours(-2) }) });
+  check("a deadline in the past → 400", r.status === 400 && r.json?.error?.code === "INVALID_DATE", r.text);
+  r = await call("POST", "/api/career/offers", { tok: T.E1, body: offerBody(await ver(ctx.A4)) });
+  const off4 = rows("CareerOffer", (o) => same(o.application, ctx.A4))[0];
+  check("employer A sends an offer → stage offer; the old status stays 'interview' (no offer in the old enum)", r.status === 201 && r.json.data.state === "offer" && appDoc(ctx.A4).status === "interview" && off4?.status === "sent", r.text.slice(0, 160));
+  r = await call("POST", `/api/career/offers/${off4._id}/confirm-hire`, { tok: T.E1, body: { version: await ver(ctx.A4) } });
+  check("confirming a hire before the candidate accepts → 409", r.status === 409 && r.json?.error?.code === "INVALID_TRANSITION" && !outcome(ctx.A4, "hired"), r.text);
+  r = await call("POST", `/api/career/offers/${off4._id}/respond`, { tok: T.S2, body: { version: 1, response: "accept" } });
+  check("another student can't answer the offer (404)", r.status === 404, r.status);
+  r = await call("POST", `/api/career/offers/${off4._id}/respond`, { tok: T.S1, body: { version: await ver(ctx.A4, T.S1), response: "accept", message: "happy to join" } });
+  check("the candidate accepts → offer accepted, NOT hired: stage offer, old status 'interview', no hire outcome", r.status === 201 && r.json.data.state === "offer" && appDoc(ctx.A4).status === "interview" && !outcome(ctx.A4, "hired") && rows("CareerOffer", (o) => same(o._id, off4._id))[0].status === "accepted", r.text.slice(0, 160));
+  r = await call("GET", `/api/career/applications/${ctx.A4}/timeline`, { tok: T.E1 });
+  check("the employer's next action is confirm hire", r.json.data.nextAllowedActions.includes("HIRE_CONFIRMED") && r.json.data.offerDetails?.status === "accepted", JSON.stringify(r.json?.data?.nextAllowedActions));
+  const v4 = await ver(ctx.A4);
+  rs = await Promise.all([1, 2].map(() => call("POST", `/api/career/offers/${off4._id}/confirm-hire`, { tok: T.E1, body: { version: v4 } })));
+  check("two simultaneous confirms → one 201, one 409; one HIRE_CONFIRMED", rs.filter((x) => x.status === 201).length === 1 && rs.filter((x) => x.status === 409).length === 1 && events(ctx.A4).filter((e) => e.type === "HIRE_CONFIRMED").length === 1, statuses(rs));
+  const hired = outcome(ctx.A4, "hired");
+  check("verified hire: old status 'hired', outcome verified, private, 7-day dispute window", appDoc(ctx.A4).status === "hired" && hired?.verificationLevel === "verified" && hired.visibility === "private" && Math.round((new Date(hired.disputeWindowEndsAt) - Date.now()) / 864e5) === 7, JSON.stringify(hired && { v: hired.verificationLevel, vis: hired.visibility }));
+  r = await call("GET", "/api/career/outcomes/me", { tok: T.S1 });
+  check("the student's outcomes: Hired via TDC (verified, private, can dispute) and Interviewed via TDC", r.status === 200 && r.json.data.outcomes.some((o) => o.label === "Hired via TDC" && o.visibility === "private" && o.canDispute) && r.json.data.outcomes.some((o) => o.label === "Interviewed via TDC"), r.text.slice(0, 200));
+  r = await call("PATCH", `/api/career/outcomes/${hired._id}`, { tok: T.S2, body: { visibility: "public" } });
+  check("another student can't change it (404)", r.status === 404, r.status);
+  r = await call("PATCH", `/api/career/outcomes/${hired._id}`, { tok: T.S1, body: { visibility: "public" } });
+  check("the student makes it public (their choice)", r.status === 200 && r.json.data.visibility === "public", r.text);
+  r = await call("POST", `/api/career/applications/${ctx.A4}/events`, { tok: T.S1, body: { type: "HIRE_DISPUTED", version: await ver(ctx.A4, T.S1) } });
+  check("a hire dispute without a reason → 400", r.status === 400 && r.json?.error?.code === "REASON_REQUIRED", r.text);
+  r = await call("POST", `/api/career/applications/${ctx.A4}/events`, { tok: T.S1, body: { type: "HIRE_DISPUTED", version: await ver(ctx.A4, T.S1), note: "the employer withdrew the job after I accepted" } });
+  check("the student disputes within 7 days → revoked, private again; old status back to 'interview'", r.status === 201 && outcome(ctx.A4, "hired").verificationLevel === "revoked" && outcome(ctx.A4, "hired").visibility === "private" && appDoc(ctx.A4).status === "interview", r.text.slice(0, 160));
+  r = await call("PATCH", `/api/career/outcomes/${hired._id}`, { tok: T.S1, body: { visibility: "public" } });
+  check("a revoked outcome can't be made public (409)", r.status === 409 && r.json?.error?.code === "REVOKED", r.text);
+
+  console.log("── 11. the dispute window and admin corrections");
+  await call("POST", `/api/career/applications/${ctx.A5}/events`, { tok: T.E1, body: { type: "SHORTLISTED", version: 1 } });
+  await call("POST", "/api/career/offers", { tok: T.E1, body: { ...offerBody(2), applicationId: String(ctx.A5) } });
+  const off5 = rows("CareerOffer", (o) => same(o.application, ctx.A5))[0];
+  await call("POST", `/api/career/offers/${off5._id}/respond`, { tok: T.S2, body: { version: await ver(ctx.A5, T.S2), response: "accept" } });
+  r = await call("POST", `/api/career/offers/${off5._id}/confirm-hire`, { tok: T.E1, body: { version: await ver(ctx.A5) } });
+  check("A5 hired (offer from shortlist, accepted, confirmed)", r.status === 201 && appDoc(ctx.A5).status === "hired", r.text.slice(0, 120));
+  events(ctx.A5).find((e) => e.type === "HIRE_CONFIRMED").occurredAt = new Date(Date.now() - 8 * 864e5); // 8 days ago
+  r = await call("POST", `/api/career/applications/${ctx.A5}/events`, { tok: T.S2, body: { type: "HIRE_DISPUTED", version: await ver(ctx.A5, T.S2), note: "not hired actually" } });
+  check("a dispute after 7 days → 409 (window closed)", r.status === 409 && r.json?.error?.code === "INVALID_TRANSITION", r.text);
+  r = await call("POST", `/api/career/applications/${ctx.A5}/events`, { tok: T.E1, body: { type: "HIRE_REVOKED", version: await ver(ctx.A5), note: "entered by mistake" } });
+  check("the employer can't revoke a verified hire itself (403)", r.status === 403, r.text);
+  const audits = rows("DomainEvent", (e) => e.type === "career.admin.access").length;
+  r = await call("POST", `/api/career/applications/${ctx.A5}/events`, { tok: T.admin, body: { type: "HIRE_REVOKED", version: await ver(ctx.A5, T.admin), note: "duplicate hire record (support ticket 42)" } });
+  check("admin revokes with a reason → revoked; audited; the event records the admin", r.status === 201 && outcome(ctx.A5, "hired").verificationLevel === "revoked" && rows("DomainEvent", (e) => e.type === "career.admin.access").length > audits && events(ctx.A5).slice(-1)[0].actorRole === "admin", r.text.slice(0, 160));
+
+  console.log("── 12. offer deadlines");
+  await call("POST", `/api/career/applications/${ids.Ae2}/events`, { tok: T.E2, body: { type: "SHORTLISTED", version: 0 } });
+  r = await call("POST", "/api/career/offers", { tok: T.E2, body: { applicationId: String(ids.Ae2), version: await ver(ids.Ae2, T.E2), title: "Designer", expiresAt: inHours(30) } });
+  const offE2 = rows("CareerOffer", (o) => same(o.application, ids.Ae2))[0];
+  check("employer B sends an offer to its own applicant", r.status === 201 && offE2, r.text.slice(0, 120));
+  const expired = new Date(Date.now() - 3600e3);
+  offE2.expiresAt = expired;
+  for (const e of events(ids.Ae2)) if (e.type === "OFFER_SENT") e.metadata.expiresAt = expired;
+  r = await call("POST", `/api/career/offers/${offE2._id}/respond`, { tok: T.S1, body: { version: await ver(ids.Ae2, T.S1), response: "accept" } });
+  check("accepting after the deadline → 409 OFFER_EXPIRED; the timeline shows it expired", r.status === 409 && r.json?.error?.code === "OFFER_EXPIRED" && (await call("GET", `/api/career/applications/${ids.Ae2}/timeline`, { tok: T.S1 })).json.data.offer.status === "expired", r.text);
+  r = await call("POST", "/api/career/offers", { tok: T.E2, body: { applicationId: String(ids.Ae2), version: await ver(ids.Ae2, T.E2), title: "Designer", expiresAt: inHours(48) } });
+  check("…the employer can send a new offer", r.status === 201, r.text.slice(0, 120));
+
   // @@MORE@@
 
   // ---------- leak scan ----------
