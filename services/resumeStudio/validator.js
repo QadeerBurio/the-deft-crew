@@ -20,13 +20,19 @@ const EMAIL_RE = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
 const PROPER_RE = /(?<=[a-z,;:]\s)([A-Z][a-zA-Z0-9&.'-]*(?:\s+(?:of|and|&|for|the|[A-Z][a-zA-Z0-9&.'-]*))*)/g;
 const COMMON_CAPS = new Set(["I", "A", "An", "The", "And", "Or", "In", "On", "At", "For", "With", "To", "Of", "By", "As", "From", "Using", "Through", "Developed", "Built", "Designed", "Led", "Managed", "Created", "Implemented", "Worked", "Collaborated", "Improved", "Delivered", "Supported", "Maintained", "Wrote", "Tested", "Contributed", "Student", "Final", "Team", "Project", "Projects", "Application", "App", "Web", "Mobile", "University", "College", "School", "Course", "Coursework", "Academic", "Intern", "Internship", "Volunteer", "Pakistan", "Karachi", "Lahore", "Islamabad", "English", "Urdu", "API", "APIs", "UI", "UX", "CV"]);
 
+// words that claim seniority, responsibility or recognition: new ones need the student's confirmation
+const CLAIM_WORDS = ["led", "lead", "leading", "headed", "managed", "managing", "supervised", "mentored", "coached", "trained", "owned", "spearheaded", "architected", "directed", "oversaw", "founded", "co-founded", "promoted", "award", "awarded", "award-winning", "winner", "won", "ranked", "top", "published", "patent", "certified", "senior", "expert", "principal", "chief", "head", "team of", "end-to-end", "single-handedly", "revenue", "profit", "clients", "customers"];
+const claimRe = (w) => new RegExp(`(^|[^a-z-])${w}([^a-z-]|$)`, "i"); // words are plain letters, spaces and hyphens
+const CLAIM_RES = CLAIM_WORDS.map((w) => [w, claimRe(w)]);
+
 const norm = (s) => String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
+// whole numbers as tokens ("5,000" = "5000"); a percentage only matches the same percentage
 const numbersIn = (t) => {
   const out = new Set();
   for (const m of String(t || "").matchAll(NUMBER_RE)) {
     const n = m[1].replace(/,/g, "");
     if (/^(19|20)\d{2}$/.test(n)) continue; // years are checked as dates
-    out.add(n);
+    out.add(/^\s?(%|percent)$/i.test(m[2] || "") ? `${n}%` : n);
   }
   return out;
 };
@@ -56,13 +62,15 @@ function checkText(proposed, original, corpus) {
   const support = norm(`${original}\n${corpus}`);
   const flags = [];
   const add = (flag, values) => { if (values.length) flags.push({ flag, values: values.slice(0, 8) }); };
-  add("new_number", [...numbersIn(proposed)].filter((n) => !numbersIn(support).has(n) && !support.includes(n)));
+  const knownNumbers = numbersIn(support);
+  add("new_number", [...numbersIn(proposed)].filter((n) => !knownNumbers.has(n)));
   add("new_date", [...missingFrom(yearsIn(proposed), support), ...missingFrom(monthYearsIn(proposed), support)]);
   const knownSkills = new Set(skillTermsIn(support).map(norm));
   add("new_skill", skillTermsIn(proposed).filter((s) => !knownSkills.has(norm(s)) && !support.includes(norm(s))));
   add("new_link", missingFrom(linksIn(proposed), support));
   add("new_email", missingFrom(emailsIn(proposed), support));
   add("new_name", missingFrom(properIn(proposed), support).filter((p) => !skillTermsIn(p).length));
+  add("new_claim", CLAIM_RES.filter(([, re]) => re.test(proposed) && !re.test(support)).map(([w]) => w));
   if (String(proposed).length > Math.max(120, String(original).length * 2.5)) flags.push({ flag: "much_longer", values: [] });
   const blocking = flags.some((f) => ["new_date", "new_link", "new_email"].includes(f.flag));
   const status = blocking ? "blocked" : flags.length ? "needs_user_confirmation" : "ok";
