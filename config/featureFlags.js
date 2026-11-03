@@ -29,6 +29,10 @@ const FLAGS = {
   // on for BOTH the brand and the student, e.g. FLAG_LOYALTY_V2="ids:<test brand id>,<test student id>".
   // Per user only: listed by /api/app/flags/me, not by the public /api/app/flags.
   loyaltyV2: { default: false, client: true },
+  // Hiring timeline, interviews, offers, verified hires (routes/career.routes.js, services/career/).
+  // Needs it on for BOTH the job's employer and the candidate, e.g.
+  // FLAG_CAREER_TIMELINE="ids:<employer id>,<student id>". Per user only (/api/app/flags/me).
+  careerTimeline: { default: false, client: true },
 };
 
 const JOBS = {
@@ -38,6 +42,7 @@ const JOBS = {
   engagementScheduler: "engagement/schedular: daily drops, streak reminders, rollover, weekly reset (cron)",
   chatSync: "chat-service scheduler: database sync sweeps",
   pushes: "every Expo push (utils/expoProjects.js); off = nothing reaches a phone",
+  careerOutbox: "career/careerOutboxJob: hiring-timeline notifications (retries, interview reminders), every 5 minutes",
 };
 
 const envName = (prefix, name) => `${prefix}_${name.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toUpperCase()}`;
