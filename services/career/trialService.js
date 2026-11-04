@@ -11,6 +11,10 @@
 //      Applications, shortlists, interviews and offers never touch it.
 //   4. A hire revoked within 7 days of its confirmation (candidate dispute or admin) restores the trial
 //      (free_hire_restored); revoked later, the trial goes to under_review for an admin.
+//   5. An admin who rejects the dispute restores the hire (HIRE_RESTORED): it counts again, once. If this hire
+//      no longer holds anything in the ledger, it uses the free hire when the trial is still active and unused,
+//      else it is recorded as hire_billable_pending_pricing. If it still holds its free hire or a pending row
+//      (the dispute came after the 7 days, or it was never free), nothing new is recorded. Audited.
 // Nothing here charges anyone: the ledger only records. Hooks run after the timeline event commits
 // (careerTimelineService.onEvent) and never throw into it; a hire missed by a hook is picked up later by
 // reconcile() (same keys, so never twice).
@@ -209,6 +213,11 @@ async function onVerifiedHire(event) {
   if (!event?.employer || !flagOn(event.employer)) return { skipped: "flag off" };
   // only a hire the job's employer confirmed counts (an admin can't confirm hires or use a free hire)
   if (event.actorRole && event.actorRole !== "employer") return { skipped: "not confirmed by the employer" };
+  return recordHire(event);
+}
+
+// the ledger for one verified hire event (HIRE_CONFIRMED, or an admin's HIRE_RESTORED): exactly once per event
+async function recordHire(event, { by = event.employer, byRole = "system", reason = "verified hire" } = {}) {
   const key = `hire:${event._id}`;
   const done = await EmployerHiringBillingEvent.findOne({ idempotencyKey: key }).lean();
   if (done) return { billing: done, created: false };
@@ -222,7 +231,7 @@ async function onVerifiedHire(event) {
       {
         $set: { eligibilityStatus: "used", consumedCount: 1, consumedByApplicationId: event.application, consumedByEventId: event._id, consumedAt: at },
         $inc: { version: 1 },
-        $push: { history: { action: "consumed", status: "used", by: event.employer, byRole: "system", reason: "verified hire", applicationId: event.application, at } },
+        $push: { history: { action: "consumed", status: "used", by, byRole, reason, applicationId: event.application, at } },
       },
       { returnDocument: "after" }
     ).lean();
@@ -267,7 +276,9 @@ async function onVerifiedHire(event) {
  */
 async function onHireRevoked(event) {
   if (!event?.employer || !flagOn(event.employer)) return { skipped: "flag off" };
-  const consumed = await EmployerHiringBillingEvent.findOne({ applicationId: event.application, eventType: "free_hire_consumed" }).sort({ createdAt: -1 }).lean();
+  // the free hire this revocation undoes: the latest one used BEFORE it (a replay of an old dispute never undoes
+  // the free hire a later restore used)
+  const consumed = await EmployerHiringBillingEvent.findOne({ applicationId: event.application, eventType: "free_hire_consumed", createdAt: { $lte: new Date(event.occurredAt || Date.now()) } }).sort({ createdAt: -1 }).lean();
   if (!consumed) return { skipped: "not a free hire" };
   const restoreKey = `restore:${consumed.eventId}`;
   if (await EmployerHiringBillingEvent.exists({ idempotencyKey: restoreKey })) return { skipped: "already restored" };
@@ -306,7 +317,7 @@ async function reconcile({ companyGroupKey = null, limit = 200 } = {}) {
   const employers = companyGroupKey
     ? (await EmployerCompanyVerification.find({ companyGroupKey, status: "approved" }).select("employerUserId").lean()).map((v) => v.employerUserId)
     : null;
-  const filter = { type: { $in: ["HIRE_CONFIRMED", "HIRE_DISPUTED", "HIRE_REVOKED"] }, ...(employers ? { employer: { $in: employers } } : {}) };
+  const filter = { type: { $in: ["HIRE_CONFIRMED", "HIRE_DISPUTED", "HIRE_REVOKED", "HIRE_RESTORED"] }, ...(employers ? { employer: { $in: employers } } : {}) };
   const events = await CareerApplicationEvent.find(filter).sort({ occurredAt: 1 }).limit(limit).lean();
   // never reach back: only hires after the employer's company was approved (a hire confirmed before the pilot
   // or before approval is not part of the programme)
@@ -318,6 +329,8 @@ async function reconcile({ companyGroupKey = null, limit = 200 } = {}) {
     if (!since || new Date(e.occurredAt) < new Date(since)) continue;
     if (e.type === "HIRE_CONFIRMED") {
       if (!(await EmployerHiringBillingEvent.exists({ idempotencyKey: `hire:${e._id}` }))) { await onVerifiedHire(e); processed += 1; }
+    } else if (e.type === "HIRE_RESTORED") {
+      if ((await onHireRestored(e)).created) processed += 1;
     } else {
       const r = await onHireRevoked(e);
       if (r.restored || r.underReview) processed += 1;
@@ -326,8 +339,34 @@ async function reconcile({ companyGroupKey = null, limit = 200 } = {}) {
   return processed;
 }
 
+/**
+ * An admin rejected the candidate's dispute: the hire is verified again and counts again, exactly once. It uses the
+ * free hire if the company's trial is active and unused, else it is billable with pricing pending; nothing new if
+ * this hire still holds its free hire or a pending row (never counted twice). Audited with the admin's reason.
+ */
+async function onHireRestored(event) {
+  if (!event?.employer || !flagOn(event.employer)) return { skipped: "flag off" };
+  if (event.actorRole !== "admin") return { skipped: "not an admin restore" };
+  if (await EmployerHiringBillingEvent.exists({ idempotencyKey: `hire:${event._id}` })) return { skipped: "already recorded" };
+  const rows = await EmployerHiringBillingEvent.find({ applicationId: event.application }).select("eventType").lean();
+  const n = (t) => rows.filter((r) => r.eventType === t).length;
+  if (n("free_hire_consumed") - n("free_hire_restored") > 0 || n("hire_billable_pending_pricing") > 0) return { skipped: "already counted" };
+  const reason = String(event.metadata?.note || "dispute rejected").slice(0, 500);
+  const out = await recordHire(event, { by: event.actor, byRole: "admin", reason: `hire restored: ${reason}` });
+  // audited on the company's trial (a company without one has no First Hire Free to account for; the timeline
+  // event itself records the admin and the reason)
+  const trialId = out.billing?.trialId || (out.billing?.companyGroupKey && (await EmployerHiringTrial.findOne({ companyGroupKey: out.billing.companyGroupKey }).select("_id").lean())?._id);
+  if (out.created && out.billing && trialId) {
+    const free = out.billing.eventType === "free_hire_consumed";
+    await audit(event.actor, free ? "trial.restored_hire_used_free_hire" : "trial.restored_hire_pending_pricing", "EmployerHiringTrial", { _id: trialId }, reason,
+      { applicationId: String(event.application) }, { eventType: out.billing.eventType, feeWaived: out.billing.feeWaived, amount: out.billing.amount });
+  }
+  return out;
+}
+
 timeline.onEvent(async (event) => {
   if (event.type === "HIRE_CONFIRMED") await onVerifiedHire(event);
+  else if (event.type === "HIRE_RESTORED") await onHireRestored(event);
   else if (event.type === "HIRE_DISPUTED" || event.type === "HIRE_REVOKED") await onHireRevoked(event);
 });
 
@@ -392,5 +431,5 @@ async function reviewTrial(adminId, id, { action, reason }, now = new Date()) {
 
 module.exports = {
   POLICY_VERSION, POLICY_TEXT, RESTORE_DAYS, flagOn, pilotConfigured, cleanDetails, normalizeRegistration, freeMail, hostOf,
-  submitVerification, activate, viewFor, summaryFor, onVerifiedHire, onHireRevoked, reconcile, reviewVerification, reviewTrial, trialOfGroup,
+  submitVerification, activate, viewFor, summaryFor, onVerifiedHire, onHireRevoked, onHireRestored, reconcile, reviewVerification, reviewTrial, trialOfGroup,
 };
