@@ -325,19 +325,57 @@ const trials = () => rows("EmployerHiringTrial");
   const forged = { ...hireEvent(h1.appId), _id: oid(), actorRole: "admin", occurredAt: new Date() };
   const fr = await trialService.onVerifiedHire(forged);
   check("a hire event recorded by an admin is never billed and never uses the free hire (hook guard)", fr.skipped === "not confirmed by the employer" && t1().consumedCount === 0 && billing().length === billingBefore, JSON.stringify(fr));
+  // ---------- an admin rejects a dispute: the restored hire counts again, exactly once ----------
+  // the company's ledger always matches its trial: free hires consumed - restored = the trial's consumedCount
+  const ledgerMatches = () => billing((b) => b.companyGroupKey === t1().companyGroupKey && b.eventType === "free_hire_consumed").length - billing((b) => b.companyGroupKey === t1().companyGroupKey && b.eventType === "free_hire_restored").length === t1().consumedCount;
+  const restoreEvent = (appId) => rows("CareerApplicationEvent", (e) => same(e.application, appId) && e.type === "HIRE_RESTORED").slice(-1)[0];
+  const audits0 = rows("CareerAdminAudit").length;
   r = await call("POST", `${B}/applications/${h1.appId}/events`, { tok: T.admin, body: { type: "HIRE_RESTORED", version: await ver(h1.appId, T.admin), note: "dispute rejected: payslip checked" } });
   await tick();
+  const h1rows = billing((b) => same(b.applicationId, h1.appId));
+  check("dispute → restore: the trial is Used again by this hire (free_hire_consumed again, fee 0)", r.status === 201 && t1().eligibilityStatus === "used" && t1().consumedCount === 1 && same(t1().consumedByApplicationId, h1.appId) && h1rows.map((b) => b.eventType).join() === "free_hire_consumed,free_hire_restored,free_hire_consumed" && h1rows[2].amount === 0 && h1rows[2].feeWaived === true, `${r.status} ${t1().eligibilityStatus} ${h1rows.map((b) => b.eventType).join()}`);
+  check("…audited: the admin and the reason they gave", rows("CareerAdminAudit").length === audits0 + 1 && rows("CareerAdminAudit").slice(-1).every((a) => a.action === "trial.restored_hire_used_free_hire" && same(a.admin, ids.admin) && /payslip checked/.test(a.reason)));
+  const ev = restoreEvent(h1.appId);
+  await Promise.all([1, 2, 3, 4, 5].map(() => trialService.onHireRestored(ev)));
   await trialService.reconcile();
-  check("an admin restores the disputed hire: verified again, but the free hire is NOT used again (still Active, no new billing row)", r.status === 201 && rows("CareerOutcome", (o) => same(o.application, h1.appId) && o.outcomeType === "hired")[0]?.verificationLevel === "verified" && t1().eligibilityStatus === "active" && t1().consumedCount === 0 && billing().length === billingBefore, `${r.status} ${t1().eligibilityStatus} ${billing().length - billingBefore}`);
+  check("5 more callbacks + a reconcile: still one row for the restore, the trial used once, no second audit", billing((b) => same(b.applicationId, h1.appId)).length === 3 && t1().consumedCount === 1 && rows("CareerAdminAudit").length === audits0 + 1);
+  check("the ledger matches the trial (consumed - restored = 1)", ledgerMatches());
+  r = await call("POST", `${B}/applications/${h1.appId}/events`, { tok: T.admin, body: { type: "HIRE_REVOKED", version: await ver(h1.appId, T.admin), note: "hire record entered twice (ticket 81)" } });
+  await tick();
+  check("restore → admin revokes again within 7 days: the free hire comes back once more, ledger still matches", r.status === 201 && t1().eligibilityStatus === "active" && t1().consumedCount === 0 && billing((b) => same(b.applicationId, h1.appId)).length === 4 && ledgerMatches());
+
+  // a free hire, disputed (the free hire comes back), then another hire uses it, then the dispute is rejected
+  const hX = await toAccepted("E1", "S5", "Support analyst");
+  await confirm("E1", hX);
+  await tick();
+  r = await call("POST", `${B}/applications/${hX.appId}/events`, { tok: T.S5, body: { type: "HIRE_DISPUTED", version: await ver(hX.appId, T.S5), note: "I declined on the first day" } });
+  await tick();
+  check("hire X used the free hire, then its dispute gave it back", r.status === 201 && t1().eligibilityStatus === "active" && billing((b) => same(b.applicationId, hX.appId)).map((b) => b.eventType).join() === "free_hire_consumed,free_hire_restored");
   const h3 = await toAccepted("E1", "S3", "QA engineer");
   await confirm("E1", h3);
   await tick();
   check("the restored free hire is used by the next verified hire", billing((b) => same(b.applicationId, h3.appId))[0]?.eventType === "free_hire_consumed" && t1().eligibilityStatus === "used");
+  const audits1 = rows("CareerAdminAudit").length;
+  r = await call("POST", `${B}/applications/${hX.appId}/events`, { tok: T.admin, body: { type: "HIRE_RESTORED", version: await ver(hX.appId, T.admin), note: "dispute rejected: contract signed" } });
+  await tick();
+  await trialService.reconcile();
+  const hXrows = billing((b) => same(b.applicationId, hX.appId));
+  check("restore after another hire took the free hire: hire_billable_pending_pricing (amount null), the trial stays with hire 3", r.status === 201 && hXrows.length === 3 && hXrows[2].eventType === "hire_billable_pending_pricing" && hXrows[2].amount === null && same(t1().consumedByApplicationId, h3.appId) && t1().consumedCount === 1 && ledgerMatches(), hXrows.map((b) => b.eventType).join());
+  check("…audited as pending pricing with the reason", rows("CareerAdminAudit").length === audits1 + 1 && rows("CareerAdminAudit").slice(-1)[0].action === "trial.restored_hire_pending_pricing" && /contract signed/.test(rows("CareerAdminAudit").slice(-1)[0].reason));
+
+  // a hire that was never free (pending pricing) is disputed and restored: its pending row still stands
+  r = await call("POST", `${B}/applications/${h2.appId}/events`, { tok: T.S2, body: { type: "HIRE_DISPUTED", version: await ver(h2.appId, T.S2), note: "not hired actually" } });
+  await tick();
+  r = await call("POST", `${B}/applications/${h2.appId}/events`, { tok: T.admin, body: { type: "HIRE_RESTORED", version: await ver(h2.appId, T.admin), note: "dispute rejected: start letter seen" } });
+  await tick();
+  await trialService.reconcile();
+  check("a pending-pricing hire disputed and restored: still one pending row (no double counting)", r.status === 201 && billing((b) => same(b.applicationId, h2.appId)).length === 1 && billing((b) => same(b.applicationId, h2.appId))[0].eventType === "hire_billable_pending_pricing" && ledgerMatches());
   t1().consumedAt = new Date(Date.now() - 8 * 864e5);
   hireEvent(h3.appId).occurredAt = new Date(Date.now() - 8 * 864e5);
+  const restoredBefore = billing((b) => b.eventType === "free_hire_restored").length;
   r = await call("POST", `${B}/applications/${h3.appId}/events`, { tok: T.admin, body: { type: "HIRE_REVOKED", version: await ver(h3.appId, T.admin), note: "duplicate record found 8 days later" } });
   await tick();
-  check("revoked after 7 days: not restored, the trial goes to Under review", r.status === 201 && t1().eligibilityStatus === "under_review" && t1().fraudReviewStatus === "open" && billing((b) => b.eventType === "free_hire_restored").length === 1, `${r.status} ${t1().eligibilityStatus}`);
+  check("revoked after 7 days: not restored, the trial goes to Under review", r.status === 201 && t1().eligibilityStatus === "under_review" && t1().fraudReviewStatus === "open" && billing((b) => b.eventType === "free_hire_restored").length === restoredBefore, `${r.status} ${t1().eligibilityStatus}`);
   r = await call("GET", `${B}/employers/me/trial`, { tok: T.E1 });
   check("the employer sees Under review", r.json.data.status === "under_review" && r.json.data.nextAction.action === "wait_for_review");
 

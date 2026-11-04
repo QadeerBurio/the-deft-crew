@@ -58,7 +58,7 @@ FLAG_CAREER_TIMELINE=ids:<employer user id>,<student user id>
 | HIRE_CONFIRMED | employer (the job's own; never an admin) | The offer is **accepted** and no hire was recorded before. This is the verified hire. |
 | HIRE_DISPUTED | candidate | Within 7 days of HIRE_CONFIRMED. A reason is required. The hire is revoked at once and the dispute is open. |
 | HIRE_REVOKED | admin | The hire is verified (a correction), or its dispute is open (dispute upheld). A reason is required, and the action is audited. |
-| HIRE_RESTORED | admin | The dispute is open: rejected, the hire is verified again and can't be disputed again. A reason is required; audited. It never uses a free hire. |
+| HIRE_RESTORED | admin | The dispute is open: rejected, the hire is verified again and can't be disputed again. A reason is required; audited. For First Hire Free it counts again, once (docs/FIRST_HIRE_FREE.md). |
 
 **Every write is checked for:**
 - the role, from the database;

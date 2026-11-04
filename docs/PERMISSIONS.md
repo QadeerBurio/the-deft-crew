@@ -12,7 +12,7 @@ Notes
 - Admins may act for an employer on the hiring timeline (shortlist, interviews, offers), each written to the admin
   audit, but **cannot confirm a hire** (403 `EMPLOYER_ONLY`): only the employer who posted the job makes a hire
   verified, so an admin never uses a company's free hire. Admins resolve hire disputes instead, with a reason:
-  `HIRE_RESTORED` (dispute rejected, hire verified again, no free hire used) or `HIRE_REVOKED` (dispute upheld).
+  `HIRE_RESTORED` (dispute rejected, hire verified again; it counts for First Hire Free again, once) or `HIRE_REVOKED` (dispute upheld).
 - The submitted resume snapshot is visible to the candidate and the job's employer only; admins get 404.
 - The public loyalty program view is readable by anyone, including guests (read-only, no personal data).
 - 404 is used for "not yours" so ids of other people's resources can't be probed.
