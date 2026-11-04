@@ -29,6 +29,10 @@ const FLAGS = {
   // routes behave exactly as before. The employer needs it too to see an attached snapshot, e.g.
   // FLAG_RESUME_STUDIO_V2="ids:<test student id>,<test employer id>". Per user only (/api/app/flags/me).
   resumeStudioV2: { default: false, client: true },
+  // Mutual ratings after a completed interview or a verified hire (routes/careerRatings.routes.js,
+  // services/career/ratingService.js). Needs it on for the rater and the person rated, e.g.
+  // FLAG_CAREER_RATINGS="ids:<employer id>,<student id>". Per user only (/api/app/flags/me).
+  careerRatings: { default: false, client: true },
   // Brand loyalty (routes/loyalty.routes.js, services/loyalty.js). A loyalty credit or discount needs it
   // on for BOTH the brand and the student, e.g. FLAG_LOYALTY_V2="ids:<test brand id>,<test student id>".
   // Per user only: listed by /api/app/flags/me, not by the public /api/app/flags.
