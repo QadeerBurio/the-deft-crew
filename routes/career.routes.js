@@ -23,6 +23,8 @@
 //   (upheld) or HIRE_RESTORED (hire verified again), or revokes a verified hire; always with a reason. Only the
 //   employer who owns the job confirms a hire (POST /offers/:id/confirm-hire); an admin can't.
 //   POST /admin/outbox/drain               admin: deliver notifications that are due (also runs after each event)
+//   GET  /admin/disputes                   admin: open hire disputes (audited); resolved with POST /applications/:id/events
+//                                          HIRE_RESTORED / HIRE_REVOKED and a reason. 404 unless FLAG_CAREER_TIMELINE is set
 //   GET  /employers/me/analytics           employer: my funnel; GET /admin/analytics admin: all (audited)
 //                                          ?from&to (applications whose timeline started then), from events only
 const express = require("express");
@@ -227,6 +229,54 @@ router.get("/admin/analytics", auth, role("admin"), handle(async (req, res) => {
   if (req.query.employerId && !isId(req.query.employerId)) return fail(req, res, 400, "INVALID_ID", "Invalid employer id");
   await recordSafe("career.admin.access", `${req.userId}:analytics:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`, { actor: req.userId, subject: { kind: "CareerAnalytics", id: null }, data: { action: "read:analytics", employerId: req.query.employerId || null } });
   ok(req, res, await analytics.funnel({ employerId: req.query.employerId || null, ...r }));
+}));
+
+// open hire disputes: the candidate disputed a verified hire and no admin has decided yet. Names and the job only
+// (no contact details); the timeline itself is read with GET /applications/:id/timeline (audited per application).
+const pilotConfigured = () => !["", "off", "false", "0", "no"].includes(String(process.env.FLAG_CAREER_TIMELINE || "").trim().toLowerCase());
+router.get("/admin/disputes", auth, role("admin"), handle(async (req, res) => {
+  if (!pilotConfigured()) return fail(req, res, 404, "CAREER_OFF", "The hiring timeline isn't set up");
+  const appIds = await CareerApplicationEvent.distinct("application", { type: "HIRE_DISPUTED" });
+  const events = appIds.length ? await CareerApplicationEvent.find({ application: { $in: appIds } }).sort({ seq: 1 }).lean() : [];
+  const by = new Map();
+  for (const e of events) {
+    const k = String(e.application);
+    if (!by.has(k)) by.set(k, []);
+    by.get(k).push(e);
+  }
+  const apps = await JobApplication.find({ _id: { $in: appIds } }).select("jobId userId status").lean();
+  const open = [];
+  for (const app of apps) {
+    const list = by.get(String(app._id)) || [];
+    const s = timeline.fold(list, app.status);
+    if (s.hire.dispute !== "open") continue;
+    const dispute = [...list].reverse().find((e) => e.type === "HIRE_DISPUTED");
+    const hire = [...list].reverse().find((e) => e.type === "HIRE_CONFIRMED");
+    open.push({ app, dispute, hire, version: s.version });
+  }
+  const jobs = new Map((await Job.find({ _id: { $in: open.map((o) => o.app.jobId) } }).select("title companyName postedBy isExternal").lean()).map((j) => [String(j._id), j]));
+  const userIds = [...new Set(open.flatMap((o) => [String(o.app.userId), String(jobs.get(String(o.app.jobId))?.postedBy || "")]).filter(isId))];
+  const users = new Map((await User.find({ _id: { $in: userIds } }).select("name companyName").lean()).map((u) => [String(u._id), u]));
+  const out = open
+    .map(({ app, dispute, hire, version }) => {
+      const job = jobs.get(String(app.jobId));
+      const employerId = job?.postedBy ? String(job.postedBy) : null;
+      return {
+        applicationId: String(app._id),
+        version,
+        job: { title: job?.title || "", company: job?.companyName || "" },
+        candidate: { id: String(app.userId), name: users.get(String(app.userId))?.name || "" },
+        employer: { id: employerId, name: (employerId && (users.get(employerId)?.companyName || users.get(employerId)?.name)) || "" },
+        hireConfirmedAt: hire?.occurredAt || null,
+        disputedAt: dispute?.occurredAt || null,
+        reason: String(dispute?.metadata?.note || ""),
+        // the timeline must still be on for both sides to read and resolve it
+        resolvable: timeline.enabledForJob(job, app.userId),
+      };
+    })
+    .sort((a, b) => new Date(a.disputedAt) - new Date(b.disputedAt));
+  await recordSafe("career.admin.access", `${req.userId}:disputes:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`, { actor: req.userId, subject: { kind: "CareerDisputes", id: null }, data: { action: "read:disputes", count: out.length } });
+  ok(req, res, { disputes: out });
 }));
 
 router.post("/admin/outbox/drain", auth, role("admin"), handle(async (req, res) => {
