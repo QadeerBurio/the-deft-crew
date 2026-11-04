@@ -280,6 +280,7 @@ const check = (name, ok, detail = "") => { results.push(!!ok); if (!ok || proces
     ["PATCH", `${C}/outcomes/${fx.OC}`, { visibility: "private" }, ["S"], "own outcome"],
     ["GET", `${C}/employers/me/analytics`, null, [...ANY_EMPLOYER, "A"]],
     ["GET", `${C}/admin/analytics`, null, ["A"]],
+    ["GET", `${C}/admin/disputes`, null, ["A"], "open hire disputes (admin only, audited)"],
     ["POST", `${C}/admin/outbox/drain`, {}, ["A"]],
     // resume studio
     ["GET", `${RS}/sources/${ids.R1}`, null, ["S"], "own resume"],

@@ -49,6 +49,7 @@ Notes
 | `PATCH /api/career/outcomes/:id` (own outcome) | deny 401 | allow 200 | deny 404 | deny 403 | deny 403 | deny 403 | deny 403 | deny 403 |
 | `GET /api/career/employers/me/analytics` | deny 401 | deny 403 | deny 403 | deny 403 | deny 403 | allow 200 | allow 200 | allow 200 |
 | `GET /api/career/admin/analytics` | deny 401 | deny 403 | deny 403 | deny 403 | deny 403 | deny 403 | deny 403 | allow 200 |
+| `GET /api/career/admin/disputes` (open hire disputes (admin only, audited)) | deny 401 | deny 403 | deny 403 | deny 403 | deny 403 | deny 403 | deny 403 | allow 200 |
 | `POST /api/career/admin/outbox/drain` | deny 401 | deny 403 | deny 403 | deny 403 | deny 403 | deny 403 | deny 403 | allow 200 |
 | `GET /api/career/resume/sources/:id` (own resume) | deny 401 | allow 200 | deny 404 | deny 403 | deny 403 | deny 403 | deny 403 | deny 403 |
 | `POST /api/career/resume/sources/:id/confirm` | deny 401 | allow 409 | deny 404 | deny 403 | deny 403 | deny 403 | deny 403 | deny 403 |
