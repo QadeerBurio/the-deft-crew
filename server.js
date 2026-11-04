@@ -279,6 +279,7 @@ app.use('/api/loyalty', require('./routes/loyalty.routes')); // brand loyalty (F
 app.use('/api/career', require('./routes/careerTrial.routes')); // First Hire Free (FLAG_EMPLOYER_FIRST_HIRE_FREE); unmatched requests continue below
 app.use('/api/career', require('./routes/career.routes')); // hiring timeline (FLAG_CAREER_TIMELINE)
 app.use('/api/surplus', require('./routes/surplus.routes')); // Surprise Box (FLAG_SURPLUS_BOXES)
+app.use('/api/analytics', require('./routes/analytics.routes')); // admin / brand / employer figures from authoritative records (read-only)
 
 // 🆕 admin crew
 app.use('/api/admin/crew', require('./routes/adminCrew.routes'));
