@@ -108,8 +108,11 @@ for the server, manual for the device / real service · **N/A** = not in this pi
 10. **Product sign-off**: the owner signs the decisions listed below.
 
 ## Gaps (no proof yet)
-- **Staging environment**: all automated proof runs on an in-memory database; there is no separate staging deploy.
-  Manual steps 1-9 must run against production with test ids only (flags scoped), or a staging service must be set up.
+- **Staging environment**: all automated proof runs on an in-memory database. `docs/STAGING.md` describes a staging
+  Railway environment with its own Atlas cluster; whether it has been set up is not confirmed. Manual steps 1-9 run
+  there, or in production with test ids only (flags scoped to test accounts).
+- **Career data retention**: the 2-year anonymisation job and the account-deletion wiring for hiring timeline data
+  are not built (`docs/CAREER_TIMELINE.md`, "Retention"). Needed before the career pilot widens past pilot ids.
 - **Portal headless checks are not in the portal repo** (they ran from a scratch folder each sprint). They should be
   committed as a portal test suite.
 - **Online payments for Surprise Box**: not built (N/A by decision); acceptance must be re-proven before any payment.
@@ -119,6 +122,7 @@ for the server, manual for the device / real service · **N/A** = not in this pi
 1. Admins can act for an employer on the hiring timeline, including **confirming a hire**, which then uses the
    company's free hire (see `docs/SECURITY_REVIEW.md` #2). Keep, or restrict hire confirmation to the employer?
 2. Per-user rate limits on Resume Studio PDF preview/export and the analytics overview before `pct:` stages.
-3. Staging: set up a staging Railway service + Atlas copy, or accept "production with test ids" for the pilot.
+3. Staging: set up the staging environment in `docs/STAGING.md`, or accept "production with test ids" for the pilot.
+6. Build the career retention job and account-deletion wiring before `FLAG_CAREER_TIMELINE` goes past pilot ids.
 4. Pricing for hires after the free one (today recorded as "pending pricing", nothing charged).
 5. Surprise Box pickup-only, pay-at-pickup for the pilot (no refunds through tdc).
