@@ -127,6 +127,11 @@ connectDB().then(() => {
     require("./services/surplus/sweep").start();
   }
 
+  // career data retention: daily; counts only (dry run) unless CAREER_RETENTION_MODE=apply
+  if (jobEnabled("careerRetention")) {
+    require("./services/career/careerRetentionJob").start();
+  }
+
   // the chat database is connected either way (chat routes need it); its schedulers are switches
   const { connectDB: connectChatDB } = require("./chat-service/dist/config/db");
   connectChatDB().then(() => {

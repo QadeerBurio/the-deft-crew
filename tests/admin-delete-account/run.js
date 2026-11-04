@@ -112,6 +112,9 @@ const Models = {
   Application: M("Application"), Event: M("Event", "Event"), Registration: M("Event", "Registration"), EventNotification: M("Event", "EventNotification"),
   Booking: M("Booking"), PushLog: M("PushLog"), SocialPushDaily: M("SocialPushDaily"), SocialPushGroup: M("SocialPushGroup"), OtpCode: M("OtpCode"),
   RedemptionArchive: M("RedemptionArchive"), AdminAuditLog: M("AdminAuditLog"),
+  CareerApplicationEvent: M("CareerApplicationEvent"), CareerInterview: M("CareerInterview"), CareerOffer: M("CareerOffer"), CareerOutcome: M("CareerOutcome"),
+  CareerNotificationOutbox: M("CareerNotificationOutbox"), CareerResumeDraft: M("CareerResumeDraft"), CareerResumeApprovedVersion: M("CareerResumeApprovedVersion"),
+  CareerApplicationResumeAttachment: M("CareerApplicationResumeAttachment"), CareerResumeTailorJob: M("CareerResumeTailorJob"), CareerResumeSourceConfirmation: M("CareerResumeSourceConfirmation"),
 };
 
 // ---------- app + leak scanner ----------
@@ -276,6 +279,26 @@ seed(Models.Resume, [{ _id: ids.resS, user: ids.S, uploadedResume: { fileUrl: cl
 seed(Models.SkillGapCache, [{ _id: oid(), resumeId: ids.resS, jobId: oid() }]);
 seed(Models.ProfessionalProfile, [{ _id: oid(), userId: ids.S }]);
 seed(Models.JobApplication, [{ _id: oid(), userId: ids.S, jobId: oid(), coverLetter: "hi", resumePublicId: "TDC_Job_Resumes/sana-app.pdf" }]);
+// hiring timeline + Resume Studio: S was hired through employer EMP (T applied to the same employer, untouched)
+const EMP = oid(), appS = oid(), appT = oid();
+const cev = (app, cand, seq, type, actor, metadata = {}) => ({ _id: oid(), application: app, job: oid(), candidate: cand, employer: EMP, seq, type, actor, actorRole: String(actor) === String(EMP) ? "employer" : "candidate", source: "portal", metadata, idempotencyKey: `${app}:${seq}`, occurredAt: ago(50 - seq) });
+seed(Models.CareerApplicationEvent, [
+  cev(appS, ids.S, 1, "APPLIED", ids.S), cev(appS, ids.S, 2, "SHORTLISTED", EMP, { note: "great fit", internalNote: "her number 0300 1112223" }),
+  cev(appS, ids.S, 3, "OFFER_SENT", EMP, { offerId: "o1", note: "salary 80k" }), cev(appS, ids.S, 4, "OFFER_ACCEPTED", ids.S, { offerId: "o1", response: "accept", note: "thank you!" }),
+  cev(appS, ids.S, 5, "HIRE_CONFIRMED", EMP, { offerId: "o1" }), cev(appT, ids.T, 1, "APPLIED", ids.T, { note: "taha's note" }),
+]);
+seed(Models.CareerInterview, [{ _id: oid(), application: appS, job: oid(), employer: EMP, candidate: ids.S, startsAt: ago(45), endsAt: ago(45), location: "Clifton office", meetingLink: "https://meet.example/s", note: "bring CNIC", status: "completed", active: false, calendarUid: "u-s", responses: [{ response: "accept", message: "see you", at: ago(46) }] }]);
+seed(Models.CareerOffer, [{ _id: oid(), application: appS, job: oid(), employer: EMP, candidate: ids.S, title: "Analyst", terms: "80k", expiresAt: ago(40), status: "accepted", active: true, responseNote: "thank you!" }]);
+seed(Models.CareerOutcome, [{ _id: oid(), application: appS, job: oid(), candidate: ids.S, employer: EMP, outcomeType: "hired", verificationLevel: "verified", visibility: "public" }, { _id: oid(), application: appT, job: oid(), candidate: ids.T, employer: EMP, outcomeType: "interviewed", verificationLevel: "employer-recorded", visibility: "private" }]);
+seed(Models.CareerNotificationOutbox, [{ _id: oid(), kind: "event", eventType: "HIRE_CONFIRMED", application: appS, recipient: ids.S, channel: "inapp", key: "s-k", payload: { body: "hired" }, status: "sent" }, { _id: oid(), kind: "event", eventType: "HIRE_CONFIRMED", application: appS, recipient: EMP, channel: "inapp", key: "e-k", payload: { body: "confirmed" }, status: "sent" }]);
+for (const who of [ids.S, ids.T]) {
+  const vId = oid();
+  seed(Models.CareerResumeDraft, [{ _id: oid(), userId: who, resumeId: oid(), target: { kind: "pasted" }, sourceRevisionHash: "h", sourceContent: { personalInfo: { firstName: "x" } } }]);
+  seed(Models.CareerResumeApprovedVersion, [{ _id: vId, userId: who, sourceResumeId: oid(), draftId: oid(), contentSnapshot: { personalInfo: { firstName: "x" } }, contentHash: "h", rendererVersion: "1" }]);
+  seed(Models.CareerApplicationResumeAttachment, [{ _id: oid(), applicationId: String(who) === String(ids.S) ? appS : appT, jobId: oid(), userId: who, versionId: vId, contentHash: "h", retainUntil: later(24 * 700) }]);
+  seed(Models.CareerResumeTailorJob, [{ _id: oid(), userId: who, resumeId: oid(), idempotencyKey: "k", target: { kind: "pasted" }, status: "succeeded" }]);
+  seed(Models.CareerResumeSourceConfirmation, [{ _id: oid(), userId: who, resumeId: oid(), revisionHash: "h" }]);
+}
 seed(Models.JobInteraction, [{ _id: oid(), userId: ids.S, jobId: oid(), interactionType: "view" }]);
 seed(Models.Application, [{ _id: oid(), userId: ids.S, programId: oid() }]);
 seed(Models.EngagementEvent, [{ _id: oid(), user: ids.S, name: "open_app" }, { _id: oid(), user: ids.T, name: "open_app" }]);
@@ -445,6 +468,15 @@ const textAnywhere = (needle, skip = []) => [...fake.STORE].filter(([n]) => !ski
   check("booking kept anonymised", rows(Models.Booking, (b) => b.packageName === "Hunza" && b.customerName === "deleted user" && !same(b.userId, ids.S)).length === 1);
   check("career, scholarship, engagement and push records gone", [Models.Resume, Models.SkillGapCache, Models.ProfessionalProfile, Models.JobApplication, Models.JobInteraction, Models.Application, Models.UserBadge, Models.DropReaction, Models.SavedItem, Models.Credential, Models.PartnerApplication, Models.PartnerPost, Models.ReferralClick, Models.PushLog, Models.SocialPushDaily, Models.OtpCode].every((Mdl) => rows(Mdl).length === 0));
   check("engagement events kept anonymised (metrics history)", rows(Models.EngagementEvent).length === 2);
+  const sEv = rows(Models.CareerApplicationEvent, (e) => same(e.application, appS)).sort((a, b) => a.seq - b.seq);
+  check("hiring timeline: S's 5 events kept (the employer's funnel still counts the hire) with a placeholder instead of S", sEv.length === 5 && sEv.every((e) => !same(e.candidate, ids.S) && same(e.candidate, sEv[0].candidate) && same(e.employer, EMP)) && !sEv.some((e) => same(e.actor, ids.S)) && sEv[4].type === "HIRE_CONFIRMED");
+  check("…notes and internal notes cleared, offer id and answer kept", !/great fit|0300|80k|thank you/.test(JSON.stringify(sEv.map((e) => e.metadata))) && sEv[3].metadata.offerId === "o1" && sEv[3].metadata.response === "accept");
+  const sIv = rows(Models.CareerInterview, (x) => same(x.application, appS))[0];
+  const sOf = rows(Models.CareerOffer, (x) => same(x.application, appS))[0];
+  check("interview and offer kept without S: placeholder, no location, link, note, messages or terms", !same(sIv.candidate, ids.S) && sIv.location === "" && sIv.meetingLink === "" && sIv.note === "" && sIv.responses.length === 0 && !same(sOf.candidate, ids.S) && sOf.terms === "" && sOf.responseNote === "" && sOf.status === "accepted");
+  check("S's outcome (even a public one) and S's notifications deleted; the employer's notification kept", rows(Models.CareerOutcome, (x) => same(x.application, appS)).length === 0 && rows(Models.CareerNotificationOutbox, (x) => same(x.recipient, ids.S)).length === 0 && rows(Models.CareerNotificationOutbox, (x) => same(x.recipient, EMP)).length === 1);
+  check("S's Resume Studio drafts, versions, sent snapshots, tailoring jobs and confirmations deleted", [Models.CareerResumeDraft, Models.CareerResumeApprovedVersion, Models.CareerApplicationResumeAttachment, Models.CareerResumeTailorJob, Models.CareerResumeSourceConfirmation].every((Mdl) => rows(Mdl, (x) => same(x.userId, ids.S)).length === 0));
+  check("T's career and Resume Studio data untouched", rows(Models.CareerApplicationEvent, (e) => same(e.application, appT) && same(e.candidate, ids.T) && e.metadata.note === "taha's note").length === 1 && rows(Models.CareerOutcome, (x) => same(x.candidate, ids.T)).length === 1 && [Models.CareerResumeDraft, Models.CareerResumeApprovedVersion, Models.CareerApplicationResumeAttachment, Models.CareerResumeTailorJob, Models.CareerResumeSourceConfirmation].every((Mdl) => rows(Mdl, (x) => same(x.userId, ids.T)).length === 1));
   check("S's queued social push item removed, T's kept", rows(Models.SocialPushGroup)[0].items.length === 1 && same(rows(Models.SocialPushGroup)[0].items[0].authorId, ids.T));
   check("S's active reward code deleted, used one kept anonymised", rows(Models.RewardRedemption, (x) => same(x.reward, ids.rC)).length === 1 && rows(Models.RewardRedemption, (x) => same(x.reward, ids.rC))[0].status === "used");
   check("C campaign with S as partner ended", rows(Models.Campaign)[0].status === "ended");

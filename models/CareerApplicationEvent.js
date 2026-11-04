@@ -1,6 +1,7 @@
 // models/CareerApplicationEvent.js
 // One step in a job application's history (applied, shortlisted, interview invited, offer accepted, hire
-// confirmed, disputed, ...). Append-only: rows are never edited or deleted (retention:
+// confirmed, disputed, ...). Append-only: rows are never edited or deleted, except that the retention job and
+// account deletion replace personal ids and notes with placeholders (services/career/retentionService.js,
 // docs/CAREER_TIMELINE.md). `seq` numbers an application's events 1, 2, 3...; the unique (application, seq)
 // index is the optimistic version check: two writers who saw the same version can't both append.
 // idempotencyKey is unique: a retried request returns the event it already wrote.
