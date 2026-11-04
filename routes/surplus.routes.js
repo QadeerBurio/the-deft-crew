@@ -39,6 +39,11 @@ const orders = require("../services/surplus/orders");
 const cases = require("../services/surplus/cases");
 const { SurplusError } = inventory;
 
+// the pilot is configured but the pickup-code secret isn't: say so at startup (holds and orders are refused)
+if (!["", "off", "false", "0", "no"].includes(String(process.env.FLAG_SURPLUS_BOXES || "").trim().toLowerCase()) && !require("../services/surplus/pickupCode").configured()) {
+  require("../services/surplus/pickupCode").logNotConfigured("startup");
+}
+
 const router = express.Router();
 const isId = (v) => mongoose.Types.ObjectId.isValid(String(v || ""));
 const same = (a, b) => String(a) === String(b);
