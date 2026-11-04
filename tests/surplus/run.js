@@ -408,6 +408,10 @@ const inH = (h) => new Date(Date.now() + h * H).toISOString();
   check("re-queuing the same event adds nothing (outbox keys are unique)", rows("SurplusNotificationOutbox").length === before);
   const allText = rows("SurplusNotificationOutbox").map((x) => JSON.stringify(x.payload)).join(" ");
   check("notifications carry no contact details and no pickup code", !/test\.local|0300/.test(allText) && !allText.includes(o1.pickup.code) && !allText.includes("TDCBOX1"));
+  const tapRows = rows("SurplusNotificationOutbox", (x) => same(x.order, o1.id));
+  check("a student's notification opens the order (screen SurpriseBoxes + orderId), never an offer", tapRows.filter((x) => same(x.recipient, ids.S1)).every((x) => x.payload.data.screen === "SurpriseBoxes" && x.payload.data.params?.orderId === o1.id && !x.payload.data.offerId) && tapRows.some((x) => same(x.recipient, ids.S1)));
+  check("a brand's notification carries no app screen (orders live in the portal)", tapRows.filter((x) => same(x.recipient, ids.A)).every((x) => !x.payload.data.screen && !x.payload.data.offerId));
+  check("the in-app rows carry the same tap target", rows("Notification", (n) => n.metadata?.surplusOrderId === o1.id && same(n.recipient, ids.S1)).every((n) => n.metadata.screen === "SurpriseBoxes" && n.metadata.params?.orderId === o1.id));
   check("in-app notifications use an existing type (schema unchanged)", rows("Notification", (n) => n.metadata?.surplusOrderId).every((n) => n.type === "Offer"));
 
   // ---------- SURPLUS_CODE_SECRET ----------
