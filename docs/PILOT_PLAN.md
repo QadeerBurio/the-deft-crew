@@ -125,9 +125,7 @@ All figures come from the admin **Overview** page with the range set to the pilo
 | Free hires consumed | `free_hire_consumed` billing rows minus restored | equals verified hires of pilot companies (max 1 each); never 2 for one company |
 | Disputes | interview and hire disputes or revocations | each one resolved, reason recorded |
 
-**Resume Studio**: **no analytics card or admin page exists for Resume Studio yet.** Until one is built, these are
-read with a read-only count on the Resume Studio collections (drafts, versions, tailoring jobs), and the logs. Adding a
-Resume Studio card to the Overview before day 8 is recommended.
+**Resume Studio** (Overview → Resume Studio card; tailoring requests are kept 30 days, so read it within the pilot):
 
 | Measure | Definition | Proposed target |
 |---|---|---|
