@@ -75,6 +75,9 @@ const gate = (...roles) => async (req, res, next) => {
 };
 const student = [auth, gate("student")];
 const anyone = [auth, gate()];
+// every PDF is rendered on the server: per-user limit, shared by previews, exports and the employer's copy
+// (RATE_LIMIT_RESUME_PDF_MAX / _WINDOW_MIN, utils/userRateLimit.js)
+const pdfLimit = require("../utils/userRateLimit").perUser("resume_pdf");
 const sendPdf = (res, buf, name) => {
   res.setHeader("Content-Type", "application/pdf");
   res.setHeader("Content-Disposition", `attachment; filename="${String(name).replace(/[^A-Za-z0-9 ._-]/g, "").slice(0, 80) || "resume"}.pdf"`);
@@ -167,7 +170,7 @@ router.patch("/drafts/:id/decisions", ...student, handle(async (req, res) => {
   ok(req, res, drafts.studentView(await drafts.decide(req.userId, req.params.id, req.body || {})));
 }));
 
-router.get("/drafts/:id/preview.pdf", ...student, handle(async (req, res) => {
+router.get("/drafts/:id/preview.pdf", ...student, pdfLimit, handle(async (req, res) => {
   const d = await ownDraft(req);
   if (!d) return fail(req, res, 404, "NOT_FOUND", "Draft not found");
   sendPdf(res, await render(drafts.contentWithDecisions(d), { draft: true }), `DRAFT ${d.target?.title || "resume"}`);
@@ -200,7 +203,7 @@ router.get("/versions/:id", ...student, handle(async (req, res) => {
   ok(req, res, { ...drafts.versionView(v), content: v.contentSnapshot });
 }));
 
-router.get("/versions/:id/export.pdf", ...student, handle(async (req, res) => {
+router.get("/versions/:id/export.pdf", ...student, pdfLimit, handle(async (req, res) => {
   const v = await ownVersion(req);
   if (!v) return fail(req, res, 404, "NOT_FOUND", "Version not found");
   sendPdf(res, await render(v.contentSnapshot), v.label || "resume");
@@ -266,7 +269,7 @@ router.get("/applications/:applicationId/resume", ...anyone, handle(async (req, 
   ok(req, res, attachmentView(found.a, found.v));
 }));
 
-router.get("/applications/:applicationId/resume.pdf", ...anyone, handle(async (req, res) => {
+router.get("/applications/:applicationId/resume.pdf", ...anyone, pdfLimit, handle(async (req, res) => {
   const found = await attachmentFor(req);
   if (!found) return fail(req, res, 404, "NOT_FOUND", "No tailored resume for this application");
   const pi = found.v.contentSnapshot?.personalInfo || {};
