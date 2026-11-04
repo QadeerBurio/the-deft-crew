@@ -56,9 +56,9 @@ async function funnel({ employerId = null, from = null, to = null } = {}) {
     if (has("OFFER_SENT")) c.offersSent += 1;
     if (has("OFFER_ACCEPTED")) c.offersAccepted += 1;
     if (has("OFFER_DECLINED")) c.offersDeclined += 1;
-    // a verified hire: confirmed, and not disputed / revoked afterwards
+    // a verified hire: confirmed (or restored by an admin after a dispute), and not disputed / revoked afterwards
     const hire = lastIndex("HIRE_CONFIRMED");
-    const verified = hire >= 0 && hire > Math.max(lastIndex("HIRE_DISPUTED"), lastIndex("HIRE_REVOKED"));
+    const verified = hire >= 0 && Math.max(hire, lastIndex("HIRE_RESTORED")) > Math.max(lastIndex("HIRE_DISPUTED"), lastIndex("HIRE_REVOKED"));
     if (verified) c.verifiedHires += 1;
     c.disputes += list.filter((e) => ["INTERVIEW_DISPUTED", "HIRE_DISPUTED", "HIRE_REVOKED"].includes(e.type)).length;
     // times, only for applications submitted through the timeline

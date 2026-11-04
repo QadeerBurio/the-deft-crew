@@ -424,6 +424,56 @@ const applyBody = (who) => ({ fullName: `${who} full name`, email: `${who}@test.
   r = await call("POST", `/api/career/applications/${ctx.A5}/events`, { tok: T.admin, body: { type: "HIRE_REVOKED", version: await ver(ctx.A5, T.admin), note: "duplicate hire record (support ticket 42)" } });
   check("admin revokes with a reason → revoked; audited; the event records the admin", r.status === 201 && outcome(ctx.A5, "hired").verificationLevel === "revoked" && rows("DomainEvent", (e) => e.type === "career.admin.access").length > audits && events(ctx.A5).slice(-1)[0].actorRole === "admin", r.text.slice(0, 160));
 
+  console.log("── 11b. only the job's employer confirms a hire; an admin resolves disputes");
+  // an application with an accepted offer: shortlisted, offered, accepted
+  const acceptedApp = async (title, studentTok, studentKey) => {
+    const jobId = oid();
+    fake.seed(coll("Job"), [job(jobId, ids.E1, title)]);
+    await call("POST", `/api/jobs/apply/${jobId}`, { tok: studentTok, body: applyBody(studentKey) });
+    const appId = rows("JobApplication", (a) => same(a.jobId, jobId))[0]._id;
+    await call("POST", `/api/career/applications/${appId}/events`, { tok: T.E1, body: { type: "SHORTLISTED", version: 1 } });
+    await call("POST", "/api/career/offers", { tok: T.E1, body: { applicationId: String(appId), version: 2, title, expiresAt: inHours(72) } });
+    const off = rows("CareerOffer", (o) => same(o.application, appId))[0];
+    await call("POST", `/api/career/offers/${off._id}/respond`, { tok: studentTok, body: { version: await ver(appId, studentTok), response: "accept" } });
+    return { appId, off };
+  };
+  const h1 = await acceptedApp("Data intern", T.S1, "S1");
+  r = await call("GET", `/api/career/applications/${h1.appId}/timeline`, { tok: T.admin });
+  check("an admin's next actions don't include confirming the hire; the employer's do", r.status === 200 && !r.json.data.nextAllowedActions.includes("HIRE_CONFIRMED") && (await call("GET", `/api/career/applications/${h1.appId}/timeline`, { tok: T.E1 })).json.data.nextAllowedActions.includes("HIRE_CONFIRMED"), JSON.stringify(r.json?.data?.nextAllowedActions));
+  r = await call("POST", `/api/career/offers/${h1.off._id}/confirm-hire`, { tok: T.admin, body: { version: await ver(h1.appId, T.admin), note: "employer asked by phone" } });
+  check("an admin can't confirm a hire: 403 EMPLOYER_ONLY, no HIRE_CONFIRMED, no hire outcome, old status unchanged", r.status === 403 && r.json?.error?.code === "EMPLOYER_ONLY" && !events(h1.appId).some((e) => e.type === "HIRE_CONFIRMED") && !outcome(h1.appId, "hired") && appDoc(h1.appId).status === "interview", r.text);
+  r = await call("POST", `/api/career/offers/${h1.off._id}/confirm-hire`, { tok: T.E2, body: { version: await ver(h1.appId) } });
+  check("another employer can't confirm it (404)", r.status === 404, r.status);
+  r = await call("POST", `/api/career/offers/${h1.off._id}/confirm-hire`, { tok: T.E1, body: { version: await ver(h1.appId) } });
+  check("the job's employer confirms → verified hire, the event records the employer", r.status === 201 && outcome(h1.appId, "hired")?.verificationLevel === "verified" && events(h1.appId).slice(-1)[0].actorRole === "employer", r.text.slice(0, 120));
+  r = await call("POST", `/api/career/applications/${h1.appId}/events`, { tok: T.S1, body: { type: "HIRE_DISPUTED", version: await ver(h1.appId, T.S1), note: "I never started this job" } });
+  const tl1 = async (tok) => (await call("GET", `/api/career/applications/${h1.appId}/timeline`, { tok })).json.data;
+  check("the candidate disputes → revoked, dispute open", r.status === 201 && outcome(h1.appId, "hired").verificationLevel === "revoked" && (await tl1(T.admin)).hire?.dispute === "open", r.text.slice(0, 200));
+  const adminNext = (await tl1(T.admin)).nextAllowedActions;
+  check("the admin can now restore or revoke (uphold), not confirm", ["HIRE_RESTORED", "HIRE_REVOKED"].every((t) => adminNext.includes(t)) && !adminNext.includes("HIRE_CONFIRMED"), JSON.stringify(adminNext));
+  r = await call("POST", `/api/career/applications/${h1.appId}/events`, { tok: T.admin, body: { type: "HIRE_RESTORED", version: await ver(h1.appId, T.admin) } });
+  check("restoring without a reason → 400 REASON_REQUIRED", r.status === 400 && r.json?.error?.code === "REASON_REQUIRED", r.text);
+  r = await call("POST", `/api/career/applications/${h1.appId}/events`, { tok: T.E1, body: { type: "HIRE_RESTORED", version: await ver(h1.appId), note: "they did start, here is the contract" } });
+  check("the employer can't restore it themselves (403)", r.status === 403, r.text);
+  r = await call("POST", `/api/career/offers/${h1.off._id}/confirm-hire`, { tok: T.E1, body: { version: await ver(h1.appId) } });
+  check("…nor confirm it again while the dispute is open (409)", r.status === 409, r.text);
+  const audits2 = rows("DomainEvent", (e) => e.type === "career.admin.access").length;
+  r = await call("POST", `/api/career/applications/${h1.appId}/events`, { tok: T.admin, body: { type: "HIRE_RESTORED", version: await ver(h1.appId, T.admin), note: "contract and first payslip checked (ticket 77)" } });
+  const o1 = outcome(h1.appId, "hired");
+  check("the admin restores with a reason → verified again, private, old status 'hired', audited, the event records the admin and reason", r.status === 201 && o1.verificationLevel === "verified" && o1.visibility === "private" && !o1.revokedAt && appDoc(h1.appId).status === "hired" && rows("DomainEvent", (e) => e.type === "career.admin.access").length > audits2 && events(h1.appId).slice(-1)[0].actorRole === "admin" && /ticket 77/.test(events(h1.appId).slice(-1)[0].metadata.note), r.text.slice(0, 200));
+  check("…the offer is verified again", rows("CareerOffer", (o) => same(o._id, h1.off._id))[0].verificationStatus === "verified");
+  r = await call("POST", `/api/career/applications/${h1.appId}/events`, { tok: T.S1, body: { type: "HIRE_DISPUTED", version: await ver(h1.appId, T.S1), note: "disputing again" } });
+  check("a restored hire can't be disputed again (409)", r.status === 409 && r.json?.error?.code === "INVALID_TRANSITION", r.text);
+  check("both sides were told about the restore", new Set(rows("CareerNotificationOutbox", (o) => o.eventType === "HIRE_RESTORED" && same(o.application, h1.appId)).map((o) => String(o.recipient))).size === 2);
+  const h2 = await acceptedApp("Ops intern", T.S2, "S2");
+  await call("POST", `/api/career/offers/${h2.off._id}/confirm-hire`, { tok: T.E1, body: { version: await ver(h2.appId) } });
+  await call("POST", `/api/career/applications/${h2.appId}/events`, { tok: T.S2, body: { type: "HIRE_DISPUTED", version: await ver(h2.appId, T.S2), note: "offer was withdrawn on day one" } });
+  r = await call("POST", `/api/career/applications/${h2.appId}/events`, { tok: T.admin, body: { type: "HIRE_REVOKED", version: await ver(h2.appId, T.admin), note: "employer confirmed the offer was withdrawn" } });
+  const h2tl = (await call("GET", `/api/career/applications/${h2.appId}/timeline`, { tok: T.admin })).json.data;
+  check("the admin upholds a dispute (HIRE_REVOKED with a reason) → stays revoked, dispute upheld", r.status === 201 && h2tl.hire?.dispute === "upheld" && outcome(h2.appId, "hired").verificationLevel === "revoked", r.text.slice(0, 200));
+  r = await call("POST", `/api/career/applications/${h2.appId}/events`, { tok: T.admin, body: { type: "HIRE_RESTORED", version: await ver(h2.appId, T.admin), note: "changed my mind" } });
+  check("…an upheld dispute can't be restored afterwards (409)", r.status === 409, r.text);
+
   console.log("── 12. offer deadlines");
   await call("POST", `/api/career/applications/${ids.Ae2}/events`, { tok: T.E2, body: { type: "SHORTLISTED", version: 0 } });
   r = await call("POST", "/api/career/offers", { tok: T.E2, body: { applicationId: String(ids.Ae2), version: await ver(ids.Ae2, T.E2), title: "Designer", expiresAt: inHours(30) } });
@@ -495,13 +545,13 @@ const applyBody = (who) => ({ fullName: `${who} full name`, email: `${who}@test.
   const lastI = (l, t) => l.map((e) => e.type).lastIndexOf(t);
   const want = {
     applications: apps1.length,
-    verifiedHires: apps1.filter((id) => { const l = evOf(id); const h = lastI(l, "HIRE_CONFIRMED"); return h >= 0 && h > Math.max(lastI(l, "HIRE_DISPUTED"), lastI(l, "HIRE_REVOKED")); }).length,
+    verifiedHires: apps1.filter((id) => { const l = evOf(id); const h = lastI(l, "HIRE_CONFIRMED"); return h >= 0 && Math.max(h, lastI(l, "HIRE_RESTORED")) > Math.max(lastI(l, "HIRE_DISPUTED"), lastI(l, "HIRE_REVOKED")); }).length,
     interviewsCompleted: apps1.filter((id) => { const l = evOf(id); return lastI(l, "INTERVIEW_COMPLETED") > lastI(l, "INTERVIEW_DISPUTED"); }).length,
     offersAccepted: apps1.filter((id) => evOf(id).some((e) => e.type === "OFFER_ACCEPTED")).length,
     disputes: mineEv.filter((e) => ["INTERVIEW_DISPUTED", "HIRE_DISPUTED", "HIRE_REVOKED"].includes(e.type)).length,
   };
   check("employer A's funnel matches its events (applications, verified hires, completed interviews, accepted offers, disputes)", r.status === 200 && ["applications", "verifiedHires", "interviewsCompleted", "offersAccepted", "disputes"].every((k) => a1.counts[k] === want[k]), `${JSON.stringify(want)} vs ${JSON.stringify(a1?.counts)}`);
-  check("…3 accepted offers but only 1 verified hire (one disputed, one revoked)", a1.counts.offersAccepted === 3 && a1.counts.verifiedHires === 1, JSON.stringify(a1?.counts));
+  check("…5 accepted offers but 2 verified hires (one disputed, one revoked, one dispute upheld; the restored one counts)", a1.counts.offersAccepted === 5 && a1.counts.verifiedHires === 2, JSON.stringify(a1?.counts));
   check("…the interview that was disputed doesn't count as completed; scheduled ones neither", a1.counts.interviewsCompleted === 1 && a1.counts.interviewsInvited >= 3, JSON.stringify(a1?.counts));
   check("…the pre-pilot application is counted as joined later, not submitted", a1.counts.joinedPilotLater >= 1 && a1.counts.submitted === a1.counts.applications - a1.counts.joinedPilotLater);
   check("…median response times are hours (numbers)", typeof a1.medianHours.firstEmployerResponse === "number" && typeof a1.medianHours.toVerifiedHire === "number", JSON.stringify(a1?.medianHours));

@@ -115,6 +115,15 @@ const revokeHire = (who) => async (session, ev) => {
 };
 timeline.registerSideEffect("HIRE_DISPUTED", revokeHire("candidate"));
 timeline.registerSideEffect("HIRE_REVOKED", revokeHire("admin"));
+// an admin rejected the candidate's dispute: the outcome is verified again (still private)
+timeline.registerSideEffect("HIRE_RESTORED", async (session, ev) => {
+  await CareerOutcome.updateOne(
+    { application: ev.application, outcomeType: "hired" },
+    { $set: { verificationLevel: "verified", revokedAt: null, revokedReason: "", disputeWindowEndsAt: ev.occurredAt, visibility: "private", auditEventId: ev._id } },
+    { session }
+  );
+  await CareerOffer.updateMany({ application: ev.application, status: "accepted", verificationStatus: "revoked" }, { $set: { verificationStatus: "verified" } }, { session });
+});
 // a closed application: its open offer closes too
 timeline.registerSideEffect("REJECTED", (session, ev) => CareerOffer.updateMany({ application: ev.application, status: "sent" }, { $set: { status: "withdrawn", active: false } }, { session }));
 timeline.registerSideEffect("WITHDRAWN", (session, ev) => CareerOffer.updateMany({ application: ev.application, status: "sent" }, { $set: { status: "declined", active: false } }, { session }));

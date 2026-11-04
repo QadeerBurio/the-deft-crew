@@ -207,6 +207,8 @@ async function approvedGroupOf(employerId) {
  */
 async function onVerifiedHire(event) {
   if (!event?.employer || !flagOn(event.employer)) return { skipped: "flag off" };
+  // only a hire the job's employer confirmed counts (an admin can't confirm hires or use a free hire)
+  if (event.actorRole && event.actorRole !== "employer") return { skipped: "not confirmed by the employer" };
   const key = `hire:${event._id}`;
   const done = await EmployerHiringBillingEvent.findOne({ idempotencyKey: key }).lean();
   if (done) return { billing: done, created: false };

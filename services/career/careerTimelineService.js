@@ -51,7 +51,7 @@ function fold(events, legacyStatus = "pending", now = new Date()) {
     version: 0,
     interview: { id: null, status: "none", startsAt: null },
     offer: { id: null, status: "none", expiresAt: null },
-    hire: { status: "none", confirmedAt: null, disputeWindowEndsAt: null },
+    hire: { status: "none", confirmedAt: null, disputeWindowEndsAt: null, dispute: "none" },
     interviewCompletedAt: null,
     legacyHired: false,
     lastEventAt: null,
@@ -82,9 +82,12 @@ function fold(events, legacyStatus = "pending", now = new Date()) {
       case "OFFER_DECLINED": s.offer.status = "declined"; break;
       case "OFFER_WITHDRAWN": s.offer.status = "withdrawn"; break;
       case "OFFER_EXPIRED": s.offer.status = "expired"; break;
-      case "HIRE_CONFIRMED": s.stage = "hired"; s.hire = { status: "verified", confirmedAt: e.occurredAt, disputeWindowEndsAt: new Date(new Date(e.occurredAt).getTime() + DISPUTE_DAYS * DAY) }; break;
-      case "HIRE_DISPUTED":
-      case "HIRE_REVOKED": s.stage = "offer"; s.hire = { ...s.hire, status: "revoked" }; break;
+      case "HIRE_CONFIRMED": s.stage = "hired"; s.hire = { status: "verified", confirmedAt: e.occurredAt, disputeWindowEndsAt: new Date(new Date(e.occurredAt).getTime() + DISPUTE_DAYS * DAY), dispute: "none" }; break;
+      // a candidate dispute takes the hire down at once; an admin then upholds it (HIRE_REVOKED) or restores the hire
+      case "HIRE_DISPUTED": s.stage = "offer"; s.hire = { ...s.hire, status: "revoked", dispute: "open" }; break;
+      case "HIRE_REVOKED": s.stage = "offer"; s.hire = { ...s.hire, status: "revoked", dispute: s.hire.dispute === "open" ? "upheld" : s.hire.dispute }; break;
+      // restored: verified again, and the dispute window is closed (the same hire can't be disputed twice)
+      case "HIRE_RESTORED": s.stage = "hired"; s.hire = { ...s.hire, status: "verified", disputeWindowEndsAt: e.occurredAt, dispute: "rejected" }; break;
       default: break;
     }
   }
@@ -117,10 +120,15 @@ const RULES = {
   OFFER_WITHDRAWN: { roles: ["employer"], ok: (s) => s.stage === "offer" && s.offer.status === "sent", internal: true },
   OFFER_ACCEPTED: { roles: ["candidate"], ok: (s) => s.stage === "offer" && s.offer.status === "sent", internal: true },
   OFFER_DECLINED: { roles: ["candidate"], ok: (s) => s.stage === "offer" && s.offer.status === "sent", internal: true },
-  // a verified hire: the candidate accepted the offer AND the employer confirms
-  HIRE_CONFIRMED: { roles: ["employer"], ok: (s) => s.stage === "offer" && s.offer.status === "accepted" && s.hire.status !== "verified", internal: true },
+  // a verified hire: the candidate accepted the offer AND the employer who owns the job confirms (ownerOnly: an
+  // admin can't confirm for them, so an admin never makes a hire verified or uses a company's free hire)
+  // once only: after a dispute or a revocation, only an admin can make the hire verified again (HIRE_RESTORED)
+  HIRE_CONFIRMED: { roles: ["employer"], ownerOnly: true, ok: (s) => s.stage === "offer" && s.offer.status === "accepted" && s.hire.status === "none", internal: true },
   HIRE_DISPUTED: { roles: ["candidate"], ok: (s, now) => s.hire.status === "verified" && now <= new Date(s.hire.disputeWindowEndsAt) },
-  HIRE_REVOKED: { roles: ["admin"], ok: (s) => s.hire.status === "verified" },
+  // an admin corrects a verified hire, or upholds an open dispute
+  HIRE_REVOKED: { roles: ["admin"], ok: (s) => s.hire.status === "verified" || s.hire.dispute === "open" },
+  // an admin rejects an open dispute: the hire is verified again (this never uses a free hire)
+  HIRE_RESTORED: { roles: ["admin"], ok: (s) => s.hire.dispute === "open" && s.offer.status === "accepted" },
 };
 // events the generic POST /applications/:id/events accepts; the rest go through the interview / offer routes
 const GENERIC_EVENTS = Object.keys(RULES).filter((t) => !RULES[t].internal);
@@ -131,10 +139,14 @@ const INTERNAL_ONLY = new Set(Object.keys(RULES).filter((t) => t.startsWith("INT
 const ARCHIVED_EMPLOYER_OK = new Set(["REJECTED", "HIRE_CONFIRMED", "INTERVIEW_CANCELLED", "OFFER_WITHDRAWN", "INTERVIEW_COMPLETED", "CANDIDATE_NO_SHOW_REPORTED"]);
 const blockedOnArchived = (ctx, type) => !!ctx?.archived && RULES[type].roles.includes("employer") && !ARCHIVED_EMPLOYER_OK.has(type);
 
+// the job's own employer (an admin who posted the job counts as its employer)
+const isOwner = (ctx) => !!ctx?.employerId && same(ctx.employerId, ctx.userId);
+const ownerBlocked = (ctx, type) => !!RULES[type].ownerOnly && !isOwner(ctx);
+
 function nextAllowedActions(state, role, ctx, now = new Date()) {
   if (ctx?.external) return role === "candidate" && notClosed(state) ? ["WITHDRAWN"] : [];
   const roles = role === "admin" ? ["admin", "employer"] : [role];
-  return Object.keys(RULES).filter((t) => RULES[t].roles.some((r) => roles.includes(r)) && RULES[t].ok(state, now) && !blockedOnArchived(ctx, t));
+  return Object.keys(RULES).filter((t) => RULES[t].roles.some((r) => roles.includes(r)) && RULES[t].ok(state, now) && !blockedOnArchived(ctx, t) && !ownerBlocked(ctx, t));
 }
 
 // ---------- access ----------
@@ -228,6 +240,7 @@ async function append(ctx, { type, expectedVersion, idempotencyKey = null, metad
   const role = actorRole || ctx.role;
   const acting = role === "admin" && !rule.roles.includes("admin") && rule.roles.includes("employer") ? "employer" : role;
   if (!rule.roles.includes(acting)) throw new CareerError(403, "NOT_YOUR_ACTION", `${type} is not an action for a ${role}`);
+  if (ownerBlocked(ctx, type)) throw new CareerError(403, "EMPLOYER_ONLY", "Only the employer who posted this job can confirm a hire");
   if (ctx.external && INTERNAL_ONLY.has(type)) throw new CareerError(409, "EXTERNAL_JOB", `${EXTERNAL_LABEL}: interviews, offers and hires aren't tracked for it`);
   if (blockedOnArchived(ctx, type)) {
     throw new CareerError(410, "JOB_ARCHIVED", "This job was deleted; its history stays, but nothing new can start");
@@ -259,7 +272,8 @@ async function append(ctx, { type, expectedVersion, idempotencyKey = null, metad
     seq: state.version + 1,
     type,
     actor: ctx.userId,
-    actorRole: role,
+    // an admin who posted the job acts as its employer
+    actorRole: role === "admin" && acting === "employer" && isOwner(ctx) ? "employer" : role,
     source: String(source || ""),
     metadata: {
       ...(metadata.note ? { note: String(metadata.note).slice(0, 1000) } : {}),

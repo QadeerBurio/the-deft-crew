@@ -55,9 +55,10 @@ FLAG_CAREER_TIMELINE=ids:<employer user id>,<student user id>
 | OFFER_SENT | employer | The stage is shortlisted, interview or offer, with no open offer. The deadline is 1 hour to 90 days away. |
 | OFFER_WITHDRAWN | employer | The offer is sent. |
 | OFFER_ACCEPTED, OFFER_DECLINED | candidate | The offer is sent and its deadline hasn't passed. |
-| HIRE_CONFIRMED | employer | The offer is **accepted**. This is the verified hire. |
-| HIRE_DISPUTED | candidate | Within 7 days of HIRE_CONFIRMED. A reason is required. |
-| HIRE_REVOKED | admin | The hire is verified. A reason is required, and the action is audited. |
+| HIRE_CONFIRMED | employer (the job's own; never an admin) | The offer is **accepted** and no hire was recorded before. This is the verified hire. |
+| HIRE_DISPUTED | candidate | Within 7 days of HIRE_CONFIRMED. A reason is required. The hire is revoked at once and the dispute is open. |
+| HIRE_REVOKED | admin | The hire is verified (a correction), or its dispute is open (dispute upheld). A reason is required, and the action is audited. |
+| HIRE_RESTORED | admin | The dispute is open: rejected, the hire is verified again and can't be disputed again. A reason is required; audited. It never uses a free hire. |
 
 **Every write is checked for:**
 - the role, from the database;
@@ -130,7 +131,7 @@ audited) count distinct applications from events only.
 | submitted | The timeline started with APPLIED from the app. Pilot applications that started later count as "joined the pilot later". |
 | reviewed | Any employer decision: reviewed, shortlisted, rejected, interview invited or offer sent. |
 | interviews completed | INTERVIEW_COMPLETED, with no later dispute. Scheduled interviews never count. |
-| verified hires | HIRE_CONFIRMED, with no later HIRE_DISPUTED or HIRE_REVOKED. Accepted offers alone never count. |
+| verified hires | HIRE_CONFIRMED (or a later HIRE_RESTORED), with no HIRE_DISPUTED or HIRE_REVOKED after it. Accepted offers alone never count. |
 | disputes | INTERVIEW_DISPUTED + HIRE_DISPUTED + HIRE_REVOKED events. |
 | median hours | From APPLIED to the first employer decision, the first interview invite, and the verified hire. |
 

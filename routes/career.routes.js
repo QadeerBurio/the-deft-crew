@@ -19,7 +19,9 @@
 //   POST /offers/:id/confirm-hire          employer, after the candidate accepted: a verified hire
 //   GET  /offers/:id                       either side
 //   GET  /outcomes/me, PATCH /outcomes/:id candidate: "Hired / Interviewed via TDC", private by default
-//   Disputes: POST /applications/:id/events HIRE_DISPUTED (candidate, 7 days) / HIRE_REVOKED (admin), with a reason
+//   Disputes: POST /applications/:id/events HIRE_DISPUTED (candidate, 7 days); an admin resolves it with HIRE_REVOKED
+//   (upheld) or HIRE_RESTORED (hire verified again), or revokes a verified hire; always with a reason. Only the
+//   employer who owns the job confirms a hire (POST /offers/:id/confirm-hire); an admin can't.
 //   POST /admin/outbox/drain               admin: deliver notifications that are due (also runs after each event)
 //   GET  /employers/me/analytics           employer: my funnel; GET /admin/analytics admin: all (audited)
 //                                          ?from&to (applications whose timeline started then), from events only
@@ -120,7 +122,7 @@ router.post("/applications/:id/events", auth, handle(async (req, res) => {
     return fail(req, res, 400, "NOT_A_GENERIC_EVENT", `Use the interview / offer routes for ${type || "this"}; allowed here: ${timeline.GENERIC_EVENTS.join(", ")}`);
   }
   // a dispute or a correction says why
-  if (["HIRE_DISPUTED", "HIRE_REVOKED"].includes(type) && String(note || "").trim().length < 5) {
+  if (["HIRE_DISPUTED", "HIRE_REVOKED", "HIRE_RESTORED"].includes(type) && String(note || "").trim().length < 5) {
     return fail(req, res, 400, "REASON_REQUIRED", "Give a reason (at least 5 characters)");
   }
   const out = await timeline.append(ctx, {

@@ -274,7 +274,7 @@ const check = (name, ok, detail = "") => { results.push(!!ok); if (true) console
     ["GET", `${C}/offers/${fx.O1}`, null, ["S", "E", "A"]],
     ["POST", `${C}/offers/${fx.O1}/respond`, async () => ({ version: await V(fx.A3)(), response: "accept" }), ["S"]],
     ["POST", `${C}/offers/${fx.O1}/withdraw`, async () => ({ version: await V(fx.A3)() }), ["E", "A"], "job's employer, or an admin acting for them (audited)"],
-    ["POST", `${C}/offers/${fx.O1}/confirm-hire`, async () => ({ version: await V(fx.A3)() }), ["E", "A"], "job's employer, or an admin acting for them (audited)"],
+    ["POST", `${C}/offers/${fx.O1}/confirm-hire`, async () => ({ version: await V(fx.A3)() }), ["E"], "the job's employer only (an admin can't confirm a hire)"],
     ["GET", `${C}/outcomes/me`, null, ANY_STUDENT],
     ["PATCH", `${C}/outcomes/${fx.OC}`, { visibility: "private" }, ["S"], "own outcome"],
     ["GET", `${C}/employers/me/analytics`, null, [...ANY_EMPLOYER, "A"]],
