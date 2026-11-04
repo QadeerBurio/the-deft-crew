@@ -10,7 +10,7 @@ scanners in every suite, and a read of the routes and services.
 | # | Area | Finding | Status |
 |---|---|---|---|
 | 1 | Injection | `POST /api/surplus/merchant/orders/:id/transition` with an object or array as `version` reached the query as `NaN`: **500**. Nothing was changed or leaked (the update matched nothing), but it's a crash on bad input. | **Fixed** (`fix/security-review`): `400 INVALID_VERSION`. |
-| 2 | Auth (policy) | Admins may act for an employer on the hiring timeline (shortlist, interviews, offers, **confirm a hire**). Sprint 3 design: support actions, each in the admin audit. An admin-confirmed hire counts as a verified hire and uses the company's First Hire Free entitlement. | **Decision needed** (see below). Not changed. |
+| 2 | Auth (policy) | Admins could act for an employer on the hiring timeline, including **confirming a hire**, which then used the company's First Hire Free entitlement. | **Fixed** (owner decision): only the employer who posted the job confirms a hire (403 `EMPLOYER_ONLY` for admins, also guarded in the free-hire hook); admins resolve disputes with `HIRE_RESTORED` / `HIRE_REVOKED` and a reason. `tests/career` 11b, `tests/first-hire-free`. |
 | 3 | Rate limits | No global rate limit. Per-feature limits exist: Resume Studio tailoring (10 an hour, 2 at once per student), Surprise Box pickup codes (10 wrong codes / 10 min per brand), holds and orders bounded by business rules, the Woo webhook limiter. **Not limited**: Resume Studio PDF preview / export (CPU), analytics admin overview (reads every redemption in the range), loyalty quotes, First Hire Free verification resubmits. All need a signed-in account of the right role (pilot accounts only while flags are scoped). | **Recommendation**: per-user limiter on the PDF and analytics routes before `pct:` stages. Not added (it changes behaviour). |
 | 4 | Rate limits | The wrong-pickup-code limiter is in memory, per server instance. With one Railway instance that's the real limit; with several, it's per instance. | Note for scaling. |
 | 5 | Ownership | Every route x 8 roles behaves as designed (680/680). "Not yours" answers 404 (ids can't be probed). Employers see only their own jobs' candidates, attachments and figures; brands only their listings, orders and figures. | OK |
@@ -22,8 +22,6 @@ scanners in every suite, and a read of the routes and services.
 | 11 | Audit | Admin writes recorded: career timeline (admin audit), loyalty reversals (ledger actor + reason), Surprise Box cases and brand blocks (history), First Hire Free (`CareerAdminAudit`, reason required). | OK |
 
 ## Decisions for the owner
-1. **Admin acting as employer (#2).** Options: keep (support can fix a stuck hire; audited), or restrict admins to
-   corrections only (`HIRE_REVOKED`) so a verified hire always needs the employer. Recommendation: restrict
-   `HIRE_CONFIRMED` to the employer before First Hire Free goes beyond test ids.
+1. **Admin acting as employer (#2).** Decided: hire confirmation is the employer's only; admins resolve disputes.
 2. **Rate limits (#3).** Recommendation: a per-user limiter (e.g. 30 / 10 min) on Resume Studio PDF preview/export and
    the analytics overview, before the `pct:10` stage.

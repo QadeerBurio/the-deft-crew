@@ -9,9 +9,10 @@ without ownership. All pilot flags are on for every test account: this table is 
 the module's routes answer 404.
 
 Notes
-- Admins may act for an employer on the hiring timeline (shortlist, interviews, offers, confirm a hire). Sprint 3
-  design: support actions, each written to the admin audit. A hire an admin confirms counts as a verified hire
-  (see RELEASE_CHECKLIST.md, open decisions).
+- Admins may act for an employer on the hiring timeline (shortlist, interviews, offers), each written to the admin
+  audit, but **cannot confirm a hire** (403 `EMPLOYER_ONLY`): only the employer who posted the job makes a hire
+  verified, so an admin never uses a company's free hire. Admins resolve hire disputes instead, with a reason:
+  `HIRE_RESTORED` (dispute rejected, hire verified again, no free hire used) or `HIRE_REVOKED` (dispute upheld).
 - The submitted resume snapshot is visible to the candidate and the job's employer only; admins get 404.
 - The public loyalty program view is readable by anyone, including guests (read-only, no personal data).
 - 404 is used for "not yours" so ids of other people's resources can't be probed.
@@ -43,7 +44,7 @@ Notes
 | `GET /api/career/offers/:id` | deny 401 | allow 200 | deny 404 | deny 404 | deny 404 | allow 200 | deny 404 | allow 200 |
 | `POST /api/career/offers/:id/respond` | deny 401 | allow 201 | deny 404 | deny 404 | deny 404 | deny 403 | deny 404 | deny 403 |
 | `POST /api/career/offers/:id/withdraw` (job's employer, or an admin acting for them (audited)) | deny 401 | deny 403 | deny 404 | deny 404 | deny 404 | allow 409 | deny 404 | allow 409 |
-| `POST /api/career/offers/:id/confirm-hire` (job's employer, or an admin acting for them (audited)) | deny 401 | deny 403 | deny 404 | deny 404 | deny 404 | allow 201 | deny 404 | allow 409 |
+| `POST /api/career/offers/:id/confirm-hire` (the job's employer only (an admin can't confirm a hire)) | deny 401 | deny 403 | deny 404 | deny 404 | deny 404 | allow 201 | deny 404 | deny 403 |
 | `GET /api/career/outcomes/me` | deny 401 | allow 200 | allow 200 | deny 403 | deny 403 | deny 403 | deny 403 | deny 403 |
 | `PATCH /api/career/outcomes/:id` (own outcome) | deny 401 | allow 200 | deny 404 | deny 403 | deny 403 | deny 403 | deny 403 | deny 403 |
 | `GET /api/career/employers/me/analytics` | deny 401 | deny 403 | deny 403 | deny 403 | deny 403 | allow 200 | allow 200 | allow 200 |

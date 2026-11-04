@@ -315,6 +315,20 @@ const trials = () => rows("EmployerHiringTrial");
   check("a dispute within 7 days revokes the hire and restores the free hire (free_hire_restored)", r.status === 201 && t1().eligibilityStatus === "active" && t1().consumedCount === 0 && billing((b) => same(b.applicationId, h1.appId) && b.eventType === "free_hire_restored").length === 1 && t1().history.some((x) => x.action === "restored"));
   await trialService.reconcile();
   check("a reconcile doesn't restore twice", billing((b) => b.eventType === "free_hire_restored").length === 1);
+
+  // ---------- an admin never confirms a hire or uses the free hire ----------
+  const hA = await toAccepted("E1", "S4", "Analyst");
+  const billingBefore = billing().length;
+  r = await confirm("admin", hA);
+  await tick();
+  check("an admin can't confirm a hire for the employer (403 EMPLOYER_ONLY): the free hire stays Active, no billing row", r.status === 403 && r.json?.error?.code === "EMPLOYER_ONLY" && t1().eligibilityStatus === "active" && t1().consumedCount === 0 && billing().length === billingBefore, r.text.slice(0, 160));
+  const forged = { ...hireEvent(h1.appId), _id: oid(), actorRole: "admin", occurredAt: new Date() };
+  const fr = await trialService.onVerifiedHire(forged);
+  check("a hire event recorded by an admin is never billed and never uses the free hire (hook guard)", fr.skipped === "not confirmed by the employer" && t1().consumedCount === 0 && billing().length === billingBefore, JSON.stringify(fr));
+  r = await call("POST", `${B}/applications/${h1.appId}/events`, { tok: T.admin, body: { type: "HIRE_RESTORED", version: await ver(h1.appId, T.admin), note: "dispute rejected: payslip checked" } });
+  await tick();
+  await trialService.reconcile();
+  check("an admin restores the disputed hire: verified again, but the free hire is NOT used again (still Active, no new billing row)", r.status === 201 && rows("CareerOutcome", (o) => same(o.application, h1.appId) && o.outcomeType === "hired")[0]?.verificationLevel === "verified" && t1().eligibilityStatus === "active" && t1().consumedCount === 0 && billing().length === billingBefore, `${r.status} ${t1().eligibilityStatus} ${billing().length - billingBefore}`);
   const h3 = await toAccepted("E1", "S3", "QA engineer");
   await confirm("E1", h3);
   await tick();

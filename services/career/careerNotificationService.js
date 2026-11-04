@@ -53,6 +53,7 @@ function messagesFor(e, job) {
       E("Hire confirmed", `Your hire for ${title} is confirmed.`),
     ];
     case "HIRE_DISPUTED": return [E("Hire disputed", `The candidate disputed the hire for ${title}. tdc will review it.`)];
+    case "HIRE_RESTORED": return [C("Hire record reviewed", `tdc reviewed your dispute about ${title} and kept the hire record. It stays private.`), E("Hire record restored", `tdc reviewed the candidate's dispute about ${title} and restored the hire.`)];
     case "HIRE_REVOKED": return [C("Hire record corrected", `The hire record for ${title} was corrected by tdc.`), E("Hire record corrected", `The hire record for ${title} was corrected by tdc.`)];
     case "WITHDRAWN": return [E("Application withdrawn", `A candidate withdrew their application for ${title}.`)];
     default: return []; // APPLIED (the apply route already notifies), REVIEWED, LEGACY_STATUS
