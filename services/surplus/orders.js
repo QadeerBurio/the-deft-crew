@@ -16,7 +16,7 @@ const Branch = require("../../models/Branch");
 const { recordSafe } = require("../domainEvents");
 const policy = require("./policy");
 const pickupCode = require("./pickupCode");
-const { SurplusError, endHold, restoreStock } = require("./inventory");
+const { SurplusError, endHold, restoreStock, assertConfigured } = require("./inventory");
 
 const same = (a, b) => String(a) === String(b);
 const isId = (v) => mongoose.Types.ObjectId.isValid(String(v || ""));
@@ -30,6 +30,7 @@ async function placeOrder({ studentId, holdId, idempotencyKey, acceptedTerms, no
   if (!/^[A-Za-z0-9_-]{8,80}$/.test(key)) throw new SurplusError(400, "IDEMPOTENCY_KEY_REQUIRED", "idempotencyKey (8-80 letters, digits, - or _) is required");
   const again = await SurplusOrder.findOne({ student: studentId, idempotencyKey: key }).lean();
   if (again) return { order: again, created: false };
+  assertConfigured("order"); // before the hold is touched: it stays active, its stock stays held until it expires
   if (!isId(holdId)) throw new SurplusError(400, "HOLD_REQUIRED", "Hold the box first");
   if (acceptedTerms !== true) throw new SurplusError(400, "TERMS_REQUIRED", "Please read and accept the food and pickup terms first");
 
@@ -183,6 +184,7 @@ async function verifyPickup(brandId, { code, qr, branchId, markPaid = false, now
 /** The code and QR for the student's own active order (derived, never stored) */
 function pickupFor(order) {
   if (!policy.AWAITING_PICKUP.includes(order.state)) return null;
+  if (!pickupCode.configured()) { pickupCode.logNotConfigured("show pickup code"); return { code: null, qr: null, validUntil: order.pickupEnd, unavailable: true }; }
   const code = pickupCode.codeFor(order._id, order.pickupCodeNonce);
   return { code, qr: pickupCode.qrFor(order._id, code), validUntil: order.pickupEnd };
 }

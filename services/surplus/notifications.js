@@ -49,6 +49,14 @@ const brandNameOf = async (brandId) => {
   return b?.brandName || b?.companyName || b?.name || "the brand";
 };
 
+// what a tap opens. The app's tap handlers (push, in-app banner, notification list) navigate to
+// data.screen with data.params: the student's goes to the SurpriseBoxes screen on that order. Brands
+// handle orders in the portal, so theirs carry no app screen (a tap opens nothing instead of a wrong page).
+const tapData = (order, type, to) => ({
+  surplusOrderId: String(order._id), ref: order.ref, eventType: type,
+  ...(to === "student" ? { screen: "SurpriseBoxes", params: { orderId: String(order._id) } } : {}),
+});
+
 /** Queue the notifications for one order event (kind "event") or a reminder; then deliver what's due */
 async function onOrderEvent(order, type, { kind = "event", drainNow = true } = {}) {
   const msgs = messagesFor(type, order, await brandNameOf(order.brand));
@@ -62,7 +70,7 @@ async function onOrderEvent(order, type, { kind = "event", drainNow = true } = {
       try {
         await SurplusNotificationOutbox.create({
           kind, eventType: type, order: order._id, recipient, channel, key,
-          payload: { title: m.title, body: m.body, data: { surplusOrderId: String(order._id), ref: order.ref, eventType: type, screen: m.to === "student" ? "SurpriseBoxOrder" : "SurpriseBoxOrders" } },
+          payload: { title: m.title, body: m.body, data: tapData(order, type, m.to) },
           expiresAt: kind === "reminder" ? order.pickupEnd : null,
         });
         queued += 1;
@@ -119,4 +127,4 @@ async function drain({ limit = 25, now = new Date() } = {}) {
   return out.filter(Boolean);
 }
 
-module.exports = { messagesFor, onOrderEvent, deliver, drain, providers, MAX_ATTEMPTS };
+module.exports = { tapData, messagesFor, onOrderEvent, deliver, drain, providers, MAX_ATTEMPTS };

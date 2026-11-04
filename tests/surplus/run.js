@@ -10,6 +10,7 @@ const Module = require("module");
 const SERVER = path.resolve(process.argv[2] || path.join(__dirname, "..", ".."));
 const reqS = Module.createRequire(path.join(SERVER, "server.js"));
 process.env.JWT_SECRET = "test-only";
+process.env.SURPLUS_CODE_SECRET = "test-only-surplus-code-secret-0123456789abcdef"; // the pickup-code secret (not JWT_SECRET)
 process.env.DISABLE_NOTIFICATION_PUSH = "true";
 for (const k of ["MONGO_URI", "MONGODB_URI", "REDIS_URL", "APP_ENV", "RAILWAY_ENVIRONMENT_NAME"]) delete process.env[k];
 for (const k of Object.keys(process.env)) if (/^(FLAG|JOB)_/.test(k)) delete process.env[k];
@@ -407,12 +408,50 @@ const inH = (h) => new Date(Date.now() + h * H).toISOString();
   check("re-queuing the same event adds nothing (outbox keys are unique)", rows("SurplusNotificationOutbox").length === before);
   const allText = rows("SurplusNotificationOutbox").map((x) => JSON.stringify(x.payload)).join(" ");
   check("notifications carry no contact details and no pickup code", !/test\.local|0300/.test(allText) && !allText.includes(o1.pickup.code) && !allText.includes("TDCBOX1"));
+  const tapRows = rows("SurplusNotificationOutbox", (x) => same(x.order, o1.id));
+  check("a student's notification opens the order (screen SurpriseBoxes + orderId), never an offer", tapRows.filter((x) => same(x.recipient, ids.S1)).every((x) => x.payload.data.screen === "SurpriseBoxes" && x.payload.data.params?.orderId === o1.id && !x.payload.data.offerId) && tapRows.some((x) => same(x.recipient, ids.S1)));
+  check("a brand's notification carries no app screen (orders live in the portal)", tapRows.filter((x) => same(x.recipient, ids.A)).every((x) => !x.payload.data.screen && !x.payload.data.offerId));
+  check("the in-app rows carry the same tap target", rows("Notification", (n) => n.metadata?.surplusOrderId === o1.id && same(n.recipient, ids.S1)).every((n) => n.metadata.screen === "SurpriseBoxes" && n.metadata.params?.orderId === o1.id));
   check("in-app notifications use an existing type (schema unchanged)", rows("Notification", (n) => n.metadata?.surplusOrderId).every((n) => n.type === "Offer"));
+
+  // ---------- SURPLUS_CODE_SECRET ----------
+  const errors = [];
+  const origError = console.error;
+  console.error = (...a) => { errors.push(a.join(" ")); };
+  const SECRET = process.env.SURPLUS_CODE_SECRET;
+  const c1 = pickupCode.codeFor("6ae9c1c1c1c1c1c1c1c1c1c1", "nonce-1");
+  process.env.JWT_SECRET = "a-different-jwt-secret";
+  const c2 = pickupCode.codeFor("6ae9c1c1c1c1c1c1c1c1c1c1", "nonce-1");
+  process.env.JWT_SECRET = "test-only";
+  process.env.SURPLUS_CODE_SECRET = `${SECRET}-rotated`;
+  const c3 = pickupCode.codeFor("6ae9c1c1c1c1c1c1c1c1c1c1", "nonce-1");
+  process.env.SURPLUS_CODE_SECRET = SECRET;
+  check("the code comes from SURPLUS_CODE_SECRET, not JWT_SECRET", c1 === c2 && c1 !== c3);
+  const lbLeft = doc("SurplusListing", LB).quantityAvailable;
+  const preHold = (await call("POST", `${B}/holds`, { tok: T.S8, body: { listingId: LB, qty: 1, idempotencyKey: key() } })).json?.data?.hold;
+  delete process.env.SURPLUS_CODE_SECRET;
+  r = await call("POST", `${B}/holds`, { tok: T.S2, body: { listingId: LB, qty: 1, idempotencyKey: key() } });
+  check("no SURPLUS_CODE_SECRET: holds refused (503 SURPLUS_NOT_CONFIGURED), stock untouched", r.status === 503 && r.json.error.code === "SURPLUS_NOT_CONFIGURED" && doc("SurplusListing", LB).quantityAvailable === lbLeft - 1, r.text.slice(0, 120));
+  check("no SURPLUS_CODE_SECRET: a clear error in the logs", errors.some((e) => /\[surplus\] SURPLUS_CODE_SECRET is not set/.test(e) && /never taken from JWT_SECRET/.test(e)), errors.join(" | ").slice(0, 200));
+  r = await call("POST", `${B}/orders`, { tok: T.S8, body: { holdId: preHold?.id, idempotencyKey: key(), acceptedTerms: true } });
+  check("no SURPLUS_CODE_SECRET: orders refused, no order made, the hold isn't consumed (it expires and gives its box back)", r.status === 503 && r.json.error.code === "SURPLUS_NOT_CONFIGURED" && !rows("SurplusOrder", (o) => same(o.student, ids.S8)).length && doc("SurplusInventoryHold", preHold.id).state === "active");
+  r = await call("GET", `${B}/orders/${sB.id}`, { tok: T.S1 });
+  check("no SURPLUS_CODE_SECRET: an existing order still loads, its code shown as unavailable (no 500, no fallback)", r.status === 200 && r.json.data.pickup?.unavailable === true && r.json.data.pickup.code === null);
+  process.env.SURPLUS_CODE_SECRET = "too-short-secret";
+  r = await call("POST", `${B}/holds`, { tok: T.S2, body: { listingId: LB, qty: 1, idempotencyKey: key() } });
+  check("a secret shorter than 32 characters is refused too", r.status === 503 && r.json.error.code === "SURPLUS_NOT_CONFIGURED");
+  process.env.SURPLUS_CODE_SECRET = SECRET;
+  r = await call("POST", `${B}/orders`, { tok: T.S8, body: { holdId: preHold.id, idempotencyKey: key(), acceptedTerms: true } });
+  check("with the secret back, the same hold becomes an order with its code", r.status === 201 && /^[A-Z2-9]{6}$/.test(r.json.data.pickup.code));
+  r = await call("GET", `${B}/orders/${sB.id}`, { tok: T.S1 });
+  check("and the earlier order shows its code again", /^[A-Z2-9]{6}$/.test(r.json.data.pickup?.code || ""));
+  console.error = origError;
 
   // ---------- leak scan ----------
   const leaky = responses.filter((x) => x.leaks.length);
   check(`leak scan: ${responses.length} responses, no contact details, code hashes or pickup codes outside the student's own order`, leaky.length === 0, leaky.map((x) => `${x.url} ${x.leaks.join(",")}`).slice(0, 5).join(" | "));
-  check("no 500s", !responses.some((x) => x.status >= 500), responses.filter((x) => x.status >= 500).map((x) => x.url + " " + x.text.slice(0, 80)).join(" | "));
+  const unexpected = (x) => x.status >= 500 && !(x.status === 503 && /SURPLUS_NOT_CONFIGURED/.test(x.text)); // 503: the intended "secret not set" refusal
+  check("no 500s", !responses.some(unexpected), responses.filter(unexpected).map((x) => x.url + " " + x.text.slice(0, 80)).join(" | "));
 
   server.close();
   const failed = results.filter((x) => !x).length;

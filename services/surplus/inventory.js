@@ -9,6 +9,7 @@ const SurplusOrder = require("../../models/SurplusOrder");
 const SurplusBrandBlock = require("../../models/SurplusBrandBlock");
 const { isEnabled } = require("../../config/featureFlags");
 const policy = require("./policy");
+const pickupCode = require("./pickupCode");
 
 class SurplusError extends Error {
   constructor(status, code, message, extra = {}) { super(message); this.status = status; this.code = code; Object.assign(this, extra); }
@@ -41,6 +42,13 @@ async function releaseExpiredHolds({ listing = null, now = new Date(), limit = 2
   return released;
 }
 
+// no SURPLUS_CODE_SECRET: no pickup code could be made, so nothing is held or ordered (and it's logged)
+function assertConfigured(where) {
+  if (pickupCode.configured()) return;
+  pickupCode.logNotConfigured(where);
+  throw new SurplusError(503, "SURPLUS_NOT_CONFIGURED", "Surprise Box orders aren't available right now. Please try again later.");
+}
+
 const brandBlocked = async (brandId) => !!(await SurplusBrandBlock.exists({ brand: brandId, active: true }));
 const flagOn = (id) => isEnabled("surplusBoxes", { id: String(id) });
 
@@ -62,6 +70,7 @@ async function createHold({ studentId, listingId, qty, idempotencyKey, now = new
   if (!/^[A-Za-z0-9_-]{8,80}$/.test(key)) throw new SurplusError(400, "IDEMPOTENCY_KEY_REQUIRED", "idempotencyKey (8-80 letters, digits, - or _) is required");
   const again = await SurplusInventoryHold.findOne({ student: studentId, idempotencyKey: key }).lean();
   if (again) return { hold: again, created: false };
+  assertConfigured("hold");
   const n = Number(qty);
   if (!Number.isInteger(n) || n < 1 || n > policy.MAX_PER_LISTING) throw new SurplusError(400, "INVALID_QTY", `Choose 1 to ${policy.MAX_PER_LISTING} boxes`);
 
@@ -113,4 +122,4 @@ async function releaseHold(studentId, holdId, now = new Date()) {
   return hold;
 }
 
-module.exports = { SurplusError, createHold, releaseHold, endHold, releaseExpiredHolds, restoreStock, assertOrderable, brandBlocked, flagOn };
+module.exports = { SurplusError, assertConfigured, createHold, releaseHold, endHold, releaseExpiredHolds, restoreStock, assertOrderable, brandBlocked, flagOn };

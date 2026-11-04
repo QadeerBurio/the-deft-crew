@@ -1,18 +1,34 @@
 // services/surplus/pickupCode.js
 // The pickup code: 6 characters (no 0/O/1/I/L) plus a QR of "TDCBOX1:<orderId>:<code>". It's derived
-// from the order id and a random per-order nonce with an HMAC under the server's existing JWT_SECRET (no
-// new secret), so the student's app can show it again any time while only its hash is stored. Single use
+// from the order id and a random per-order nonce with an HMAC under SURPLUS_CODE_SECRET, a secret used for
+// nothing else, so the student's app can show it again any time while only its hash is stored. Single use
 // (pickupCodeUsedAt) and expires at the pickup window's end; checked in services/surplus/orders.js.
+// SURPLUS_CODE_SECRET unset (or shorter than 32 characters): Surprise Box holds and orders are refused and
+// the reason is logged. It is never taken from JWT_SECRET or any other secret.
 const crypto = require("crypto");
 
 const ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 const LENGTH = 6;
 const QR_PREFIX = "TDCBOX1";
+const MIN_SECRET_LENGTH = 32;
+const NOT_CONFIGURED = "SURPLUS_CODE_SECRET is not set (or is shorter than 32 characters): Surprise Box holds and orders are refused until it is set on the server. It is never taken from JWT_SECRET.";
 
+const configured = () => String(process.env.SURPLUS_CODE_SECRET || "").trim().length >= MIN_SECRET_LENGTH;
+let lastLog = 0;
+/** Log that the secret is missing (at most once a minute, so refusals stay visible without flooding) */
+function logNotConfigured(where = "") {
+  if (Date.now() - lastLog >= 60000) {
+    lastLog = Date.now();
+    console.error(`[surplus] ${NOT_CONFIGURED}${where ? ` (${where})` : ""}`);
+  }
+  return NOT_CONFIGURED;
+}
 const secret = () => {
-  const s = process.env.JWT_SECRET;
-  if (!s) throw new Error("JWT_SECRET is not set");
-  return s;
+  if (!configured()) {
+    logNotConfigured("pickup code");
+    throw Object.assign(new Error(NOT_CONFIGURED), { code: "SURPLUS_NOT_CONFIGURED" });
+  }
+  return String(process.env.SURPLUS_CODE_SECRET).trim();
 };
 const newNonce = () => crypto.randomBytes(12).toString("hex");
 
@@ -35,4 +51,4 @@ function parse(input) {
 }
 const looksValid = (code) => new RegExp(`^[${ALPHABET}]{${LENGTH}}$`).test(code);
 
-module.exports = { codeFor, hashOf, qrFor, parse, normalize, newNonce, looksValid, ALPHABET, LENGTH, QR_PREFIX };
+module.exports = { configured, logNotConfigured, MIN_SECRET_LENGTH, NOT_CONFIGURED, codeFor, hashOf, qrFor, parse, normalize, newNonce, looksValid, ALPHABET, LENGTH, QR_PREFIX };
