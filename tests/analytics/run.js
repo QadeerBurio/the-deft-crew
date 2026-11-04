@@ -122,6 +122,19 @@ fake.seed(coll("EmployerHiringBillingEvent"), [
   { _id: oid(), companyGroupKey: "reg:1", employerUserId: ids.E1, applicationId: a1, eventType: "free_hire_consumed", feeWaived: true, amount: 0, currency: "PKR", policyVersion: "fhf-2026-11", idempotencyKey: "hire:1", createdAt: ago(6) },
   { _id: oid(), companyGroupKey: "reg:1", employerUserId: ids.E1, applicationId: oid(), eventType: "hire_billable_pending_pricing", feeWaived: false, amount: null, currency: "PKR", policyVersion: "fhf-2026-11", idempotencyKey: "hire:2", createdAt: ago(2) },
 ]);
+// Resume Studio: 6 requests in range (4 done in 10 / 20 / 30 / 120 s, 1 timed out, 1 queued; 5 students),
+// 1 done 40 days ago; drafts in range with 6 suggestions (2 blocked by the factual check, 1 needs confirmation),
+// 1 old draft; 3 approvals in range (2 students) + 1 old; 2 applications sent with a version in range + 1 old
+const sec = (d, s) => new Date(ago(d).getTime() + s * 1000);
+const tj = (s, status, d, took, errorCode = "") => ({ _id: oid(), userId: students[s], resumeId: oid(), idempotencyKey: `k${Math.random()}`, target: { kind: "pasted", title: "Zebulon job" }, status, errorCode, attempts: 1, createdAt: ago(d), finishedAt: took == null ? null : sec(d, took) });
+fake.seed(coll("CareerResumeTailorJob"), [tj(0, "succeeded", 3, 10), tj(0, "succeeded", 2, 20), tj(1, "succeeded", 4, 30), tj(2, "succeeded", 5, 120), tj(3, "failed", 1, 90, "TIMED_OUT"), tj(4, "queued", 1, null), tj(5, "succeeded", 40, 5)]);
+const sg = (status) => ({ suggestionId: `s${Math.random()}`, kind: "reword", fieldPath: "professionalSummary.summary", status, decision: "pending" });
+const dr = (d, list) => ({ _id: oid(), userId: students[0], resumeId: oid(), target: { kind: "pasted", title: "Zebulon job" }, sourceRevisionHash: "h", sourceContent: {}, suggestions: list, status: "open", createdAt: ago(d) });
+fake.seed(coll("CareerResumeDraft"), [dr(3, [sg("ok"), sg("blocked"), sg("needs_user_confirmation"), sg("ok")]), dr(2, [sg("blocked"), sg("ok")]), dr(45, [sg("blocked")])]);
+const av = (s, d) => ({ _id: oid(), userId: students[s], sourceResumeId: oid(), draftId: oid(), label: "Zebulon v1", contentSnapshot: {}, contentHash: "h", rendererVersion: "1", approvedAt: ago(d) });
+fake.seed(coll("CareerResumeApprovedVersion"), [av(0, 2), av(0, 1), av(1, 3), av(2, 50)]);
+const at = (d) => ({ _id: oid(), applicationId: oid(), jobId: oid(), userId: students[0], versionId: oid(), contentHash: "h", attachedAt: ago(d) });
+fake.seed(coll("CareerApplicationResumeAttachment"), [at(1), at(2), at(60)]);
 const token = (id, role) => jwt.sign({ id: String(id), role }, "test-only", { expiresIn: "1h" });
 
 let PORT;
@@ -206,6 +219,17 @@ const check = (name, ok, detail = "") => { results.push(!!ok); console.log(`${ok
   check("employer in the pilot: the trial summary (Used) next to the funnel", r.json.data.trial?.status === "used" && r.json.data.trial.summary && /coming soon/.test(r.json.data.trial.furtherHires), r.text.slice(0, 200));
   r = await call("GET", `/api/analytics/employers/me${q}`, { tok: T.E2 });
   check("another employer sees only its own (1 application, 0 hires)", r.json.data.hiring.counts.applications === 1 && r.json.data.hiring.counts.verifiedHires === 0);
+
+  console.log("-- Resume Studio card");
+  const rsc = o.resumeStudio;
+  check("tailoring: 6 started in range (the 40-day-old one not), 4 completed, 1 failed (TIMED_OUT), 1 in progress, 5 students", rsc && rsc.tailoringStarted === 6 && rsc.tailoringCompleted === 4 && rsc.tailoringFailed === 1 && rsc.failedByReason.TIMED_OUT === 1 && rsc.inProgress === 1 && rsc.studentsTailoring === 5, JSON.stringify(rsc).slice(0, 300));
+  check("approvals: 3 approved versions in range (2 students); the old one not", rsc.approvals === 3 && rsc.studentsApproved === 2);
+  check("applications sent with a tailored version: 2 in range", rsc.applicationsWithTailoredVersion === 2);
+  check("factual check: 2 of 6 suggestions blocked (33.3%), 1 needs confirmation; the old draft not counted", rsc.suggestions === 6 && rsc.factualCheckRejections === 2 && rsc.factualCheckRejectionPct === 33.3 && rsc.needsConfirmation === 1);
+  check("time to draft from completed requests only: p50 20 s, p95 120 s (the failed one isn't a time)", rsc.timeToDraftSeconds.p50 === 20 && rsc.timeToDraftSeconds.p95 === 120 && rsc.timeToDraftSeconds.count === 4, JSON.stringify(rsc.timeToDraftSeconds));
+  check("every figure says what it counts", ["tailoringStarted", "approvals", "applicationsWithTailoredVersion", "factualCheckRejections", "timeToDraftSeconds"].every((k) => rsc.definitions[k]));
+  const { percentile } = reqS("./services/analytics/businessAnalytics");
+  check("percentile (nearest rank): empty → null; one value; 1..100 → p50 50, p95 95", percentile([], 50) === null && percentile([7], 95) === 7 && percentile(Array.from({ length: 100 }, (_, i) => i + 1), 50) === 50 && percentile(Array.from({ length: 100 }, (_, i) => i + 1), 95) === 95);
 
   console.log("-- privacy");
   const all = responses.map((x) => x.text).join(" ");

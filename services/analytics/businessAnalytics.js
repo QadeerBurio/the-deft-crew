@@ -5,6 +5,7 @@
 //   - a hold or a view as a Surprise Box order; an order as picked up without the pickup code being verified
 //   - an application or a scheduled interview as a hire (the hiring funnel comes from timeline events)
 //   - a trial signup as revenue (there is no pricing yet: paying employers = 0)
+//   - a Resume Studio request as completed, or a draft as approved (only succeeded jobs / approved versions)
 // Privacy: no student names anywhere; any per-brand or per-employer figure built from fewer than 5 distinct
 // students is hidden (null, with a note).
 const Offer = require("../../models/Offer");
@@ -16,6 +17,10 @@ const EmployerCompanyVerification = require("../../models/EmployerCompanyVerific
 const EmployerHiringTrial = require("../../models/EmployerHiringTrial");
 const EmployerHiringBillingEvent = require("../../models/EmployerHiringBillingEvent");
 const careerAnalytics = require("../career/careerAnalyticsService");
+const CareerResumeTailorJob = require("../../models/CareerResumeTailorJob");
+const CareerResumeDraft = require("../../models/CareerResumeDraft");
+const CareerResumeApprovedVersion = require("../../models/CareerResumeApprovedVersion");
+const CareerApplicationResumeAttachment = require("../../models/CareerApplicationResumeAttachment");
 
 const MIN_COHORT = 5;
 const DAY = 864e5;
@@ -140,12 +145,51 @@ async function employerFigures(r) {
   };
 }
 
+// ---------- Resume Studio: tailoring jobs, drafts, approved versions, attachments ----------
+// the value at a percentile of an ascending list (nearest rank), or null for an empty list
+const percentile = (sorted, p) => (sorted.length ? sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil((p / 100) * sorted.length) - 1))] : null);
+async function resumeStudioFigures(r) {
+  const [jobs, drafts, versions, attachments] = await Promise.all([
+    CareerResumeTailorJob.find({ createdAt: { $gte: r.from, $lte: r.to } }).select("userId status errorCode createdAt finishedAt").lean(),
+    CareerResumeDraft.find({ createdAt: { $gte: r.from, $lte: r.to } }).select("suggestions.status suggestions.decision").lean(),
+    CareerResumeApprovedVersion.find({ approvedAt: { $gte: r.from, $lte: r.to } }).select("userId").lean(),
+    CareerApplicationResumeAttachment.find({ attachedAt: { $gte: r.from, $lte: r.to } }).select("applicationId").lean(),
+  ]);
+  const succeeded = jobs.filter((j) => j.status === "succeeded");
+  const failed = jobs.filter((j) => j.status === "failed");
+  const failedBy = {};
+  for (const j of failed) failedBy[j.errorCode || "UNKNOWN"] = (failedBy[j.errorCode || "UNKNOWN"] || 0) + 1;
+  const seconds = succeeded.filter((j) => j.finishedAt).map((j) => Math.max(0, (new Date(j.finishedAt) - new Date(j.createdAt)) / 1000)).sort((a, b) => a - b);
+  const suggestions = drafts.flatMap((d) => d.suggestions || []);
+  const blocked = suggestions.filter((s) => s.status === "blocked").length;
+  return {
+    tailoringStarted: jobs.length, tailoringCompleted: succeeded.length, tailoringFailed: failed.length, failedByReason: failedBy,
+    inProgress: jobs.length - succeeded.length - failed.length,
+    studentsTailoring: new Set(jobs.map((j) => String(j.userId))).size,
+    approvals: versions.length, studentsApproved: new Set(versions.map((v) => String(v.userId))).size,
+    applicationsWithTailoredVersion: attachments.length,
+    suggestions: suggestions.length, factualCheckRejections: blocked,
+    factualCheckRejectionPct: pct(blocked, suggestions.length),
+    needsConfirmation: suggestions.filter((s) => s.status === "needs_user_confirmation").length,
+    timeToDraftSeconds: { p50: percentile(seconds, 50), p95: percentile(seconds, 95), count: seconds.length },
+    definitions: {
+      tailoringStarted: "tailoring requests made in the range (requests are kept 30 days, so older ranges undercount)",
+      tailoringCompleted: "requests that produced a draft; failed ones are listed by reason (TIMED_OUT, model errors)",
+      approvals: "tailored versions students approved in the range",
+      applicationsWithTailoredVersion: "applications sent with an approved tailored version (attached in the range)",
+      factualCheckRejections: "suggested changes the factual check blocked (a fact, date, number or link not in the student's resume), in drafts created in the range",
+      needsConfirmation: "suggested changes shown only if the student confirms they are true",
+      timeToDraftSeconds: "from the request to the finished draft, completed requests only (p50 = median)",
+    },
+  };
+}
+
 async function adminOverview(q) {
   const r = rangeOf(q);
-  const [discounts, loyalty, surplus, hiring, employers] = await Promise.all([
-    discountsAdmin(r), loyaltyFigures(r), surplusFigures(r), careerAnalytics.funnel({ from: r.from, to: r.to }), employerFigures(r),
+  const [discounts, loyalty, surplus, hiring, employers, resumeStudio] = await Promise.all([
+    discountsAdmin(r), loyaltyFigures(r), surplusFigures(r), careerAnalytics.funnel({ from: r.from, to: r.to }), employerFigures(r), resumeStudioFigures(r),
   ]);
-  return { range: r, minCohort: MIN_COHORT, discounts, loyalty, surpriseBox: surplus, hiring, employers };
+  return { range: r, minCohort: MIN_COHORT, discounts, loyalty, surpriseBox: surplus, hiring, employers, resumeStudio };
 }
 
 async function brandInsights(brandId, q) {
@@ -176,4 +220,4 @@ async function employerResults(employerId, q, { trialService = null } = {}) {
   return out;
 }
 
-module.exports = { adminOverview, brandInsights, employerResults, rangeOf, MIN_COHORT, discountFigures };
+module.exports = { adminOverview, brandInsights, employerResults, rangeOf, MIN_COHORT, discountFigures, resumeStudioFigures, percentile };
