@@ -41,6 +41,10 @@ const FLAGS = {
   // services/surplus/). Needs it on for the brand (its listings show only then) and the student, e.g.
   // FLAG_SURPLUS_BOXES="ids:<brand id>,<student id>". Per user only (/api/app/flags/me).
   surplusBoxes: { default: false, client: true },
+  // First Hire Free: one fee-waived verified hire per verified company (routes/careerTrial.routes.js,
+  // services/career/trialService.js). Per employer, e.g. FLAG_EMPLOYER_FIRST_HIRE_FREE="ids:<employer id>".
+  // Off: no trial, no billing ledger rows, the hiring timeline unchanged. Per user only (/api/app/flags/me).
+  employerFirstHireFree: { default: false, client: true },
 };
 
 const JOBS = {
