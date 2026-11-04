@@ -98,6 +98,8 @@ async function placeOrder({ studentId, holdId, idempotencyKey, acceptedTerms, no
  * @returns the updated order, or throws STALE_VERSION
  */
 async function move(order, to, { byRole, by = null, note = "", version = null, set = {}, now = new Date(), extraFilter = {} }) {
+  // a version from a request must be a whole number (an object or array would reach the query as NaN)
+  if (version != null && !Number.isInteger(Number(version))) throw new SurplusError(400, "INVALID_VERSION", "version must be a number");
   const filter = { _id: order._id, state: order.state, version: version == null ? order.version : Number(version), ...extraFilter };
   const terminal = policy.TERMINAL.includes(to);
   const update = {
