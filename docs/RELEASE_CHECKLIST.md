@@ -1,4 +1,4 @@
-# Release checklist (Sprint 7)
+# Release checklist (Sprint 7, updated before the pilot)
 
 Every acceptance criterion from the master plan (section 9 "Acceptance criteria (release blockers)") and the Career
 Engine handoff (section 8 "must pass before launch", the Resume Tailoring QA matrix in section 11, and the "Final
@@ -6,9 +6,9 @@ release gate"), each mapped to the automated check that proves it, or marked **m
 
 How to run: server suites are folders under `tests/`, each run as `node tests/<suite>/run.js <serverDir>` from a
 folder with no `.env` (they use an in-memory fake database and never connect to MongoDB). App suites are
-`tests/app/*.test.js` in the app repo (`node tests/app/<name>.test.js`). Portal checks are headless-Chrome scripts that
-ran from a scratch folder each sprint (not in a repo: see "Gaps"). Quoted text below is the exact check label printed
-by the suite.
+`tests/app/*.test.js` in the app repo (`node tests/app/<name>.test.js`). Portal checks are in the portal repo,
+`scripts/portal-checks` (6 page checks + 5 axe checks against a mock API): `npm run check:portal` runs all of them
+(see its README). Quoted text below is the exact check label printed by the suite.
 
 Status: **auto** = an automated check proves it · **manual** = a person checks it (steps given) · **partial** = automated
 for the server, manual for the device / real service · **N/A** = not in this pilot (reason given) · **gap** = no proof yet.
@@ -42,11 +42,13 @@ for the server, manual for the device / real service · **N/A** = not in this pi
 | Updated .ics supersedes the old slot | `career`: "…the new .ics: same UID, SEQUENCE:1 (replaces the old slot)"; "the candidate withdraws → … its .ics becomes CANCEL" | auto (+ manual: import on a phone, see below) |
 | Accepted offer ≠ verified hire until the employer confirms | `career`: "the candidate accepts → offer accepted, NOT hired"; `analytics`: "an accepted offer and a scheduled interview aren't hires" | auto |
 | Hired badge revocable on dispute, private by default | `career`: "verified hire: … outcome verified, private"; "the student disputes within 7 days → revoked, private again"; "a revoked outcome can't be made public (409)" | auto |
-| First verified hire free consumed exactly once per verified company | `first-hire-free`: "the first verified hire: fee 0 …"; "5 duplicate callbacks + a reconcile: still one billing row"; "two verified hires at the same moment: exactly one free"; "the company's second verified hire … isn't free"; `load`: "50 confirm-hires at once: … the free hire used once" | auto |
+| Only the job's employer confirms a hire; admins resolve disputes with a reason | `career` 11b: "an admin can't confirm a hire: 403 EMPLOYER_ONLY …"; "an admin's next actions don't include confirming the hire"; "restoring without a reason → 400 REASON_REQUIRED"; "the admin restores with a reason → verified again … audited"; "the admin upholds a dispute (HIRE_REVOKED with a reason) …"; "…nor confirm it again while the dispute is open (409)"; `permissions`: confirm-hire row (admin denied) | auto |
+| First verified hire free consumed exactly once per verified company | `first-hire-free`: "the first verified hire: fee 0 …"; "5 duplicate callbacks + a reconcile: still one billing row"; "two verified hires at the same moment: exactly one free"; "the company's second verified hire … isn't free"; `load`: "50 confirm-hires at once: … the free hire used once"; an admin never uses it: `first-hire-free`: "an admin can't confirm a hire for the employer (403 EMPLOYER_ONLY): the free hire stays Active, no billing row"; "a hire event recorded by an admin is never billed …"; "an admin restores the disputed hire: … the free hire is NOT used again" | auto |
 | Employer can't access another employer's applicants | `career`: "employer B → 404 for employer A's applicant"; `permissions`: every career row (other employer denied) | auto |
 | Historical hiring evidence survives job archival | `career`: "employer deletes a job (archived)"; "its application's timeline is still there" | auto |
 | Notification retries can't duplicate state transitions | `career`: "the retry delivers it (attempt 2); no timeline event written again"; "… stops after 5 attempts" | auto |
-| No regressions to existing jobs, resumes, portals | All server suites (19) + app suites + portal headless checks green on every merge | auto (+ manual smoke below) |
+| No regressions to existing jobs, resumes, portals | All server suites (23) + app suites + `npm run check:portal` (11) green on every merge | auto (+ manual smoke below) |
+| Career data retention (2 years) and account deletion | `career-retention` (27): dry run writes nothing; "the hiring funnel counts are exactly the same before and after"; public outcomes skipped; logs counts only. `admin-delete-account`: "hiring timeline: S's 5 events kept … with a placeholder instead of S"; "S's Resume Studio drafts, versions, sent snapshots … deleted" | auto, **built, waiting for approval** (branch `feat/career-retention`, not merged) |
 
 ## Resume Studio (plan 9 + handoff 8 + handoff 11)
 | Criterion | Proof | Status |
@@ -74,18 +76,19 @@ for the server, manual for the device / real service · **N/A** = not in this pi
 | Fresher resume works without work experience | `resume-studio/renderer`: "pdftotext: fresher gets projects and education before skills" | auto |
 | Match score doesn't imply a hiring guarantee | `resume-studio/run`: leak scan "no hiring verdicts / percentiles / probabilities"; `app/resume-studio`: "no scores, percentages or hiring verdicts anywhere" | auto |
 | Delete drafts; revoke public career badges | `resume-studio/run`: "deleting an approved draft keeps its version"; `career`: outcome visibility switch | auto |
-| Retention policies; no accidental public URLs | Draft TTL 30 days, used versions 2 years (TTL indexes): `resume-studio/run`: "approved draft: no expiry; open draft: expires in ~30 days"; PDFs are served only through authorised routes (no public storage URLs) | partial (TTL deletion itself happens in MongoDB: check in staging, below) |
+| Retention policies; no accidental public URLs | Draft TTL 30 days, used versions 2 years (TTL indexes): `resume-studio/run`: "approved draft: no expiry; open draft: expires in ~30 days"; approved versions over 2 years old that nothing uses are emptied by the retention job (`career-retention`, waiting for approval); PDFs are served only through authorised routes (no public storage URLs) | partial (TTL deletion itself happens in MongoDB: check in staging, below) |
+| PDF rendering can't be abused | `rate-limits`: "the 5th PDF (preview or export, one shared count) → 429 RATE_LIMITED"; "10 simultaneous exports from one student: exactly 4 rendered" (test limit; default 30 per 10 minutes, `RATE_LIMIT_RESUME_PDF_MAX` / `_WINDOW_MIN`) | auto |
 
 ## Platform (plan 9)
 | Criterion | Proof | Status |
 |---|---|---|
 | No regression to discounts, QR verification, jobs, scholarships, events, confessions, networking, portals | 19 server suites incl. `live-security`, `brand-online-store`, `social-push`, `streak-reminders`, `perf-server`; app suites incl. events, tickets, social push; portal headless checks | auto (+ manual smoke) |
 | Admin actions audited | `loyalty` (reversal with admin + reason), `career` (admin writes audited), `surplus` (case decisions, brand blocks), `first-hire-free`: "every admin decision is in the audit with its reason" | auto |
-| Analytics reconcile to authoritative events | `analytics`: 39 checks reconciling each card with seeded records | auto |
+| Analytics reconcile to authoritative events | `analytics`: 46 checks reconciling each card with seeded records, Resume Studio included ("tailoring: 6 started in range …"; "factual check: 2 of 6 suggestions blocked …"; "time to draft …: p50 20 s, p95 120 s"); per-user limit on `/api/analytics/*` (`rate-limits`: "admin: 3 overviews → 200, the 4th → 429"; default 60 per 10 minutes) | auto |
 | Permissions | `permissions`: 85 routes × 8 roles (680) | auto |
 | Concurrency | `load`: 7 scenarios, 0 duplicates | auto |
 | Security | `security` (fuzz) + `docs/SECURITY_REVIEW.md` | auto + review |
-| Accessibility | portal: axe WCAG 2 A/AA, 0 violations on the new pages; app: `app/a11y-pilot` | auto (+ manual screen reader pass, below) |
+| Accessibility | portal: `npm run check:portal`, axe WCAG 2 A/AA, 0 violations on the new pages (the Resume Studio card included); app: `app/a11y-pilot` | auto (+ manual screen reader pass, below) |
 | Staging QA, backup / rollback, product sign-off | — | **manual** (below) |
 
 ## Manual checks (exact steps)
@@ -111,20 +114,36 @@ for the server, manual for the device / real service · **N/A** = not in this pi
 - **Staging environment**: all automated proof runs on an in-memory database. `docs/STAGING.md` describes a staging
   Railway environment with its own Atlas cluster; whether it has been set up is not confirmed. Manual steps 1-9 run
   there, or in production with test ids only (flags scoped to test accounts).
-- **Career data retention**: the 2-year anonymisation job and the account-deletion wiring for hiring timeline data
-  are not built (`docs/CAREER_TIMELINE.md`, "Retention"). Needed before the career pilot widens past pilot ids.
-- **Portal headless checks are not in the portal repo** (they ran from a scratch folder each sprint). They should be
-  committed as a portal test suite.
+- **Career data retention: built and tested, not merged** (`feat/career-retention`, waiting for the owner's approval
+  because it changes data). Until it is merged:
+  - nothing anonymises hiring data after 2 years;
+  - deleting a student's account leaves their id in the career collections (the deletion test proves this on the
+    old code).
+
+  After merging, it runs as a dry run (counts only) until `CAREER_RETENTION_MODE=apply` is set.
+- **`JobApplication` records** (the existing job routes) are outside the career retention policy: kept as before,
+  deleted with the account.
+- **Admin dispute resolution has no portal screen yet.** Admins restore or uphold a disputed hire through the API
+  (`POST /api/career/applications/:id/events` with `HIRE_RESTORED` / `HIRE_REVOKED` and a reason).
+- **Rate limits are counted per server instance** (in memory). With 2 instances the effective limit doubles, and a
+  restart resets the counts.
 - **Online payments for Surprise Box**: not built (N/A by decision); acceptance must be re-proven before any payment.
-- **Resume Studio pilot measures**: no analytics card or admin page counts Resume Studio usage
-  (`docs/PILOT_PLAN.md`).
 - **Real-device push and calendar behaviour**: manual only (steps 2, 5).
 
+Closed since the first version of this list: the portal headless and axe checks are in the portal repo
+(`npm run check:portal`); Resume Studio has an Overview card; hire confirmation is the employer's only; rate limits
+on PDFs and analytics.
+
+## Decided
+- Hire confirmation is the job employer's only; admins resolve disputes with a reason (`HIRE_RESTORED` /
+  `HIRE_REVOKED`). A restored hire does not use a free hire (the company keeps it).
+- Per-user rate limits: Resume Studio PDFs 30 per 10 minutes, analytics 60 per 10 minutes (Railway variables to change).
+
 ## Decisions needing sign-off
-1. Admins can act for an employer on the hiring timeline, including **confirming a hire**, which then uses the
-   company's free hire (see `docs/SECURITY_REVIEW.md` #2). Keep, or restrict hire confirmation to the employer?
-2. Per-user rate limits on Resume Studio PDF preview/export and the analytics overview before `pct:` stages.
+1. Merge the career retention branch (`feat/career-retention`). It changes data: account deletion starts anonymising
+   career rows at once; the 2-year job stays a dry run until step 2.
+2. After a few days of dry-run log lines, set `CAREER_RETENTION_MODE=apply`.
 3. Staging: set up the staging environment in `docs/STAGING.md`, or accept "production with test ids" for the pilot.
-6. Build the career retention job and account-deletion wiring before `FLAG_CAREER_TIMELINE` goes past pilot ids.
 4. Pricing for hires after the free one (today recorded as "pending pricing", nothing charged).
 5. Surprise Box pickup-only, pay-at-pickup for the pilot (no refunds through tdc).
+6. An admin screen for hire disputes, or keep resolving them through the API during the pilot.

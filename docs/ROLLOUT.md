@@ -37,8 +37,12 @@ or employers. At the `%` stages, decide which merchants and employers are ready:
 | 4. 50% | `ids:<pilot ids>;50%` | + half of users | 1 week | watch list clean; support load OK |
 | 5. On | `on` | everyone | — | — |
 
-Before stage 3, decide the open items in `docs/RELEASE_CHECKLIST.md` (rate limits on Resume Studio PDF preview/export
-and the analytics overview; admin hire confirmation).
+Before stage 3, decide the open items in `docs/RELEASE_CHECKLIST.md` (the career retention merge, staging). Rate
+limits and employer-only hire confirmation are in place.
+
+Rate limits (Railway variables, per user, per server instance): `RATE_LIMIT_RESUME_PDF_MAX` (default 30) /
+`RATE_LIMIT_RESUME_PDF_WINDOW_MIN` (10), `RATE_LIMIT_ANALYTICS_MAX` (60) / `RATE_LIMIT_ANALYTICS_WINDOW_MIN` (10).
+Raise one if real users report "Too many requests".
 
 ## What to watch at every stage
 - **Railway logs**, searched for each module's tag. Any repeat of these lines is a stop:
@@ -120,7 +124,8 @@ and the analytics overview; admin hire confirmation).
   - `[resume-studio] tailor job failed` lines in the logs.
   - Tailoring jobs ending `TIMED_OUT` or `FAILED`.
   - Model cost per day.
-  - PDF preview and export volume. These have no rate limit yet (see the release checklist).
+  - PDF preview and export volume, and 429 `RATE_LIMITED` replies on the PDF routes (limit: 30 per student per 10
+    minutes).
 - **Rollback:**
   - For one user: remove the id.
   - For everyone: set `FLAG_RESUME_STUDIO_V2=off`.
