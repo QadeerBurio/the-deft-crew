@@ -116,6 +116,8 @@ for the server, manual for the device / real service · **N/A** = not in this pi
 - **Portal headless checks are not in the portal repo** (they ran from a scratch folder each sprint). They should be
   committed as a portal test suite.
 - **Online payments for Surprise Box**: not built (N/A by decision); acceptance must be re-proven before any payment.
+- **Resume Studio pilot measures**: no analytics card or admin page counts Resume Studio usage
+  (`docs/PILOT_PLAN.md`).
 - **Real-device push and calendar behaviour**: manual only (steps 2, 5).
 
 ## Decisions needing sign-off
