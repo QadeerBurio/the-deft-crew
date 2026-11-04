@@ -159,6 +159,8 @@ async function forDeletedStudent({ id, ghost, upd, del }) {
   await del(CareerResumeDraft, { userId: id });
   await del(CareerResumeTailorJob, { userId: id });
   await del(CareerResumeSourceConfirmation, { userId: id });
+  // candidate matching: the stored evidence quotes their resume
+  await del(require("../../models/CareerMatchSnapshot"), { candidate: id });
 }
 
 module.exports = { run, forDeletedStudent, eligible, RETAIN_DAYS, KEEP_META, applyMode };

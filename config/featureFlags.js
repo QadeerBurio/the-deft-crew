@@ -37,6 +37,10 @@ const FLAGS = {
   // Needs it on for BOTH the job's employer and the candidate, e.g.
   // FLAG_CAREER_TIMELINE="ids:<employer id>,<student id>". Per user only (/api/app/flags/me).
   careerTimeline: { default: false, client: true },
+  // Employer candidate matching: mandatory criteria and skill evidence per application, decision support only
+  // (routes/careerMatching.routes.js, services/career/matchingService.js). On for BOTH the job's employer and the
+  // candidate, e.g. FLAG_CAREER_MATCHING="ids:<employer id>,<student id>". Per user only (/api/app/flags/me).
+  careerMatching: { default: false, client: true },
   // Surprise Box: merchant surplus food, pickup only, pay at pickup (routes/surplus.routes.js,
   // services/surplus/). Needs it on for the brand (its listings show only then) and the student, e.g.
   // FLAG_SURPLUS_BOXES="ids:<brand id>,<student id>". Per user only (/api/app/flags/me).
