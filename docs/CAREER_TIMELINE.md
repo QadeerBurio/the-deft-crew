@@ -134,21 +134,52 @@ audited) count distinct applications from events only.
 | disputes | INTERVIEW_DISPUTED + HIRE_DISPUTED + HIRE_REVOKED events. |
 | median hours | From APPLIED to the first employer decision, the first interview invite, and the verified hire. |
 
-## Retention policy (no automatic job yet)
+## Retention policy
 
-- **Kept for 2 years:** timeline events, interviews, offers, outcomes and outbox rows, counted from the
-  application's last event.
-- **After 2 years, anonymised rather than deleted:**
-  - candidate and employer ids are replaced by a one-way hash;
-  - notes and terms are cleared, as are meeting links and locations;
-  - outbox payloads are emptied;
-  - event types, times and counts stay, so funnel analytics remain correct.
-- **Public outcomes are excluded from anonymisation** for as long as the student keeps them public. A student can
-  make an outcome private, which is the default, at any time.
-- **Account deletion:** the existing account-deletion flow is the place to apply this to one person
-  early. It isn't wired yet; the deletion job and this policy should be connected before the pilot
-  widens.
-- **No scheduled job exists for this yet.** Building it is a separate, reviewed change.
+The policy is carried out by the background job `careerRetention` (`services/career/retentionService.js`,
+`services/career/careerRetentionJob.js`).
+
+**Kept for 2 years.** Timeline events, interviews, offers, outcomes and notification rows are kept for 2 years,
+counted from the application's **last** timeline event.
+
+**After 2 years they are anonymised rather than deleted:**
+- candidate, employer, actor and recipient ids are replaced by a random placeholder: one per person per run, stored
+  nowhere, the same approach as account deletion;
+- notes, internal notes, terms, reasons, the candidate's messages, meeting links and locations are cleared;
+- notification payloads are emptied;
+- event types, order, times, stages and counts stay, so the funnel analytics are unchanged (tested).
+
+**Public outcomes are skipped** for as long as the student keeps the outcome public. Once it is private, the next run
+anonymises that application.
+
+**Resume snapshots:**
+- a snapshot sent with an application expires on its own 2 years after it was sent (TTL index);
+- an approved version older than 2 years that no live application uses has its resume content removed and its
+  student id replaced;
+- the hash is kept, so the version can never be served again.
+
+**Each application is processed once.** It is done in one transaction and recorded in `CareerRetentionMark` (a new
+collection: ids, a time and counts), so it is never processed again.
+
+**How the job runs.** Once a day, plus 2 minutes after a start; up to 200 applications per run.
+`JOB_CAREER_RETENTION` follows the same rule as the other jobs: on in production, off in staging, and switchable by
+name.
+
+**Dry run by default.** Unless `CAREER_RETENTION_MODE=apply` is set, a run only counts what it would change and logs
+one line, with counts only (no ids, names or text), and writes nothing:
+
+    [career-retention] dry-run: 3 application(s) older than 730 days (events 21, interviews 2, offers 1, outcomes 1, notifications 6); 1 skipped (public outcome); 0 old resume version(s); nothing written (CAREER_RETENTION_MODE=apply to write)
+
+Switch to `apply` only after reading a few days of dry-run lines.
+
+**Account deletion.** When a student deletes their account (`services/accountDeletion.js`):
+- their timeline events, interviews and offers are kept with the deletion's placeholder id instead of theirs, and
+  their notes, messages, terms, links and locations are cleared. The employer's funnel still counts the hire.
+- their outcomes (public ones included), their notifications and all their Resume Studio data are deleted: drafts,
+  approved versions, snapshots sent to employers, tailoring requests and source confirmations.
+
+**Not covered.** The `JobApplication` record itself (the existing job routes) is not part of this policy. It is
+deleted with the account, and otherwise kept as before.
 
 ## Testing with one employer, one job and one student
 

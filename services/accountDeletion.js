@@ -327,6 +327,9 @@ async function deleteInDatabase({ id, role, deletionId, ghost, session }) {
   await del(Resume, { user: id });
   await del(ProfessionalProfile, { userId: id });
   await del(JobApplication, { userId: id });
+  // hiring timeline and Resume Studio (services/career/retentionService.js): timeline rows keep their types and
+  // times with the placeholder id (employers' funnel counts stay); outcomes, notifications, drafts and versions go
+  if (role === "student") await require("./career/retentionService").forDeletedStudent({ id, ghost, upd, del });
   await del(JobInteraction, { userId: id });
   await del(Application, { userId: id });
 

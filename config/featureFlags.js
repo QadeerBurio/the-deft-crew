@@ -56,6 +56,7 @@ const JOBS = {
   pushes: "every Expo push (utils/expoProjects.js); off = nothing reaches a phone",
   careerOutbox: "career/careerOutboxJob: hiring-timeline notifications (retries, interview reminders), every 5 minutes",
   surplusSweep: "surplus/sweep: Surprise Box holds expiry, listing close, no-shows, pickup reminders, notifications, every minute",
+  careerRetention: "career/careerRetentionJob: daily, anonymises hiring-timeline data 2 years after an application's last event (a dry run unless CAREER_RETENTION_MODE=apply)",
 };
 
 const envName = (prefix, name) => `${prefix}_${name.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toUpperCase()}`;
