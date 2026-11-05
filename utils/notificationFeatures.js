@@ -21,6 +21,7 @@ const FEATURES = {
   offer_claimed:    { mood: 'excited', sound: 'tdc_push_deal' },
   payment:          { mood: 'money',   sound: 'tdc_mood_rs' },
   redemption:       { mood: 'money',   sound: 'tdc_mood_rs' },
+  loyalty:          { mood: 'money',   sound: 'tdc_mood_rs' },   // loyalty visits / tiers (services/loyaltyNotify.js)
 
   // ── SkillShare ──
   offer_accepted:   { mood: 'hype',    sound: 'tdc_push_deal' },

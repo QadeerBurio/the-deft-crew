@@ -254,6 +254,8 @@ async function onVerifiedRedemption(redemptionId, opts = {}) {
         actor: row.actor, subject: { kind: "LoyaltyLedger", id: result.entry._id },
         data: { brand: String(brandId), student: String(studentId), visitNumber: row.visitNumber, tier: tier.name, source: row.source },
       });
+      // push + in-app, once per ledger row (services/loyaltyNotify.js); never fails the credit
+      await require("./loyaltyNotify").notifyRow(result.entry, result.progress, { thisVisitPct: pctOf(program, tier) });
     }
     return { credited: counts, reason: row.reason, visitNumber: row.visitNumber, entry: result.entry, progress: result.progress };
   } catch (err) {
@@ -308,6 +310,7 @@ async function reverseRedemption({ redemptionId, reason, actor }) {
       actor: isId(actor) ? actor : null, subject: { kind: "LoyaltyLedger", id: result.entry._id },
       data: { redemptionId: String(redemptionId), brand: String(credit.brand), student: String(credit.student), reason: why.slice(0, 500) },
     });
+    await require("./loyaltyNotify").notifyRow(result.entry, result.progress);
     return result;
   } catch (err) {
     if (err?.code === 11000) throw new LoyaltyError(409, "ALREADY_REVERSED", "This credit was already reversed");
