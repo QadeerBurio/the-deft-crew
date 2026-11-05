@@ -154,6 +154,11 @@ async function forDeletedStudent({ id, ghost, upd, del }) {
   await upd(CareerOffer, { candidate: id }, { $set: { candidate: ghost, terms: "", responseNote: "" } }, "anonymised");
   await del(CareerOutcome, { candidate: id });
   await del(CareerNotificationOutbox, { recipient: id });
+  // ratings: the ones they wrote and the ones about them, and their reports
+  const CareerRating = require("../../models/CareerRating");
+  const mine = (await CareerRating.find({ $or: [{ rater: id }, { ratee: id }] }).select("_id").lean()).map((x) => x._id);
+  await del(require("../../models/CareerRatingReport"), { $or: [{ rating: { $in: mine } }, { reporter: id }] });
+  await del(CareerRating, { _id: { $in: mine } });
   await del(CareerApplicationResumeAttachment, { userId: id });
   await del(CareerResumeApprovedVersion, { userId: id });
   await del(CareerResumeDraft, { userId: id });

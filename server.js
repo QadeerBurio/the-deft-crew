@@ -282,6 +282,7 @@ app.use('/api/engagement', require('./routes/engagement.routes'));
 app.use('/api/admin/engagement', require('./routes/adminEngagement.routes'));
 app.use('/api/rewards', require('./routes/rewards.routes'));
 app.use('/api/loyalty', require('./routes/loyalty.routes')); // brand loyalty (FLAG_LOYALTY_V2)
+app.use('/api/career/ratings', require('./routes/careerRatings.routes')); // mutual ratings, before /api/career (FLAG_CAREER_RATINGS)
 app.use('/api/career', require('./routes/careerTrial.routes')); // First Hire Free (FLAG_EMPLOYER_FIRST_HIRE_FREE); unmatched requests continue below
 app.use('/api/career', require('./routes/career.routes')); // hiring timeline (FLAG_CAREER_TIMELINE)
 app.use('/api/surplus', require('./routes/surplus.routes')); // Surprise Box (FLAG_SURPLUS_BOXES)
