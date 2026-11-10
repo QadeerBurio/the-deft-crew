@@ -790,6 +790,34 @@ const applyBody = (who) => ({ fullName: `${who} full name`, email: `${who}@test.
   check("an employer outside the pilot → 404 CAREER_OFF", r.status === 404 && r.json.error.code === "CAREER_OFF");
   process.env.FLAG_CAREER_TIMELINE = flagNow;
 
+  console.log("── 20. one job's funnel: the employer's own jobs only; an admin any job");
+  const AN = "/api/career/employers/me/analytics";
+  const appsWithEvents = (jobId) => new Set(rows("CareerApplicationEvent", (e) => same(e.job, jobId)).map((e) => String(e.application))).size;
+  const all1 = (await call("GET", AN, { tok: T.E1 })).json.data;
+  const e1Jobs = [...new Set(rows("CareerApplicationEvent", (e) => same(e.employer, ids.E1)).map((e) => String(e.job)))];
+  let sumApps = 0, sumHires = 0, sumShort = 0;
+  for (const j of e1Jobs) {
+    const d = (await call("GET", `${AN}?jobId=${j}`, { tok: T.E1 })).json.data;
+    sumApps += d.counts.applications; sumHires += d.counts.verifiedHires; sumShort += d.counts.shortlisted;
+  }
+  check("per job: applications, shortlisted and hires add up to the employer's totals", e1Jobs.length >= 2 && sumApps === all1.counts.applications && sumHires === all1.counts.verifiedHires && sumShort === all1.counts.shortlisted, `${sumApps}/${all1.counts.applications} ${sumHires}/${all1.counts.verifiedHires}`);
+  r = await call("GET", `${AN}?jobId=${ids.J1}`, { tok: T.E1 });
+  const j1 = r.json.data;
+  check("one job: its funnel only, with views and every applicant (classic too)", r.status === 200 && j1.jobId === String(ids.J1) && j1.counts.applications === appsWithEvents(ids.J1) && j1.job.title === "Backend dev" && j1.job.applicants === rows("JobApplication", (a) => same(a.jobId, ids.J1)).length && typeof j1.job.views === "number", JSON.stringify(j1.job));
+  check("…shortlisted, interviewed, hired, time to hire are there", ["shortlisted", "interviewsCompleted", "verifiedHires"].every((k) => typeof j1.counts[k] === "number") && "toVerifiedHire" in j1.medianHours);
+  r = await call("GET", `${AN}?jobId=${ids.J2}`, { tok: T.E1 });
+  check("another employer's job → 404, nothing about it", r.status === 404 && r.json.error.code === "NOT_FOUND" && !/Designer/.test(r.text));
+  r = await call("GET", `${AN}?jobId=${ids.J1}`, { tok: T.E2 });
+  check("…and the other way round", r.status === 404 && !/Backend dev/.test(r.text));
+  r = await call("GET", `${AN}?jobId=nope`, { tok: T.E1 });
+  check("an invalid job id → 400", r.status === 400 && r.json.error.code === "INVALID_ID");
+  r = await call("GET", `/api/career/admin/analytics?jobId=${ids.J2}`, { tok: T.admin });
+  check("admin: any job's funnel, with its facts", r.status === 200 && r.json.data.jobId === String(ids.J2) && r.json.data.job.title === "Designer" && r.json.data.counts.applications === appsWithEvents(ids.J2), r.text.slice(0, 160));
+  r = await call("GET", `/api/career/admin/analytics?jobId=${oid()}`, { tok: T.admin });
+  check("admin: an unknown job → 404", r.status === 404);
+  r = await call("GET", `/api/career/admin/analytics?jobId=${ids.J1}`, { tok: T.E1 });
+  check("an employer can't use the admin funnel (403)", r.status === 403);
+
   const leaky = responses.filter((x) => x.leaks.length);
   check(`leak scan: ${responses.length} responses; /api/career has no contact details, resume files or secrets`, leaky.length === 0, leaky.map((x) => `${x.url} ${x.leaks.join(",")}`).join(" | "));
 
