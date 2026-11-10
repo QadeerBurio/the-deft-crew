@@ -1,7 +1,7 @@
 # Rollout plan (pilot flags)
 
-Five flags, all off today: `FLAG_LOYALTY_V2`, `FLAG_CAREER_TIMELINE`, `FLAG_RESUME_STUDIO_V2`, `FLAG_SURPLUS_BOXES`,
-`FLAG_EMPLOYER_FIRST_HIRE_FREE`. Each is a Railway variable on the server service (`config/featureFlags.js`). Changing one
+Seven flags, all off today: `FLAG_LOYALTY_V2`, `FLAG_CAREER_TIMELINE`, `FLAG_RESUME_STUDIO_V2`, `FLAG_SURPLUS_BOXES`,
+`FLAG_EMPLOYER_FIRST_HIRE_FREE`, `FLAG_CAREER_MATCHING`, `FLAG_CAREER_RATINGS`. Each is a Railway variable on the server service (`config/featureFlags.js`). Changing one
 restarts the service (about 1–2 minutes); no code change or app update is needed.
 
 ## How to write a flag value (read this first)
@@ -197,6 +197,62 @@ Needs `FLAG_CAREER_TIMELINE` on for the same employer, because a hire is only ve
     made while the flag was off can then use the free hire.** That is usually the intended result. If not, an admin
     can review it in Admin → Free-hire trials.
   - Nothing is ever charged, in either state.
+
+### FLAG_CAREER_MATCHING (candidate matching, decision support)
+Needs `FLAG_CAREER_TIMELINE` for the same employer and candidate, because the panel and the sort live on the
+candidate pipeline. Value: `ids:<employer id>,<student id>`, with both sides listed.
+- **Test script:**
+  1. The test student has a resume with a few skills and applies to the test employer's job (one that lists skills).
+  2. In the portal's candidate drawer, "match evidence" shows:
+     - the mandatory criteria (met / not met / unknown);
+     - each listed skill with the resume text that shows it;
+     - the estimate and how it's worked out.
+  3. Pick the job, then "sort by relevance": the order changes and nobody disappears.
+  4. The student adds a skill to their resume: reopen the drawer, and it's now matched.
+- **Watch:**
+  - employers relying on the number rather than the evidence. Ask in the pilot calls;
+  - shortlisting by cohort (fresher / experienced, institution, city), only for groups of 5 or more
+    (`docs/MATCHING_FAIRNESS.md`);
+  - `[career-matching]` log lines.
+- **Rollback:**
+  - For one employer or student: remove the id.
+  - For everyone: set `FLAG_CAREER_MATCHING=off`.
+- **In-flight items when rolled back:**
+  - The panel and the sort disappear; the pipeline is back to newest first.
+  - Nothing else changes: matching never wrote to an application.
+  - Stored match snapshots stay, for reproducibility, and are deleted with the student's account.
+
+### FLAG_CAREER_RATINGS (mutual ratings)
+Needs `FLAG_CAREER_TIMELINE`, because ratings follow a completed interview or a verified hire. Value:
+`ids:<employer id>,<student id>`.
+- **Test script:**
+  1. After the career test script's interview is recorded completed, the employer rates the candidate in the portal
+     drawer, and the student rates the employer in the app (the application's timeline).
+  2. Check that each side sees the other's rating only once both have rated (or after 14 days).
+  3. Check that the student's job details show no average until the employer has 5 ratings.
+  4. The student reports the employer's rating as unfair. In Admin → Ratings reports, hide it with a reason.
+- **Watch:**
+  - Admin → Ratings reports: how many, and how fast they're decided;
+  - comments refused by the filter (support messages about "offensive words" that weren't);
+  - retaliation patterns (low ratings right after a low rating).
+- **Rollback:**
+  - For one person: remove the id.
+  - For everyone: set `FLAG_CAREER_RATINGS=off`.
+- **In-flight items when rolled back:**
+  - The rating forms, the averages, the received lists and the admin page disappear.
+  - Ratings and reports stay stored. When it's switched back on, ratings still inside their 14-day window can be
+    given again.
+  - Nothing else ever used them.
+
+**Loyalty notifications** (under `FLAG_LOYALTY_V2`):
+- **What students get:** a push and an in-app notification for:
+  - each counted visit;
+  - a tier unlock;
+  - an admin reversal.
+- **Settings:** students turn pushes off with the new "loyalty" switch (shown to pilot students only).
+- **Pushes go out only while the `pushes` background job is on.** Watch the `LoyaltyNotice.push` values: `sent`,
+  `quiet_hours`, `pref_off`, `failed: …`.
+- **Rollback:** the loyalty rollback above also stops them. Already-sent in-app notifications stay.
 
 ## Rollback rehearsal (do once before stage 2, about 30 minutes)
 Use test accounts only, in production.
