@@ -319,7 +319,7 @@ const adversarial = JSON.stringify({
   r = await call("PATCH", `${B}/drafts/${draftId}/decisions`, { tok: T.S1, body: { revision: d.revision + 0, decisions: [{ suggestionId: id("order.skills"), decision: "rejected" }] } });
   check("an approved draft can't be changed: 409", r.status === 409);
   const vdoc = rows("CareerResumeApprovedVersion", (v) => same(v._id, versionId))[0];
-  check("version: snapshot + hash + renderer version, not yet retained", vdoc.contentHash && vdoc.rendererVersion === "ats-classic-1" && vdoc.retainUntil == null && vdoc.contentSnapshot.skills[0].name === "React");
+  check("version: snapshot + hash + renderer version, not yet retained", vdoc.contentHash && vdoc.rendererVersion === reqS("./services/resumeStudio/renderer").RENDERER_VERSION && vdoc.retainUntil == null && vdoc.contentSnapshot.skills[0].name === "React");
 
   // export
   r = await call("GET", `${B}/versions/${versionId}/export.pdf`, { tok: T.S1 });

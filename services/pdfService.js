@@ -1,4 +1,38 @@
 const PDFDocument = require('pdfkit');
+const urdu = require('./pdfText/urdu');
+
+/**
+ * Urdu (Arabic script) on this document: any doc.text() call whose text has Urdu is laid out by
+ * services/pdfText/urdu.js (embedded font, right to left, extractable), keeping the current font weight, size,
+ * colour, position, width and centring. Without Urdu support the Urdu words are left out (the export route
+ * says so in X-Resume-Warning) instead of being drawn as broken glyphs.
+ */
+function enableUrdu(doc) {
+  const ok = urdu.supported();
+  const original = doc.text.bind(doc);
+  doc._urduRawText = original; // what urdu.paragraph draws each word with (no loop back here)
+  doc.text = function (text, x, y, options) {
+    const s = String(text ?? '');
+    if (!urdu.hasArabic(s)) return original(...arguments);
+    if (!ok) {
+      const args = [...arguments];
+      args[0] = urdu.withoutArabic(s).text;
+      return original(...args);
+    }
+    if (typeof x === 'object' && x !== null) { options = x; x = undefined; y = undefined; }
+    const o = options || {};
+    const left = x ?? doc.x;
+    const top = y ?? doc.y;
+    const width = o.width ?? (doc.page.width - doc.page.margins.right - left);
+    urdu.paragraph(doc, s, {
+      x: left, y: top, width, size: doc._fontSize, latinFont: doc._font?.name || 'Helvetica',
+      color: (doc._fillColor && doc._fillColor[0]) || '#2D3748', lineGap: o.lineGap ?? 1,
+      align: o.align === 'center' ? 'center' : 'left',
+    });
+    return doc;
+  };
+  return doc;
+}
 
 /**
  * Format date string to standard display format (e.g. "Jan 2024")
@@ -55,6 +89,10 @@ function generateResumePDF(resume, res) {
     bufferPages: true
   });
 
+  enableUrdu(doc);
+  if (urdu.pdfStatus(resume).urdu === 'not_included' && res && typeof res.setHeader === 'function' && !res.headersSent) {
+    res.setHeader('X-Resume-Warning', 'urdu-not-included');
+  }
   doc.pipe(res);
 
   // Styling Constants
@@ -105,19 +143,24 @@ function generateResumePDF(resume, res) {
 
   // --- HEADER SECTION ---
   const fullName = `${personalInfo?.firstName || ''} ${personalInfo?.lastName || ''}`.trim() || 'Resume';
+  const roleTitle = personalInfo?.title || targetJob?.jobTitle || (professionalSummary?.title || '');
+  const loc = personalInfo?.location || targetJob?.location || [personalInfo?.city, personalInfo?.state, personalInfo?.country].filter(Boolean).join(', ') || (Array.isArray(workExperience) && workExperience[0] ? workExperience[0].location : '');
+  // a header with Urdu in it is left-aligned as a whole: centred right-to-left lines make text extraction and
+  // ATS parsers read the header after the rest of the page. English-only headers stay centred, as before.
+  const urduHeader = urdu.supported() && urdu.hasArabic(`${fullName} ${roleTitle} ${loc}`);
+  const headerAlign = urduHeader ? 'left' : 'center';
   doc.fillColor(PRIMARY_COLOR)
      .font(FONT_BOLD)
      .fontSize(22)
-     .text(fullName, { align: 'center' });
+     .text(fullName, { align: headerAlign });
 
   // Subtitle/Role Title
-  const roleTitle = personalInfo?.title || targetJob?.jobTitle || (professionalSummary?.title || '');
   if (roleTitle) {
     doc.moveDown(0.2);
     doc.fillColor(MUTED_COLOR)
        .font(FONT_REGULAR)
        .fontSize(12)
-       .text(roleTitle.toUpperCase(), { align: 'center', characterSpacing: 0.5 });
+       .text(roleTitle.toUpperCase(), { align: headerAlign, characterSpacing: 0.5 });
   }
 
   // Contact Info Line
@@ -125,7 +168,6 @@ function generateResumePDF(resume, res) {
   const contactParts = [];
   if (personalInfo?.email) contactParts.push(personalInfo.email);
   if (personalInfo?.phone) contactParts.push(personalInfo.phone);
-  const loc = personalInfo?.location || targetJob?.location || [personalInfo?.city, personalInfo?.state, personalInfo?.country].filter(Boolean).join(', ') || (Array.isArray(workExperience) && workExperience[0] ? workExperience[0].location : '');
   if (loc) contactParts.push(loc);
   // LinkedIn / GitHub: the full address, clickable
   const contactLinks = [personalInfo?.linkedin, personalInfo?.github].map(fullUrl).filter(Boolean);
@@ -135,7 +177,11 @@ function generateResumePDF(resume, res) {
      .fontSize(8.5);
   const contactItems = [...contactParts.map((t) => ({ t })), ...contactLinks.map((u) => ({ t: shownUrl(u), link: u }))];
   const contactLine = contactItems.map((c) => c.t).join('  |  ');
-  if (contactItems.length) {
+  if (contactItems.length && urduHeader) {
+    // one left-aligned line (laid out by the Urdu helper), then the links, each clickable
+    doc.text(contactParts.join('  |  '), 36, doc.y, { width: 523 });
+    contactLinks.forEach((u) => doc.fillColor(TEXT_COLOR).text(shownUrl(u), 36, doc.y, { link: u }));
+  } else if (contactItems.length) {
     const lineWidth = doc.widthOfString(contactLine);
     const fitsOneLine = lineWidth <= 523;
     let x = fitsOneLine ? 36 + (523 - lineWidth) / 2 : 36;
@@ -177,6 +223,10 @@ function generateResumePDF(resume, res) {
       const dateText = formatDateRange(work.startDate, work.endDate, work.current);
       
       const startY = doc.y;
+      if (urdu.hasArabic(`${positionText} ${work.company || ''}`)) {
+        // with Urdu in it: one line in one weight (two runs of different fonts can't continue each other)
+        doc.fillColor(PRIMARY_COLOR).font(FONT_BOLD).fontSize(10).text(`${positionText} @ ${work.company || 'Company'}`, 36, startY, { width: 523 });
+      } else {
       doc.fillColor(PRIMARY_COLOR)
          .font(FONT_BOLD)
          .fontSize(10)
@@ -184,6 +234,7 @@ function generateResumePDF(resume, res) {
          .fillColor(TEXT_COLOR)
          .font(FONT_REGULAR)
          .text(` @ ${work.company || 'Company'}`, { continued: false });
+      }
 
       // Subheader: dates, then location (italic)
       drawMeta([dateText, work.location], { italic: true });
@@ -231,6 +282,9 @@ function generateResumePDF(resume, res) {
       const dateText = formatDateRange(edu.startDate, edu.endDate, edu.current);
 
       const startY = doc.y;
+      if (urdu.hasArabic(`${degreeText} ${schoolText}`)) {
+        doc.fillColor(PRIMARY_COLOR).font(FONT_BOLD).fontSize(10).text(`${degreeText} - ${schoolText}`, 36, startY, { width: 523 });
+      } else {
       doc.fillColor(PRIMARY_COLOR)
          .font(FONT_BOLD)
          .fontSize(10)
@@ -238,6 +292,7 @@ function generateResumePDF(resume, res) {
          .fillColor(TEXT_COLOR)
          .font(FONT_REGULAR)
          .text(` - ${schoolText}`, { continued: false });
+      }
 
       drawMeta([dateText]);
 
@@ -324,6 +379,10 @@ function generateResumePDF(resume, res) {
       if (idx > 0) doc.moveDown(0.4);
 
       const skillLine = categorized[cat].join(', ');
+      if (urdu.hasArabic(`${cat} ${skillLine}`)) {
+        doc.fillColor(TEXT_COLOR).font(FONT_REGULAR).fontSize(9).text(`${cat}: ${skillLine}`, 36, doc.y, { width: 523 });
+        return;
+      }
       doc.fillColor(TEXT_COLOR)
          .font(FONT_BOLD)
          .fontSize(9)
@@ -345,6 +404,10 @@ function generateResumePDF(resume, res) {
       const dateText = cert.issueDate ? `Issued: ${formatDate(cert.issueDate)}` : '';
 
       const startY = doc.y;
+      if (urdu.hasArabic(`${nameText} ${orgText}`)) {
+        doc.fillColor(TEXT_COLOR).font(FONT_REGULAR).fontSize(9).text([nameText + orgText, dateText].filter(Boolean).join('  |  '), 36, startY, { width: 523 });
+        return;
+      }
       doc.fillColor(TEXT_COLOR)
          .font(FONT_BOLD)
          .fontSize(9)
@@ -373,5 +436,6 @@ function generateResumePDF(resume, res) {
 }
 
 module.exports = {
-  generateResumePDF
+  generateResumePDF,
+  enableUrdu
 };

@@ -38,7 +38,7 @@ const { requirementsFor } = require("../services/resumeStudio/jobRequirements");
 const injection = require("../services/resumeStudio/injection");
 const worker = require("../services/resumeStudio/worker");
 const drafts = require("../services/resumeStudio/drafts");
-const { render } = require("../services/resumeStudio/renderer");
+const { render, pdfStatus } = require("../services/resumeStudio/renderer");
 
 const router = express.Router();
 const { isId } = worker;
@@ -78,8 +78,10 @@ const anyone = [auth, gate()];
 // every PDF is rendered on the server: per-user limit, shared by previews, exports and the employer's copy
 // (RATE_LIMIT_RESUME_PDF_MAX / _WINDOW_MIN, utils/userRateLimit.js)
 const pdfLimit = require("../utils/userRateLimit").perUser("resume_pdf");
-const sendPdf = (res, buf, name) => {
+const sendPdf = (res, buf, name, content = null) => {
   res.setHeader("Content-Type", "application/pdf");
+  // Urdu that couldn't be drawn was left out of this PDF: the app showed the warning before export; say it here too
+  if (content && pdfStatus(content).urdu === "not_included") res.setHeader("X-Resume-Warning", "urdu-not-included");
   res.setHeader("Content-Disposition", `attachment; filename="${String(name).replace(/[^A-Za-z0-9 ._-]/g, "").slice(0, 80) || "resume"}.pdf"`);
   res.setHeader("Cache-Control", "private, no-store");
   res.send(buf);
@@ -173,7 +175,8 @@ router.patch("/drafts/:id/decisions", ...student, handle(async (req, res) => {
 router.get("/drafts/:id/preview.pdf", ...student, pdfLimit, handle(async (req, res) => {
   const d = await ownDraft(req);
   if (!d) return fail(req, res, 404, "NOT_FOUND", "Draft not found");
-  sendPdf(res, await render(drafts.contentWithDecisions(d), { draft: true }), `DRAFT ${d.target?.title || "resume"}`);
+  const content = drafts.contentWithDecisions(d);
+  sendPdf(res, await render(content, { draft: true }), `DRAFT ${d.target?.title || "resume"}`, content);
 }));
 
 router.post("/drafts/:id/approve", ...student, handle(async (req, res) => {
@@ -200,13 +203,13 @@ const ownVersion = (req) => (isId(req.params.id) ? CareerResumeApprovedVersion.f
 router.get("/versions/:id", ...student, handle(async (req, res) => {
   const v = await ownVersion(req);
   if (!v) return fail(req, res, 404, "NOT_FOUND", "Version not found");
-  ok(req, res, { ...drafts.versionView(v), content: v.contentSnapshot });
+  ok(req, res, { ...drafts.versionView(v), content: v.contentSnapshot, pdf: pdfStatus(v.contentSnapshot) });
 }));
 
 router.get("/versions/:id/export.pdf", ...student, pdfLimit, handle(async (req, res) => {
   const v = await ownVersion(req);
   if (!v) return fail(req, res, 404, "NOT_FOUND", "Version not found");
-  sendPdf(res, await render(v.contentSnapshot), v.label || "resume");
+  sendPdf(res, await render(v.contentSnapshot), v.label || "resume", v.contentSnapshot);
 }));
 
 router.delete("/versions/:id", ...student, handle(async (req, res) => {

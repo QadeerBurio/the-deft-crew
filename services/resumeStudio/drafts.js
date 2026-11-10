@@ -14,7 +14,7 @@ const CareerResumeApprovedVersion = require("../../models/CareerResumeApprovedVe
 const { StudioError } = require("./tailor");
 const { revisionHashOf, hashContent } = require("./facts");
 const { checkText, checkVersion, corpusOf, getAt, setAt, listForOrder } = require("./validator");
-const { RENDERER_VERSION } = require("./renderer");
+const { RENDERER_VERSION, pdfStatus } = require("./renderer");
 
 const clone = (x) => JSON.parse(JSON.stringify(x));
 
@@ -64,6 +64,8 @@ function studentView(draft) {
     aiSuggestions: d.fallback ? "insufficient_information" : "available",
     fallback: d.fallback || null,
     content: contentWithDecisions(d),
+    // shown before preview / export: whether Urdu text will be in the PDF ({ urdu: none | included | not_included, message })
+    pdf: pdfStatus(contentWithDecisions(d)),
     unresolved: (d.suggestions || []).filter((s) => s.decision === "pending").length,
     approvedVersionId: d.approvedVersionId ? String(d.approvedVersionId) : null,
     expiresAt: d.expiresAt || null,
