@@ -262,6 +262,12 @@ const check = (name, ok, detail = "") => { results.push(!!ok); if (!ok || proces
     ["POST", `${L}/programs/${fx.P}/restart`, { version: 1 }, ["B", "A"], "owner or admin (409 here: the program is not ended)"],
     ["POST", `${L}/quotes`, { studentId: String(ids.S), offerId: String(oid()) }, ANY_BRAND, "own offers only (unknown offer -> 404)", { allow404: true }],
     ["GET", `${L}/admin/ledger`, null, ["A"]],
+    // admin: every brand's program (each write needs a reason and is logged)
+    ["GET", `${L}/admin/programs`, null, ["A"], "admin only"],
+    ["GET", `${L}/admin/programs/${fx.P}`, null, ["A"], "admin only"],
+    ["POST", `${L}/admin/programs`, { brandId: String(oid()), reason: "permission matrix" }, ["A"], "admin only (404 here: unknown brand)", { allow404: true }],
+    ["PATCH", `${L}/admin/programs/${fx.P}`, { terms: "matrix", version: 1, reason: "permission matrix" }, ["A"], "admin only (409 here: stale version)"],
+    ["POST", `${L}/admin/programs/${fx.P}/restart`, { version: 1, reason: "permission matrix" }, ["A"], "admin only (409 here: not ended)"],
     // the unified admin action log (read-only)
     ["GET", "/api/admin/actions", null, ["A"], "admin only"],
     ["GET", "/api/admin/actions/facets", null, ["A"], "admin only"],

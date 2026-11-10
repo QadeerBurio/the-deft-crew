@@ -391,15 +391,18 @@ async function cleanInput(body, brandId, current = null, isAdmin = false) {
   return out;
 }
 
-async function createProgram(brandId, body = {}, actor) {
-  const existing = await LoyaltyProgram.findOne({ brand: brandId }).select("status").lean();
+// opts.session: run inside the caller's transaction (admin writes log in the same one); opts.isAdmin: an admin
+// creating it on the brand's behalf (may set adminMaxDiscountPct)
+async function createProgram(brandId, body = {}, actor, opts = {}) {
+  const session = opts.session || null;
+  const existing = await LoyaltyProgram.findOne({ brand: brandId }).select("status").session(session).lean();
   if (existing?.status === "ended") throw new LoyaltyError(409, "EXISTS", "Your brand's loyalty program has ended; restart it to start a new version");
   if (existing) throw new LoyaltyError(409, "EXISTS", "Your brand already has a loyalty program; edit it instead");
-  const input = await cleanInput({ tiers: DEFAULT_TIERS, ...body }, brandId, null, false);
+  const input = await cleanInput({ tiers: DEFAULT_TIERS, ...body }, brandId, null, !!opts.isAdmin);
   if (input.maxDiscountPct == null) input.maxDiscountPct = Math.max(...input.tiers.map((t) => t.discountPct));
-  validateTiers(input.tiers, input.maxDiscountPct);
+  validateTiers(input.tiers, Math.min(input.maxDiscountPct, input.adminMaxDiscountPct ?? 100));
   try {
-    const p = await LoyaltyProgram.create({ brand: brandId, status: "draft", ...input, version: 1, createdBy: actor, updatedBy: actor });
+    const [p] = await LoyaltyProgram.create([{ brand: brandId, status: "draft", ...input, version: 1, createdBy: actor, updatedBy: actor }], { session });
     await recordSafe("loyalty.program.created", String(p._id), { actor, subject: { kind: "LoyaltyProgram", id: p._id }, data: { brand: String(brandId), status: p.status } });
     return p.toObject();
   } catch (err) {
@@ -409,7 +412,7 @@ async function createProgram(brandId, body = {}, actor) {
 }
 
 // expectedVersion (optional): refuse if someone changed the program meanwhile
-async function updateProgram(program, body = {}, actor, isAdmin) {
+async function updateProgram(program, body = {}, actor, isAdmin, opts = {}) {
   const input = await cleanInput(body, program.brand, program, isAdmin);
   if (!Object.keys(input).length) return program;
   if (body.version != null && Number(body.version) !== program.version) throw new LoyaltyError(409, "VERSION_CONFLICT", "The program changed meanwhile; reload it");
@@ -421,7 +424,7 @@ async function updateProgram(program, body = {}, actor, isAdmin) {
       $inc: { version: 1 },
       $push: { history: { $each: [{ version: program.version, ...before, changedAt: new Date(), changedBy: actor }], $slice: -20 } },
     },
-    { new: true }
+    { new: true, session: opts.session || null }
   ).lean();
   if (!updated) throw new LoyaltyError(409, "VERSION_CONFLICT", "The program changed meanwhile; reload it");
   await recordSafe("loyalty.program.updated", `${program._id}:v${updated.version}`, {
@@ -435,14 +438,14 @@ async function updateProgram(program, body = {}, actor, isAdmin) {
 // Ending stays final for the version that ended. A restart makes the same program a draft at a new version
 // (same rules; dates cleared), keeps the full history (the program's history + a LoyaltyProgramRestart row),
 // and starts a new period: visits from before never count again. One restart per ended version.
-async function restartProgram(program, body = {}, actor, isAdmin) {
+async function restartProgram(program, body = {}, actor, isAdmin, opts = {}) {
   if (program.status !== "ended") throw new LoyaltyError(409, "NOT_ENDED", "Only an ended program can be restarted");
   if (body.version != null && Number(body.version) !== program.version) throw new LoyaltyError(409, "VERSION_CONFLICT", "The program changed meanwhile; reload it");
   const before = Object.fromEntries(RULE_FIELDS.map((k) => [k, program[k]]));
   const now = new Date();
   let result;
   try {
-    ({ result } = await withTransaction(async (session) => {
+    const core = async (session) => {
       const updated = await LoyaltyProgram.findOneAndUpdate(
         { _id: program._id, version: program.version, status: "ended" },
         {
@@ -458,7 +461,9 @@ async function restartProgram(program, body = {}, actor, isAdmin) {
         endedAt: program.updatedAt || null, endedRules: before, restartedAt: now, restartedBy: actor || null, byAdmin: !!isAdmin,
       }], { session });
       return updated;
-    }));
+    };
+    // inside the caller's transaction when given one (admin writes), otherwise its own
+    result = opts.session ? await core(opts.session) : (await withTransaction(core)).result;
   } catch (err) {
     if (err?.code === 11000) throw new LoyaltyError(409, "VERSION_CONFLICT", "The program was already restarted; reload it");
     throw err;

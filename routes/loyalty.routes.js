@@ -13,6 +13,12 @@
 //   POST  /quotes                    brand: what this student's visit gets (tier, %), before confirming
 //   GET   /admin/ledger              admin: credits and reversals (exceptions view)
 //   POST  /admin/reverse             admin: reverse a credit (refund / void / fraud); reason required
+//   GET   /admin/programs            admin: every brand's program (?status=&q=brand name)
+//   GET   /admin/programs/:id        admin: one program: rules, history, restarts, numbers
+//   POST  /admin/programs            admin: create a program on a brand's behalf (always a draft); reason required
+//   PATCH /admin/programs/:id        admin: edit / publish / pause / end; version + reason required
+//   POST  /admin/programs/:id/restart  admin: restart an ended program as a draft; version + reason required
+//   Every admin write here is logged in the AdminActionLog, in the same transaction as the change.
 const express = require("express");
 const mongoose = require("mongoose");
 const auth = require("../middleware/auth.middleware");
@@ -20,6 +26,8 @@ const User = require("../models/User");
 const Offer = require("../models/Offer");
 const LoyaltyProgram = require("../models/LoyaltyProgram");
 const LoyaltyLedger = require("../models/LoyaltyLedger");
+const LoyaltyProgramRestart = require("../models/LoyaltyProgramRestart");
+const { withTransaction } = require("../utils/transaction");
 const { isEnabled } = require("../config/featureFlags");
 const loyalty = require("../services/loyalty");
 const adminLog = require("../services/adminActionLog");
@@ -186,6 +194,108 @@ router.post("/admin/reverse", auth, role("admin"), handle(async (req, res) => {
   const out = await loyalty.reverseRedemption({ redemptionId, reason, actor: req.userId });
   await adminLog.recordSafe({ adminId: req.userId, action: "loyalty.visit.reverse", targetType: "LoyaltyLedger", targetId: String(out.entry.reverses), before: { counted: true }, after: { counted: false, reversalId: String(out.entry._id), visitsDelta: out.entry.visitsDelta }, reason, requestId: req.id });
   ok(req, res, { reversal: { id: String(out.entry._id), visitsDelta: out.entry.visitsDelta, reason: out.entry.reason }, progress: out.progress }, 201);
+}));
+
+// ---------- admin: every brand's program ----------
+const RULE_KEYS = ["status", "tiers", "eligibleOfferIds", "branchIds", "maxDiscountPct", "adminMaxDiscountPct", "maxVisitsPerDay", "resetMonths", "terms", "startsAt", "endsAt"];
+const reasonOf = (req) => {
+  const r = String(req.body?.reason || "").trim();
+  if (r.length < 5) throw new loyalty.LoyaltyError(400, "REASON_REQUIRED", "Give a reason (at least 5 characters)");
+  return r.slice(0, 500);
+};
+const versionOf = (req) => {
+  if (req.body?.version == null) throw new loyalty.LoyaltyError(400, "VERSION_REQUIRED", "Send the version you edited");
+  return Number(req.body.version);
+};
+// the change and its AdminActionLog row together (one transaction where the database supports it)
+async function logged(req, reason, work, entry) {
+  const { result } = await withTransaction(async (session) => {
+    const out = await work(session);
+    await adminLog.record({ adminId: req.userId, reason, requestId: req.id, ...entry(out) }, { session });
+    return out;
+  });
+  return result;
+}
+const brandNames = async (ids) => new Map((await User.find({ _id: { $in: [...new Set(ids.map(String))] }, role: "brand" }).select("brandName name").lean()).map((u) => [String(u._id), u.brandName || u.name || "brand"]));
+const adminProgramView = (p, names) => ({
+  ...loyalty.publicProgram(p),
+  brandName: names.get(String(p.brand)) || "brand",
+  inPilot: flagOn(p.brand, "brand"),
+  brandMaxDiscountPct: p.maxDiscountPct,
+  adminMaxDiscountPct: p.adminMaxDiscountPct ?? null,
+  createdAt: p.createdAt, updatedAt: p.updatedAt,
+});
+const loadProgram = async (req, res) => {
+  if (!isId(req.params.id)) { fail(req, res, 400, "INVALID_ID", "Invalid program id"); return null; }
+  const p = await LoyaltyProgram.findById(req.params.id).lean();
+  if (!p) { fail(req, res, 404, "NOT_FOUND", "Program not found"); return null; }
+  return p;
+};
+const ACTION_FOR_STATUS = { active: "loyalty.program.publish", paused: "loyalty.program.pause", ended: "loyalty.program.end" };
+
+router.get("/admin/programs", auth, role("admin"), handle(async (req, res) => {
+  const filter = {};
+  if (req.query.status && ["draft", "active", "paused", "ended"].includes(String(req.query.status))) filter.status = String(req.query.status);
+  const list = await LoyaltyProgram.find(filter).sort({ updatedAt: -1 }).limit(500).lean();
+  const names = await brandNames(list.map((p) => p.brand));
+  const q = String(req.query.q || "").trim().toLowerCase().slice(0, 80);
+  const rows = list.map((p) => adminProgramView(p, names)).filter((p) => !q || p.brandName.toLowerCase().includes(q));
+  ok(req, res, { programs: rows });
+}));
+
+router.get("/admin/programs/:id", auth, role("admin"), handle(async (req, res) => {
+  const p = await loadProgram(req, res);
+  if (!p) return;
+  const [names, restarts, numbers] = await Promise.all([
+    brandNames([p.brand]),
+    LoyaltyProgramRestart.find({ program: p._id }).sort({ endedVersion: -1 }).lean(),
+    loyalty.analytics(p.brand),
+  ]);
+  ok(req, res, {
+    program: adminProgramView(p, names),
+    history: (p.history || []).slice().reverse().map((h) => ({ version: h.version, status: h.status, tiers: h.tiers, maxDiscountPct: h.maxDiscountPct, adminMaxDiscountPct: h.adminMaxDiscountPct ?? null, startsAt: h.startsAt || null, endsAt: h.endsAt || null, changedAt: h.changedAt, restarted: !!h.restarted })),
+    restarts: restarts.map((r) => ({ endedVersion: r.endedVersion, newVersion: r.newVersion, restartedAt: r.restartedAt, byAdmin: !!r.byAdmin })),
+    numbers: { verifiedVisits: numbers.verifiedVisits || 0, members: numbers.members || 0, repeatCustomers: numbers.repeatCustomers || 0, reversals: numbers.reversals || 0, tierCounts: numbers.tierCounts || {} },
+  });
+}));
+
+router.post("/admin/programs", auth, role("admin"), handle(async (req, res) => {
+  const reason = reasonOf(req);
+  const { brandId } = req.body || {};
+  const brand = isId(brandId) ? await User.findOne({ _id: brandId, role: "brand" }).select("_id").lean() : null;
+  if (!brand) return fail(req, res, 404, "BRAND_NOT_FOUND", "Brand not found");
+  const body = { ...(req.body || {}) };
+  for (const k of ["brandId", "brand", "reason", "status", "version"]) delete body[k]; // always a draft: the brand or an admin publishes
+  const p = await logged(req, reason,
+    (session) => loyalty.createProgram(brand._id, body, req.userId, { session, isAdmin: true }),
+    (out) => ({ action: "loyalty.program.create", targetType: "LoyaltyProgram", targetId: String(out._id), before: null, after: adminLog.pick(out, RULE_KEYS) }));
+  ok(req, res, adminProgramView(p, await brandNames([p.brand])), 201);
+}));
+
+router.patch("/admin/programs/:id", auth, role("admin"), handle(async (req, res) => {
+  const p = await loadProgram(req, res);
+  if (!p) return;
+  const reason = reasonOf(req);
+  const version = versionOf(req);
+  const body = { ...(req.body || {}), version };
+  for (const k of ["brand", "brandId", "reason"]) delete body[k];
+  const changed = Object.keys(body).filter((k) => RULE_KEYS.includes(k));
+  if (!changed.length) return fail(req, res, 400, "NOTHING_TO_CHANGE", "Nothing to change");
+  const updated = await logged(req, reason,
+    (session) => loyalty.updateProgram(p, body, req.userId, true, { session }),
+    (out) => ({ action: changed.length === 1 && changed[0] === "status" && ACTION_FOR_STATUS[out.status] ? ACTION_FOR_STATUS[out.status] : "loyalty.program.update", targetType: "LoyaltyProgram", targetId: String(p._id), before: { ...adminLog.pick(p, changed), version: p.version }, after: { ...adminLog.pick(out, changed), version: out.version } }));
+  ok(req, res, adminProgramView(updated, await brandNames([updated.brand])));
+}));
+
+router.post("/admin/programs/:id/restart", auth, role("admin"), handle(async (req, res) => {
+  const p = await loadProgram(req, res);
+  if (!p) return;
+  const reason = reasonOf(req);
+  const version = versionOf(req);
+  const updated = await logged(req, reason,
+    (session) => loyalty.restartProgram(p, { version }, req.userId, true, { session }),
+    (out) => ({ action: "loyalty.program.restart", targetType: "LoyaltyProgram", targetId: String(p._id), before: { status: p.status, version: p.version }, after: { status: out.status, version: out.version } }));
+  ok(req, res, adminProgramView(updated, await brandNames([updated.brand])));
 }));
 
 module.exports = router;
