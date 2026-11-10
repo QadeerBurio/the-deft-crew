@@ -107,7 +107,7 @@ function timeline(appId, student, employer, { doneDaysAgo = 2, hireDaysAgo = nul
 const apps = {};
 const mkApp = (key, student, jobId, employer, opts) => {
   apps[key] = oid();
-  fake.seed(coll("JobApplication"), [{ _id: apps[key], jobId, userId: student, fullName: "x", email: "x@test.local", phone: "0300", status: "interview", appliedAt: ago(30) }]);
+  fake.seed(coll("JobApplication"), [{ _id: apps[key], jobId, userId: student, fullName: "x", email: "x@test.local", phone: "03005550199", status: "interview", appliedAt: ago(30) }]);
   return timeline(apps[key], student, employer, opts);
 };
 mkApp("main", ids.S, J, ids.E, { doneDaysAgo: 2, hireDaysAgo: 1 });
@@ -239,7 +239,8 @@ const goodS = { communication: 5, respect: 4, clarity: 3 };
   const upd = async (M, f, u) => (await M.updateMany(f, u)).modifiedCount;
   await retention.forDeletedStudent({ id: ids.S, ghost: oid(), upd, del });
   check("account deletion: the student's ratings (given and received) and their reports are deleted; others stay", rows("CareerRating", (x) => same(x.rater, ids.S) || same(x.ratee, ids.S)).length === 0 && rows("CareerRatingReport", (x) => same(x.reporter, ids.S)).length === 0 && rows("CareerRating").length === 3, rows("CareerRating").length);
-  check("no e-mail or phone in any reply", !/@test\.local|0300/.test(responses.map((x) => x.text).join(" ")));
+  // the seeded phone in full: a bare "0300" also turned up inside random ids now and then (a flaky failure)
+  check("no e-mail or phone in any reply", !/@test\.local|03005550199/.test(responses.map((x) => x.text).join(" ")));
   check("no 500s", !responses.some((x) => x.status >= 500));
 
   server.close();
