@@ -31,6 +31,8 @@
 //                                          these three: 404 unless FLAG_CAREER_TIMELINE is set
 //   GET  /employers/me/interviews          employer: my interviews (?jobId of my own, ?status, ?from, ?to), start order
 //   GET  /employers/me/analytics           employer: my funnel; GET /admin/analytics admin: all (audited)
+//                                          ?jobId: one job's funnel (the employer's own job; any job for an admin),
+//                                          with the job's views and total applicants (classic applications too)
 //                                          ?from&to (applications whose timeline started then), from events only
 const express = require("express");
 const auth = require("../middleware/auth.middleware");
@@ -240,15 +242,31 @@ router.get("/employers/me/interviews", auth, role("employee"), handle(async (req
   ok(req, res, { interviews: list });
 }));
 
+// one job's numbers that aren't events: views and every applicant (timeline or classic)
+async function jobFacts(jobId) {
+  const [job, applicants] = await Promise.all([Job.findById(jobId).select("title views archivedAt").lean(), JobApplication.countDocuments({ jobId })]);
+  return { id: String(jobId), title: job?.title || "", views: Number(job?.views) || 0, applicants, archived: !!job?.archivedAt };
+}
 router.get("/employers/me/analytics", auth, role("employee", "admin"), handle(async (req, res) => {
   if (!timeline.flagOn(req.userId, "employee")) return fail(req, res, 404, "CAREER_OFF", "The hiring timeline is not available for your account yet");
-  ok(req, res, await analytics.funnel({ employerId: req.userId, ...range(req) }));
+  let jobId = null;
+  if (req.query.jobId) {
+    if (!isId(req.query.jobId)) return fail(req, res, 400, "INVALID_ID", "Invalid job id");
+    // only the employer's own job: anything else is "not found" and says nothing about it
+    if (!(await Job.exists({ _id: req.query.jobId, postedBy: req.userId }))) return fail(req, res, 404, "NOT_FOUND", "Job not found");
+    jobId = req.query.jobId;
+  }
+  const out = await analytics.funnel({ employerId: req.userId, jobId, ...range(req) });
+  ok(req, res, jobId ? { ...out, job: await jobFacts(jobId) } : out);
 }));
 router.get("/admin/analytics", auth, role("admin"), handle(async (req, res) => {
   const r = range(req);
   if (req.query.employerId && !isId(req.query.employerId)) return fail(req, res, 400, "INVALID_ID", "Invalid employer id");
+  if (req.query.jobId && !isId(req.query.jobId)) return fail(req, res, 400, "INVALID_ID", "Invalid job id");
+  if (req.query.jobId && !(await Job.exists({ _id: req.query.jobId }))) return fail(req, res, 404, "NOT_FOUND", "Job not found");
   await recordSafe("career.admin.access", `${req.userId}:analytics:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`, { actor: req.userId, subject: { kind: "CareerAnalytics", id: null }, data: { action: "read:analytics", employerId: req.query.employerId || null } });
-  ok(req, res, await analytics.funnel({ employerId: req.query.employerId || null, ...r }));
+  const out = await analytics.funnel({ employerId: req.query.employerId || null, jobId: req.query.jobId || null, ...r });
+  ok(req, res, req.query.jobId ? { ...out, job: await jobFacts(req.query.jobId) } : out);
 }));
 
 // open hire disputes: the candidate disputed a verified hire and no admin has decided yet. Names and the job only
