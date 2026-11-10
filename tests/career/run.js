@@ -390,6 +390,8 @@ const applyBody = (who) => ({ fullName: `${who} full name`, email: `${who}@test.
   check("the candidate accepts → offer accepted, NOT hired: stage offer, old status 'interview', no hire outcome", r.status === 201 && r.json.data.state === "offer" && appDoc(ctx.A4).status === "interview" && !outcome(ctx.A4, "hired") && rows("CareerOffer", (o) => same(o._id, off4._id))[0].status === "accepted", r.text.slice(0, 160));
   r = await call("GET", `/api/career/applications/${ctx.A4}/timeline`, { tok: T.E1 });
   check("the employer's next action is confirm hire", r.json.data.nextAllowedActions.includes("HIRE_CONFIRMED") && r.json.data.offerDetails?.status === "accepted", JSON.stringify(r.json?.data?.nextAllowedActions));
+  r = await call("GET", "/api/career/employers/me/applications", { tok: T.E1 });
+  check("…and the pipeline list offers it too (the list's next actions match the drawer's)", (r.json?.data?.applications || []).find((a) => same(a.applicationId, ctx.A4))?.nextAllowedActions.includes("HIRE_CONFIRMED"), JSON.stringify((r.json?.data?.applications || []).find((a) => same(a.applicationId, ctx.A4))?.nextAllowedActions));
   const v4 = await ver(ctx.A4);
   rs = await Promise.all([1, 2].map(() => call("POST", `/api/career/offers/${off4._id}/confirm-hire`, { tok: T.E1, body: { version: v4 } })));
   check("two simultaneous confirms → one 201, one 409; one HIRE_CONFIRMED", rs.filter((x) => x.status === 201).length === 1 && rs.filter((x) => x.status === 409).length === 1 && events(ctx.A4).filter((e) => e.type === "HIRE_CONFIRMED").length === 1, statuses(rs));

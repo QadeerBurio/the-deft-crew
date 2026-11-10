@@ -155,7 +155,8 @@ router.get("/employers/me/applications", auth, role("employee", "admin"), handle
     applications: apps.map((a) => {
       const job = byJob.get(String(a.jobId));
       const careerEnabled = timeline.flagOn(a.userId, "student");
-      const ctx = { role: "employer", external: !!job?.isExternal, archived: !!job?.archivedAt };
+      // the job's employer is the caller: owner-only actions (confirm hire) are offered (an admin listing sees them too)
+      const ctx = { role: "employer", external: !!job?.isExternal, archived: !!job?.archivedAt, employerId: job?.postedBy ? String(job.postedBy) : null, userId: String(req.userId) };
       const s = stateOf(a);
       return {
         applicationId: String(a._id),
