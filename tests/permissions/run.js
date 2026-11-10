@@ -135,6 +135,7 @@ app.use("/api/career", reqS("./routes/careerTrial.routes"));
 app.use("/api/career", reqS("./routes/career.routes"));
 app.use("/api/surplus", reqS("./routes/surplus.routes"));
 app.use("/api/analytics", reqS("./routes/analytics.routes"));
+app.use("/api/admin/actions", reqS("./routes/adminActions.routes"));
 
 const oid = () => new mongoose.Types.ObjectId();
 const ids = {};
@@ -261,6 +262,9 @@ const check = (name, ok, detail = "") => { results.push(!!ok); if (!ok || proces
     ["POST", `${L}/programs/${fx.P}/restart`, { version: 1 }, ["B", "A"], "owner or admin (409 here: the program is not ended)"],
     ["POST", `${L}/quotes`, { studentId: String(ids.S), offerId: String(oid()) }, ANY_BRAND, "own offers only (unknown offer -> 404)", { allow404: true }],
     ["GET", `${L}/admin/ledger`, null, ["A"]],
+    // the unified admin action log (read-only)
+    ["GET", "/api/admin/actions", null, ["A"], "admin only"],
+    ["GET", "/api/admin/actions/facets", null, ["A"], "admin only"],
     ["POST", `${L}/admin/reverse`, { redemptionId: fx.redemption, reason: "test" }, ["A"], "", { allow404: true }],
     // career timeline
     ["GET", `${C}/applications/me`, null, ANY_STUDENT, "own applications"],

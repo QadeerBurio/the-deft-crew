@@ -262,6 +262,7 @@ const trials = () => rows("EmployerHiringTrial");
   check("a decision without a reason: 400", r.status === 400 && r.json.error.code === "REASON_REQUIRED");
   r = await call("POST", `${B}/admin/verifications/${v1}/review`, { tok: T.admin, body: { action: "approve", reason: "NTN checked on FBR; domain owned" } });
   check("admin approves with a reason; it's audited", r.status === 200 && r.json.data.status === "approved" && rows("CareerAdminAudit", (a) => same(a.targetId, v1) && a.action === "verification.approve" && a.reason === "NTN checked on FBR; domain owned" && same(a.admin, ids.admin)).length === 1);
+  check("…and in the unified admin action log (the refused review without a reason isn't)", rows("AdminActionLog", (x) => x.action === "fhf.verification.review" && x.targetId === String(v1)).length === 1 && rows("AdminActionLog", (x) => x.action === "fhf.verification.review" && x.targetId === String(v1))[0].after.status === "approved");
 
   // ---------- activation ----------
   const acts = await Promise.all([1, 2, 3].map(() => call("POST", `${B}/employers/me/trial/activate`, { tok: T.E1 })));

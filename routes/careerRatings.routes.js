@@ -76,6 +76,7 @@ router.post("/:id/report", auth, signedIn, flagged, handle(async (req, res) => {
 router.get("/admin/reports", auth, signedIn, admin, handle(async (req, res) => ok(req, res, await ratings.reports(String(req.query.status || "open")))));
 router.post("/admin/reports/:id/decide", auth, signedIn, admin, handle(async (req, res) => {
   const rep = await ratings.decide(req.userId, req.params.id, req.body || {});
+  await require("../services/adminActionLog").recordSafe({ adminId: req.userId, action: "career.rating.report.decide", targetType: "CareerRatingReport", targetId: String(req.params.id), before: { status: "open" }, after: { status: rep.status, action: String(req.body?.action || "") }, reason: rep.decisionReason, requestId: req.id });
   ok(req, res, { id: String(rep._id), status: rep.status, decisionReason: rep.decisionReason });
 }));
 
