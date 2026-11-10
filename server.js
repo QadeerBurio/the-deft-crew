@@ -70,8 +70,13 @@ app.use("/assets/dots",
 const { jobEnabled, describeJobs, describeFlags } = require("./config/featureFlags");
 // one line per feature flag: rule types and counts only, never the ids (config/featureFlags.js)
 for (const line of describeFlags()) console.log(line);
+// admin access to features per account (services/featureAccess.js): API requests wait for the first load (at most
+// 5 s), then it's re-read every 30 s; prints "[flags] admin access: <flag> <count>, …" (counts only)
+const featureAccess = require("./services/featureAccess");
+featureAccess.expectLoad();
 
 connectDB().then(() => {
+  featureAccess.start();
   console.log(describeJobs());
 
   // Automated event ingestion (hourly, plus a pass 10s after start)
@@ -244,6 +249,7 @@ app.post("/webhooks/app/scopes_update", async (req, res) => {
 });
 // ---------------- ROUTES ----------------
 // IMPORTANT: Register webhook routes FIRST
+app.use("/api", featureAccess.waitReady); // until admin feature access has loaded once (at most 5 s after start)
 app.use("/api/webhooks/woocommerce", require("./routes/storeWebhook.routes")); // connected WooCommerce stores
 app.use("/api/webhooks", require("./routes/webhook.routes"));
 
@@ -256,6 +262,7 @@ app.use("/api/brand/store", require("./routes/brandStore.routes")); // a brand's
 app.use("/api/notification", require("./routes/notification.routes"));
 app.use("/api/profile", require("./routes/profile.routes"));
 app.use("/api/admin/actions", require("./routes/adminActions.routes")); // the unified admin action log (read-only)
+app.use("/api/admin/features", require("./routes/adminFeatures.routes")); // features per account (admin only, logged)
 app.use("/api/admin", require("./routes/admin.routes"));
 app.use("/api/membership", require("./routes/membership.route"));
 app.use("/api/bookings", require("./routes/booking.routes"));

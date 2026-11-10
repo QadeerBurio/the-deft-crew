@@ -63,6 +63,7 @@ const PushLog = require("../models/PushLog");
 const SocialPushDaily = require("../models/SocialPushDaily");
 const SocialPushGroup = require("../models/SocialPushGroup");
 const OtpCode = require("../models/OtpCode");
+const FeatureAccess = require("../models/FeatureAccess");
 const { brandFigures, totalsOnly } = require("./brandRevenue");
 
 const SUPPORTED_ROLES = new Set(["student", "brand"]);
@@ -348,6 +349,7 @@ async function deleteInDatabase({ id, role, deletionId, ghost, session }) {
   await del(SocialPushDaily, { user: id });
   await upd(SocialPushGroup, { "items.authorId": id }, { $pull: { items: { authorId: id } } });
   await del(OtpCode, { user: id });
+  await del(FeatureAccess, { account: id }); // admin feature access (the in-memory set drops it at the next refresh)
 
   // ── the account itself ──
   await del(User, { _id: id });
