@@ -368,7 +368,8 @@ router.post('/redeem-payment', auth, async (req, res) => {
       data: { student: String(userId), billAmount: bill, savedAmount: computedSaved },
     });
     // one loyalty visit for this verified redemption (exactly once; never fails the redemption)
-    const loyaltyResult = quote.applies ? await loyalty.creditSafe(redemptionId, { source: 'redeem-payment', branchId, actor: req.userId, discountPct: discount }) : null;
+    // (reward mode: the visit counts as a stamp; the offer's own % applied, so no loyalty % is recorded)
+    const loyaltyResult = quote.applies || quote.mode === 'reward' ? await loyalty.creditSafe(redemptionId, { source: 'redeem-payment', branchId, actor: req.userId, discountPct: quote.applies ? discount : null }) : null;
 
     // Redemption changes claimedBy + redemptions → clear every list that shows them
     await clearBrandCaches(offer.brand, userId);
@@ -1009,6 +1010,8 @@ router.get("/pending-scans", auth, async (req, res) => {
     // Loyalty (FLAG_LOYALTY_V2): show the student's tier and use its % (redeem-payment applies the same)
     for (const s of formattedScans) {
       const q = await loyalty.quoteFor({ brandId: req.userId, studentId: s.studentId, offerId: s.offerId });
+      // reward mode: the offer's usual % stays; show the stamps and any waiting reward
+      if (q.mode === "reward") { s.loyalty = { mode: "reward", stamps: q.stamps, needed: q.needed, visitsToReward: q.visitsToReward, reward: q.reward, available: q.available, limitReached: q.limitReached, countsAsVisit: q.countsAsVisit }; continue; }
       if (!q.applies) continue;
       s.offerDiscountPercentage = s.discountPercentage;
       s.discountPercentage = q.discountPct;

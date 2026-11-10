@@ -10,7 +10,10 @@
 //   PATCH /programs/:id              brand: edit my program; admin: any program (and adminMaxDiscountPct)
 //   POST  /programs/:id/restart      brand (own) or admin: an ended program becomes a draft at a new version;
 //                                    visits from the ended period never count again
-//   POST  /quotes                    brand: what this student's visit gets (tier, %), before confirming
+//   POST  /quotes                    brand: what this student's visit gets (tier, %), before confirming; reward mode:
+//                                    stamps and any waiting reward (the visit itself gets the offer's usual %)
+//   POST  /rewards/:id/use           brand: apply a student's waiting reward at the till ({ billAmount? });
+//                                    once only (Idempotency-Key: a retry gets the same answer)
 //   GET   /admin/ledger              admin: credits and reversals (exceptions view)
 //   POST  /admin/reverse             admin: reverse a credit (refund / void / fraud); reason required
 //   GET   /admin/programs            admin: every brand's program (?status=&q=brand name)
@@ -187,6 +190,15 @@ router.get("/admin/ledger", auth, role("admin"), handle(async (req, res) => {
       at: r.effectiveAt,
     })),
   });
+}));
+
+// ---------- reward mode: the brand applies a waiting reward ----------
+router.post("/rewards/:id/use", auth, role("brand"), handle(async (req, res) => {
+  if (!flagOn(req.userId, "brand")) return fail(req, res, 404, "LOYALTY_OFF", "Loyalty is not available for your brand yet");
+  const key = (req.get("Idempotency-Key") || req.body?.idempotencyKey || "").trim() || null;
+  const out = await loyalty.useReward({ rewardId: req.params.id, brandId: req.userId, actor: req.userId, billAmount: req.body?.billAmount, useKey: key });
+  const r = out.reward;
+  ok(req, res, { id: String(r._id), status: r.status, label: r.label, kind: r.kind, usedAt: r.usedAt, billAmount: r.billAmount, savedAmount: r.savedAmount, duplicate: out.duplicate }, out.duplicate ? 200 : 201);
 }));
 
 router.post("/admin/reverse", auth, role("admin"), handle(async (req, res) => {

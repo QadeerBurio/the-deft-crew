@@ -27,6 +27,14 @@ async function brandOf(brandId) {
 
 /** What to say for a ledger row: { kind, title, body } or null (a credit that didn't count says nothing) */
 function messageFor(row, progress, brandName, thisVisitPct = null) {
+  if (row.type === "CREDIT" && progress?.mode === "reward") {
+    // reward mode: stamps toward a reward ("unlocked" when this visit earned it; the notice kinds are unchanged)
+    if (!(row.visitsDelta > 0)) return null;
+    if (progress.justEarned && progress.available) return { kind: "tier_unlocked", title: `Reward unlocked at ${brandName}`, body: `${progress.available.label} is waiting for you. Show your QR on your next visit.` };
+    if (progress.available) return { kind: "visit", title: `Visit counted at ${brandName}`, body: `Your reward (${progress.available.label}) is waiting. Use it on your next visit.` };
+    const label = progress.reward?.label || "your reward";
+    return { kind: "visit", title: `Visit ${progress.stamps} of ${progress.needed} at ${brandName}`, body: progress.limitReached ? `You've reached this program's reward limit${progress.limitReached === "monthly-limit" ? " for this month" : ""}.` : `${plural(progress.visitsToReward, "more visit")} to ${label}.` };
+  }
   if (row.type === "CREDIT") {
     if (!(row.visitsDelta > 0)) return null;
     const next = progress?.currentTier; // what the next visit gets
