@@ -9,12 +9,16 @@
 //   redemption (unique idempotency key + a per-redemption guard), however often or simultaneously it runs.
 // - Visits = counted credits − reversals, within the program's reset window. A reversal appends a row;
 //   nothing is edited or deleted. LoyaltySnapshot is a cache rebuilt from the ledger.
+// - Ending is final for that version. restartProgram turns an ended program back into a draft at a new
+//   version and records a LoyaltyProgramRestart; credits from the ended period (programVersion <= the ended
+//   version) never count again, so a restart never reopens old redemptions.
 // - Loyalty applies only where FLAG_LOYALTY_V2 is on for BOTH the brand and the student, and the brand
 //   has an active program covering the offer (and branch, if the program names branches).
 const mongoose = require("mongoose");
 const LoyaltyProgram = require("../models/LoyaltyProgram");
 const LoyaltyLedger = require("../models/LoyaltyLedger");
 const LoyaltySnapshot = require("../models/LoyaltySnapshot");
+const LoyaltyProgramRestart = require("../models/LoyaltyProgramRestart");
 const Offer = require("../models/Offer");
 const Branch = require("../models/Branch");
 const { isEnabled } = require("../config/featureFlags");
@@ -113,10 +117,16 @@ function publicProgram(p) {
 }
 
 const running = (p, now = new Date()) => p && p.status === "active" && (!p.startsAt || new Date(p.startsAt) <= now) && (!p.endsAt || now <= new Date(p.endsAt));
+// the program with the version its current period counts from (after the latest restart, if any)
+async function withPeriod(p) {
+  if (!p) return p;
+  const last = await LoyaltyProgramRestart.findOne({ program: p._id }).sort({ endedVersion: -1 }).lean();
+  return { ...p, countAfterVersion: last ? last.endedVersion : 0 };
+}
 async function activeProgram(brandId, now = new Date()) {
   if (!isId(brandId)) return null;
   const p = await LoyaltyProgram.findOne({ brand: brandId, status: "active" }).lean();
-  return running(p, now) ? p : null;
+  return running(p, now) ? withPeriod(p) : null;
 }
 const offerCovered = (p, offerId) => !(p.eligibleOfferIds || []).length || p.eligibleOfferIds.some((o) => same(o, offerId));
 const branchCovered = (p, branchId) => !(p.branchIds || []).length || (!!branchId && p.branchIds.some((b) => same(b, branchId)));
@@ -131,8 +141,9 @@ function windowStart(program, now = new Date()) {
 
 function tally(entries, program, now = new Date()) {
   const from = windowStart(program, now);
+  const after = Number(program.countAfterVersion) || 0; // credits from an ended period never count again
   const reversed = new Set(entries.filter((e) => e.type === "REVERSAL" && e.reverses).map((e) => String(e.reverses)));
-  const counted = entries.filter((e) => e.type === "CREDIT" && e.visitsDelta > 0 && !reversed.has(String(e._id)));
+  const counted = entries.filter((e) => e.type === "CREDIT" && e.visitsDelta > 0 && !reversed.has(String(e._id)) && (Number(e.programVersion) || 0) > after);
   const inWindow = counted.filter((e) => !from || new Date(e.effectiveAt) >= from);
   const today = dayKey(now);
   return {
@@ -284,7 +295,7 @@ async function reverseRedemption({ redemptionId, reason, actor }) {
   const credit = await LoyaltyLedger.findOne({ idempotencyKey: `credit:${redemptionId}` }).lean();
   if (!credit) throw new LoyaltyError(404, "NOT_CREDITED", "This redemption has no loyalty credit");
   if (credit.visitsDelta <= 0) throw new LoyaltyError(409, "NOT_COUNTED", "This redemption did not count as a visit; nothing to reverse");
-  const program = await LoyaltyProgram.findById(credit.program).lean();
+  const program = await withPeriod(await LoyaltyProgram.findById(credit.program).lean());
   try {
     const { result } = await withTransaction(async (session) => {
       const [entry] = await LoyaltyLedger.create([{
@@ -336,7 +347,7 @@ async function cleanInput(body, brandId, current = null, isAdmin = false) {
   }
   if (has("status")) {
     if (!STATUSES.includes(body.status)) throw new LoyaltyError(400, "INVALID_STATUS", `Status: ${STATUSES.join(", ")}`);
-    if (current?.status === "ended" && body.status !== "ended") throw new LoyaltyError(409, "ENDED", "An ended program can't be restarted; create a new one");
+    if (current?.status === "ended" && body.status !== "ended") throw new LoyaltyError(409, "ENDED", "This program has ended; restart it to start a new version");
     out.status = body.status;
   }
   for (const k of ["maxVisitsPerDay", "resetMonths"]) {
@@ -381,7 +392,9 @@ async function cleanInput(body, brandId, current = null, isAdmin = false) {
 }
 
 async function createProgram(brandId, body = {}, actor) {
-  if (await LoyaltyProgram.exists({ brand: brandId })) throw new LoyaltyError(409, "EXISTS", "Your brand already has a loyalty program; edit it instead");
+  const existing = await LoyaltyProgram.findOne({ brand: brandId }).select("status").lean();
+  if (existing?.status === "ended") throw new LoyaltyError(409, "EXISTS", "Your brand's loyalty program has ended; restart it to start a new version");
+  if (existing) throw new LoyaltyError(409, "EXISTS", "Your brand already has a loyalty program; edit it instead");
   const input = await cleanInput({ tiers: DEFAULT_TIERS, ...body }, brandId, null, false);
   if (input.maxDiscountPct == null) input.maxDiscountPct = Math.max(...input.tiers.map((t) => t.discountPct));
   validateTiers(input.tiers, input.maxDiscountPct);
@@ -418,9 +431,48 @@ async function updateProgram(program, body = {}, actor, isAdmin) {
   return updated;
 }
 
+// ---------- restart an ended program ----------
+// Ending stays final for the version that ended. A restart makes the same program a draft at a new version
+// (same rules; dates cleared), keeps the full history (the program's history + a LoyaltyProgramRestart row),
+// and starts a new period: visits from before never count again. One restart per ended version.
+async function restartProgram(program, body = {}, actor, isAdmin) {
+  if (program.status !== "ended") throw new LoyaltyError(409, "NOT_ENDED", "Only an ended program can be restarted");
+  if (body.version != null && Number(body.version) !== program.version) throw new LoyaltyError(409, "VERSION_CONFLICT", "The program changed meanwhile; reload it");
+  const before = Object.fromEntries(RULE_FIELDS.map((k) => [k, program[k]]));
+  const now = new Date();
+  let result;
+  try {
+    ({ result } = await withTransaction(async (session) => {
+      const updated = await LoyaltyProgram.findOneAndUpdate(
+        { _id: program._id, version: program.version, status: "ended" },
+        {
+          $set: { status: "draft", startsAt: null, endsAt: null, updatedBy: actor },
+          $inc: { version: 1 },
+          $push: { history: { $each: [{ version: program.version, ...before, changedAt: now, changedBy: actor, restarted: true }], $slice: -20 } },
+        },
+        { new: true, session }
+      ).lean();
+      if (!updated) throw new LoyaltyError(409, "VERSION_CONFLICT", "The program changed meanwhile; reload it");
+      await LoyaltyProgramRestart.create([{
+        program: program._id, brand: program.brand, endedVersion: program.version, newVersion: updated.version,
+        endedAt: program.updatedAt || null, endedRules: before, restartedAt: now, restartedBy: actor || null, byAdmin: !!isAdmin,
+      }], { session });
+      return updated;
+    }));
+  } catch (err) {
+    if (err?.code === 11000) throw new LoyaltyError(409, "VERSION_CONFLICT", "The program was already restarted; reload it");
+    throw err;
+  }
+  await recordSafe("loyalty.program.restarted", `${program._id}:v${program.version}`, {
+    actor, subject: { kind: "LoyaltyProgram", id: program._id },
+    data: { brand: String(program.brand), endedVersion: program.version, newVersion: result.version, byAdmin: !!isAdmin },
+  });
+  return result;
+}
+
 // ---------- brand analytics ----------
 async function analytics(brandId, { from = null, to = null } = {}) {
-  const program = await LoyaltyProgram.findOne({ brand: brandId }).lean();
+  const program = await withPeriod(await LoyaltyProgram.findOne({ brand: brandId }).lean());
   if (!program) return { program: null };
   const entries = await LoyaltyLedger.find({ brand: brandId }).sort({ effectiveAt: 1 }).lean();
   const inRange = (e) => (!from || new Date(e.effectiveAt) >= from) && (!to || new Date(e.effectiveAt) <= to);
@@ -471,6 +523,8 @@ module.exports = {
   reverseRedemption,
   rebuildSnapshot,
   createProgram,
+  restartProgram,
+  withPeriod,
   updateProgram,
   analytics,
   tally,

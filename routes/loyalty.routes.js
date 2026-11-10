@@ -8,6 +8,8 @@
 //   GET   /programs/mine             brand: my program (any status)
 //   POST  /programs                  brand: create my program (own brand only; draft unless status given)
 //   PATCH /programs/:id              brand: edit my program; admin: any program (and adminMaxDiscountPct)
+//   POST  /programs/:id/restart      brand (own) or admin: an ended program becomes a draft at a new version;
+//                                    visits from the ended period never count again
 //   POST  /quotes                    brand: what this student's visit gets (tier, %), before confirming
 //   GET   /admin/ledger              admin: credits and reversals (exceptions view)
 //   POST  /admin/reverse             admin: reverse a credit (refund / void / fraud); reason required
@@ -118,6 +120,17 @@ router.patch("/programs/:id", auth, role("brand", "admin"), handle(async (req, r
   const body = { ...(req.body || {}) };
   delete body.brand;
   const updated = await loyalty.updateProgram(p, body, req.userId, isAdmin);
+  ok(req, res, { ...loyalty.publicProgram(updated), brandMaxDiscountPct: updated.maxDiscountPct, adminMaxDiscountPct: updated.adminMaxDiscountPct });
+}));
+
+router.post("/programs/:id/restart", auth, role("brand", "admin"), handle(async (req, res) => {
+  if (!isId(req.params.id)) return fail(req, res, 400, "INVALID_ID", "Invalid program id");
+  const p = await LoyaltyProgram.findById(req.params.id).lean();
+  if (!p) return fail(req, res, 404, "NOT_FOUND", "Program not found");
+  const isAdmin = req.loyaltyRole === "admin";
+  if (!isAdmin && String(p.brand) !== String(req.userId)) return fail(req, res, 403, "NOT_YOUR_PROGRAM", "This program belongs to another brand");
+  if (!isAdmin && !flagOn(req.userId, "brand")) return fail(req, res, 404, "LOYALTY_OFF", "Loyalty is not available for your brand yet");
+  const updated = await loyalty.restartProgram(p, req.body || {}, req.userId, isAdmin);
   ok(req, res, { ...loyalty.publicProgram(updated), brandMaxDiscountPct: updated.maxDiscountPct, adminMaxDiscountPct: updated.adminMaxDiscountPct });
 }));
 
