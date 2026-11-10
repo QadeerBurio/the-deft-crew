@@ -764,6 +764,32 @@ const applyBody = (who) => ({ fullName: `${who} full name`, email: `${who}@test.
 
   // ---------- leak scan ----------
 
+  console.log("── 19. the employer's own interviews (scoped to their jobs)");
+  const MI = "/api/career/employers/me/interviews";
+  r = await call("GET", MI, { tok: T.E1 });
+  const e1Ivs = rows("CareerInterview", (i) => same(i.employer, ids.E1));
+  check("employer 1: exactly their interviews, in start order, with how to join", r.status === 200 && r.json.data.interviews.length === e1Ivs.length && e1Ivs.length > 0 && r.json.data.interviews.every((i) => i.employer.id === String(ids.E1) && "meetingLink" in i && "location" in i) && r.json.data.interviews.every((x, i, a) => i === 0 || new Date(a[i - 1].startsAt) <= new Date(x.startsAt)), `${r.json?.data?.interviews?.length} vs ${e1Ivs.length}`);
+  r = await call("GET", MI, { tok: T.E2 });
+  check("employer 2: none of employer 1's interviews", r.status === 200 && r.json.data.interviews.every((i) => i.employer.id === String(ids.E2)) && r.json.data.interviews.length === rows("CareerInterview", (i) => same(i.employer, ids.E2)).length);
+  r = await call("GET", `${MI}?jobId=${ids.J1}`, { tok: T.E2 });
+  check("employer 2 asking for employer 1's job → 404 (nothing about it)", r.status === 404 && r.json.error.code === "NOT_FOUND" && !/Backend dev/.test(r.text), r.text.slice(0, 120));
+  r = await call("GET", `${MI}?jobId=${ids.J1}`, { tok: T.E1 });
+  check("employer 1, one of their jobs: only that job's interviews", r.status === 200 && r.json.data.interviews.every((i) => i.job.id === String(ids.J1)) && r.json.data.interviews.length === rows("CareerInterview", (i) => same(i.employer, ids.E1) && same(i.job, ids.J1)).length);
+  r = await call("GET", `${MI}?jobId=nope`, { tok: T.E1 });
+  check("an invalid job id → 400", r.status === 400 && r.json.error.code === "INVALID_ID");
+  r = await call("GET", `${MI}?status=completed`, { tok: T.E1 });
+  check("status filter", r.status === 200 && r.json.data.interviews.every((i) => i.status === "completed") && r.json.data.interviews.length === rows("CareerInterview", (i) => same(i.employer, ids.E1) && i.status === "completed").length);
+  const far = new Date(Date.now() + 400 * 864e5).toISOString();
+  r = await call("GET", `${MI}?from=${far}`, { tok: T.E1 });
+  check("date filter (nothing a year ahead)", r.status === 200 && r.json.data.interviews.length === 0);
+  const nonEmp = await Promise.all([T.S1, T.admin].map((tk) => call("GET", MI, { tok: tk })));
+  check("a student or an admin → 403 (admins use /admin/interviews)", nonEmp.every((x) => x.status === 403), nonEmp.map((x) => x.status).join(","));
+  const flagNow = process.env.FLAG_CAREER_TIMELINE;
+  process.env.FLAG_CAREER_TIMELINE = `ids:${ids.E2}`;
+  r = await call("GET", MI, { tok: T.E1 });
+  check("an employer outside the pilot → 404 CAREER_OFF", r.status === 404 && r.json.error.code === "CAREER_OFF");
+  process.env.FLAG_CAREER_TIMELINE = flagNow;
+
   const leaky = responses.filter((x) => x.leaks.length);
   check(`leak scan: ${responses.length} responses; /api/career has no contact details, resume files or secrets`, leaky.length === 0, leaky.map((x) => `${x.url} ${x.leaks.join(",")}`).join(" | "));
 

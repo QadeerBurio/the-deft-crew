@@ -29,6 +29,7 @@
 //   GET  /admin/interviews                 admin: interviews across employers (?status&employerId&jobId&from&to; audited)
 //   GET  /admin/hires                      admin: hires across employers (?employerId&jobId&from&to; audited)
 //                                          these three: 404 unless FLAG_CAREER_TIMELINE is set
+//   GET  /employers/me/interviews          employer: my interviews (?jobId of my own, ?status, ?from, ?to), start order
 //   GET  /employers/me/analytics           employer: my funnel; GET /admin/analytics admin: all (audited)
 //                                          ?from&to (applications whose timeline started then), from events only
 const express = require("express");
@@ -226,6 +227,19 @@ function range(req) {
   if ((from && Number.isNaN(from.getTime())) || (to && Number.isNaN(to.getTime()))) throw new CareerError(400, "INVALID_DATE", "from / to must be dates");
   return { from, to };
 }
+// the employer's own interviews only (scheduled by them for their jobs); a job filter must be one of their jobs
+router.get("/employers/me/interviews", auth, role("employee"), handle(async (req, res) => {
+  if (!timeline.flagOn(req.userId, "employee")) return fail(req, res, 404, "CAREER_OFF", "The hiring timeline is not available for your account yet");
+  let jobId = null;
+  if (req.query.jobId) {
+    if (!isId(req.query.jobId)) return fail(req, res, 400, "INVALID_ID", "Invalid job id");
+    if (!(await Job.exists({ _id: req.query.jobId, postedBy: req.userId }))) return fail(req, res, 404, "NOT_FOUND", "Job not found");
+    jobId = req.query.jobId;
+  }
+  const list = await views.listInterviews({ employerId: req.userId, jobId, status: req.query.status, from: req.query.from, to: req.query.to, withJoin: true });
+  ok(req, res, { interviews: list });
+}));
+
 router.get("/employers/me/analytics", auth, role("employee", "admin"), handle(async (req, res) => {
   if (!timeline.flagOn(req.userId, "employee")) return fail(req, res, 404, "CAREER_OFF", "The hiring timeline is not available for your account yet");
   ok(req, res, await analytics.funnel({ employerId: req.userId, ...range(req) }));
