@@ -723,9 +723,47 @@ const applyBody = (who) => ({ fullName: `${who} full name`, email: `${who}@test.
   check("dueKind: 24 h window (1 h, 24 h], 1 h window (0, 1 h], nothing outside", reqS("./services/career/careerReminderService").dueKind(25 * 3600e3) === null && reqS("./services/career/careerReminderService").dueKind(2 * 3600e3) === "24h" && reqS("./services/career/careerReminderService").dueKind(30 * 60e3) === "1h" && reqS("./services/career/careerReminderService").dueKind(-1) === null);
   gateway.send = realSend;
 
-  // @@MORE@@
+  console.log("── 18. admin: candidates by stage, interviews, hires across employers (read-only, audited)");
+  const AV = ["/api/career/admin/applications", "/api/career/admin/interviews", "/api/career/admin/hires"];
+  for (const u of AV) {
+    const rr = await Promise.all([T.E1, T.S1].map((tk) => call("GET", u, { tok: tk })));
+    const anon = await call("GET", u);
+    check(`${u}: employer / student 403, no token 401`, rr.every((x) => x.status === 403) && anon.status === 401, `${rr.map((x) => x.status)} ${anon.status}`);
+  }
+  const savedFlag = process.env.FLAG_CAREER_TIMELINE;
+  process.env.FLAG_CAREER_TIMELINE = "off";
+  r = await call("GET", AV[0], { tok: T.admin });
+  check("timeline not set up: 404 CAREER_OFF (the admin menu hides these)", r.status === 404 && r.json?.error?.code === "CAREER_OFF", r.status);
+  process.env.FLAG_CAREER_TIMELINE = savedFlag;
+  const accessBefore = rows("DomainEvent", (e) => e.type === "career.admin.access").length;
+  r = await call("GET", AV[0], { tok: T.admin });
+  const allApps = rows("JobApplication", (a) => rows("Job", (j) => same(j._id, a.jobId)).length).length;
+  check("applications: every employer's, with counts per stage that add up", r.status === 200 && r.json.data.total === allApps && Object.values(r.json.data.counts).reduce((a, b) => a + b, 0) === allApps && r.json.data.applications.some((a) => a.employer.id === String(ids.E2)) && r.json.data.applications.some((a) => a.employer.id === String(ids.E1)), JSON.stringify(r.json?.data?.counts));
+  check("…names only: candidate first name, employer name; no contact details", r.json.data.applications.every((a) => a.candidate.firstName && !("email" in a.candidate) && !("phone" in a.candidate)) && !/@test\.local|03001234567/.test(r.text));
+  r = await call("GET", `${AV[0]}?employerId=${ids.E2}`, { tok: T.admin });
+  check("…filter by employer", r.json.data.applications.length >= 1 && r.json.data.applications.every((a) => a.employer.id === String(ids.E2)));
+  r = await call("GET", `${AV[0]}?stage=hired`, { tok: T.admin });
+  check("…filter by stage (rows), counts stay for every stage", r.json.data.applications.every((a) => a.stage === "hired") && r.json.data.applications.length === r.json.data.counts.hired && Object.keys(r.json.data.counts).length === 8, JSON.stringify(r.json.data.counts));
+  r = await call("GET", `${AV[0]}?employerId=nope`, { tok: T.admin });
+  check("…an invalid id → 400", r.status === 400 && r.json.error.code === "INVALID_ID");
+  r = await call("GET", AV[1], { tok: T.admin });
+  const ivCount = rows("CareerInterview").length;
+  check("interviews: every interview with job, employer, candidate first name, status; no meeting link or note", r.status === 200 && r.json.data.interviews.length === ivCount && ivCount > 0 && r.json.data.interviews.every((i) => i.job.title && i.candidate.firstName && i.status && !("meetingLink" in i) && !("note" in i) && !("location" in i)), `${r.json?.data?.interviews?.length} vs ${ivCount}`);
+  const ivList = r.json.data.interviews;
+  check("…in start order", ivList.every((x, i) => i === 0 || new Date(ivList[i - 1].startsAt) <= new Date(x.startsAt)));
+  r = await call("GET", `${AV[1]}?status=completed`, { tok: T.admin });
+  check("…filter by status", r.json.data.interviews.every((i) => i.status === "completed") && r.json.data.interviews.length === rows("CareerInterview", (i) => i.status === "completed").length);
+  r = await call("GET", `${AV[1]}?employerId=${ids.E2}`, { tok: T.admin });
+  check("…filter by employer", r.json.data.interviews.every((i) => i.employer.id === String(ids.E2)) && r.json.data.interviews.length === rows("CareerInterview", (i) => same(i.employer, ids.E2)).length);
+  r = await call("GET", AV[2], { tok: T.admin });
+  const hireCount = rows("CareerOutcome", (o) => o.outcomeType === "hired").length;
+  check("hires: every hire (verified, recorded, revoked) with job, employer, first name", r.status === 200 && r.json.data.hires.length === hireCount && hireCount > 0 && r.json.data.hires.every((h) => h.job.title && h.candidate.firstName && ["verified", "employer-recorded", "revoked"].includes(h.verificationLevel)), `${r.json?.data?.hires?.length} vs ${hireCount}`);
+  check("…a revoked hire shows as revoked", r.json.data.hires.some((h) => h.verificationLevel === "revoked" && h.revokedAt));
+  check("every admin read here is audited (career.admin.access)", rows("DomainEvent", (e) => e.type === "career.admin.access").length - accessBefore === 7 && /* 3 applications, 3 interviews, 1 hires; the 400 isn't a read */  rows("DomainEvent", (e) => e.type === "career.admin.access" && e.data?.action === "read:interviews").length >= 3);
+  check("reads write nothing else (no admin action log rows)", !rows("AdminActionLog").length || rows("AdminActionLog").every((x) => !/^career\.admin/.test(x.action)));
 
   // ---------- leak scan ----------
+
   const leaky = responses.filter((x) => x.leaks.length);
   check(`leak scan: ${responses.length} responses; /api/career has no contact details, resume files or secrets`, leaky.length === 0, leaky.map((x) => `${x.url} ${x.leaks.join(",")}`).join(" | "));
 

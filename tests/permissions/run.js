@@ -294,6 +294,10 @@ const check = (name, ok, detail = "") => { results.push(!!ok); if (!ok || proces
     ["GET", `${C}/employers/me/analytics`, null, [...ANY_EMPLOYER, "A"]],
     ["GET", `${C}/admin/analytics`, null, ["A"]],
     ["GET", `${C}/admin/disputes`, null, ["A"], "open hire disputes (admin only, audited)"],
+    // admin views across employers (read-only, audited)
+    ["GET", `${C}/admin/applications`, null, ["A"], "candidates by stage (admin only, audited)"],
+    ["GET", `${C}/admin/interviews`, null, ["A"], "interviews (admin only, audited)"],
+    ["GET", `${C}/admin/hires`, null, ["A"], "hires (admin only, audited)"],
     // candidate matching (decision support; the employer's side only)
     ["GET", `/api/career/matching/applications/${fx.A1}`, null, ["E", "A"], "the job's employer; an admin (audited)"],
     ["GET", `/api/career/matching/jobs/${ids.J1}`, null, ["E"], "the job's employer"],
