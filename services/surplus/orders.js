@@ -97,7 +97,7 @@ async function placeOrder({ studentId, holdId, idempotencyKey, acceptedTerms, no
  * Move an order from one state to another (conditional on state and version).
  * @returns the updated order, or throws STALE_VERSION
  */
-async function move(order, to, { byRole, by = null, note = "", version = null, set = {}, now = new Date(), extraFilter = {} }) {
+async function move(order, to, { byRole, by = null, note = "", version = null, set = {}, now = new Date(), extraFilter = {}, session = null }) {
   // a version from a request must be a whole number (an object or array would reach the query as NaN)
   if (version != null && !Number.isInteger(Number(version))) throw new SurplusError(400, "INVALID_VERSION", "version must be a number");
   const filter = { _id: order._id, state: order.state, version: version == null ? order.version : Number(version), ...extraFilter };
@@ -108,7 +108,7 @@ async function move(order, to, { byRole, by = null, note = "", version = null, s
     $push: { history: { from: order.state, to, byRole, by, note: String(note || "").slice(0, 300), at: now } },
     ...(terminal ? { $unset: { activeSlot: "" } } : {}),
   };
-  const updated = await SurplusOrder.findOneAndUpdate(filter, update, { returnDocument: "after" }).lean();
+  const updated = await SurplusOrder.findOneAndUpdate(filter, update, { returnDocument: "after", session }).lean();
   if (!updated) throw new SurplusError(409, "STALE_VERSION", "This order changed meanwhile. Reload it and try again.");
   recordSafe(`surplus.${to.toLowerCase()}`, `${order._id}:${updated.version}`, { actor: by, subject: { kind: "SurplusOrder", id: order._id }, data: { from: order.state } });
   return updated;
@@ -126,6 +126,21 @@ async function merchantTransition(brandId, orderId, { to, version, reason = "", 
   if (["CONFIRMED", "READY_FOR_PICKUP", "MERCHANT_CANCELLED", "COMPLETED"].includes(to)) await notify(updated, to);
   return updated;
 }
+
+/**
+ * An admin cancels an order the brand could still cancel (not yet handed over), with a reason the student sees.
+ * Same end state as a brand cancel (MERCHANT_CANCELLED); the history records the admin. opts.session: the
+ * caller's transaction (the admin action log row goes in the same one). The student is told after the write.
+ */
+async function adminCancel(adminId, orderId, { version = null, reason = "", now = new Date(), session = null } = {}) {
+  const order = isId(orderId) ? await SurplusOrder.findById(orderId).session(session).lean() : null;
+  if (!order) throw new SurplusError(404, "NOT_FOUND", "Order not found");
+  if (!policy.merchantNext(order.state).includes("MERCHANT_CANCELLED")) throw new SurplusError(409, "CANNOT_CANCEL", `This order can't be cancelled from ${order.state}`);
+  const why = String(reason || "").trim();
+  if (why.length < 5) throw new SurplusError(400, "REASON_REQUIRED", "Give a reason (at least 5 characters)");
+  return move(order, "MERCHANT_CANCELLED", { byRole: "admin", by: adminId, note: why, version, set: { cancelReason: why.slice(0, 300) }, now, session });
+}
+const notifyCancelled = (order) => notify(order, "MERCHANT_CANCELLED");
 
 /** The student cancels (until 30 minutes before pickup starts); the boxes go back on sale */
 async function cancelByStudent(studentId, orderId, { version = null, now = new Date() } = {}) {
@@ -191,4 +206,4 @@ function pickupFor(order) {
   return { code, qr: pickupCode.qrFor(order._id, code), validUntil: order.pickupEnd };
 }
 
-module.exports = { placeOrder, merchantTransition, cancelByStudent, verifyPickup, pickupFor, move, newRef };
+module.exports = { placeOrder, merchantTransition, cancelByStudent, verifyPickup, pickupFor, move, newRef, adminCancel, notifyCancelled };

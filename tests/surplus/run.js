@@ -416,6 +416,64 @@ const inH = (h) => new Date(Date.now() + h * H).toISOString();
   check("the in-app rows carry the same tap target", rows("Notification", (n) => n.metadata?.surplusOrderId === o1.id && same(n.recipient, ids.S1)).every((n) => n.metadata.screen === "SurpriseBoxes" && n.metadata.params?.orderId === o1.id));
   check("in-app notifications use an existing type (schema unchanged)", rows("Notification", (n) => n.metadata?.surplusOrderId).every((n) => n.type === "Offer"));
 
+  // ---------- admin: every listing (list, view, edit / pause, cancel a box), all logged ----------
+  const AB = `${B}/admin/listings`;
+  const alog = (f = () => true) => rows("AdminActionLog", f);
+  const lbNow = () => doc("SurplusListing", LB);
+  for (const [m, u, b] of [["GET", AB], ["GET", `${AB}/${LB}`], ["PATCH", `${AB}/${LB}`, { version: 1, status: "paused", reason: "admin only" }], ["POST", `${AB}/${LB}/cancel`, { version: 1, reason: "admin only" }]]) {
+    const rr = await Promise.all([T.B, T.S7].map((tk) => call(m, u, { tok: tk, body: b })));
+    const anon = await call(m, u, { body: b });
+    check(`admin listings: ${m} ${u.replace(/[0-9a-f]{24}/, ":id")} → brand / student 403, no token 401`, rr.every((x) => x.status === 403) && anon.status === 401, `${rr.map((x) => x.status)} ${anon.status}`);
+  }
+  check("…nothing changed by those", lbNow().status === "published" && !alog((x) => x.action.startsWith("surplus.listing.")).length);
+  r = await call("GET", AB, { tok: T.admin });
+  check("admin sees every brand's listings with the brand name and open orders", r.status === 200 && r.json.data.listings.some((l) => l.id === LB && l.brand.name === "Beta Cafe") && r.json.data.listings.some((l) => l.id === L3 && l.openOrders >= 0) && r.json.data.listings.some((l) => l.title === "Gamma (not in pilot)"), r.text.slice(0, 160));
+  r = await call("GET", `${AB}?brandId=${ids.B}`, { tok: T.admin });
+  const r2 = await call("GET", `${AB}?q=gamma`, { tok: T.admin });
+  check("filters: brand, search", r.json.data.listings.every((l) => l.brand.id === String(ids.B)) && r.json.data.listings.length >= 1 && r2.json.data.listings.length === 1, `${r.json.data.listings.length} ${r2.json.data.listings.length}`);
+  r = await call("GET", `${AB}/${L3}`, { tok: T.admin });
+  check("admin view: the listing and its orders (first names only)", r.status === 200 && r.json.data.listing.id === L3 && Array.isArray(r.json.data.orders) && r.json.data.orders.every((o) => !("phone" in o.student) && !("email" in o.student)), r.text.slice(0, 160));
+  r = await call("PATCH", `${AB}/${LB}`, { tok: T.admin, body: { version: lbNow().version, status: "paused" } });
+  check("admin edit without a reason → 400 REASON_REQUIRED, unchanged", r.status === 400 && r.json.error.code === "REASON_REQUIRED" && lbNow().status === "published");
+  const lbV = lbNow().version;
+  r = await call("PATCH", `${AB}/${LB}`, { tok: T.admin, body: { version: lbV, status: "paused", reason: "complaint under review" } });
+  const pz = alog((x) => x.action === "surplus.listing.pause" && x.targetId === LB)[0];
+  check("admin pauses a brand's box: logged as pause, before/after status and version, reason", r.status === 200 && r.json.data.status === "paused" && pz && pz.before.status === "published" && pz.after.status === "paused" && pz.after.version === lbV + 1 && pz.reason === "complaint under review", JSON.stringify(pz && [pz.before, pz.after]));
+  const nLogs = alog().length;
+  r = await call("PATCH", `${AB}/${LB}`, { tok: T.admin, body: { version: lbV, status: "published", reason: "stale version test" } });
+  check("a stale version → 409, nothing logged", r.status === 409 && r.json.error.code === "STALE_VERSION" && alog().length === nLogs);
+  const LE = (await call("POST", `${B}/merchant/listings`, { tok: T.B, body: listingBody({ title: "Beta lunch box", branchId: String(ids.B1), quantityTotal: 4 }) })).json.data.id;
+  r = await call("PATCH", `${AB}/${LE}`, { tok: T.admin, body: { version: doc("SurplusListing", LE).version, title: "Beta box (fixed typo)", quantityTotal: 6, reason: "brand asked by phone" } });
+  const ed = alog((x) => x.action === "surplus.listing.update" && x.targetId === LE)[0];
+  check("admin edits (no orders yet): title and quantity, logged with only those fields", r.status === 200 && r.json.data.title === "Beta box (fixed typo)" && r.json.data.quantityTotal === 6 && ed && ed.after.title === "Beta box (fixed typo)" && ed.before.quantityTotal === 4 && !("price" in ed.after), r.text.slice(0, 200));
+  r = await call("PATCH", `${AB}/${L3}`, { tok: T.admin, body: { version: doc("SurplusListing", L3).version, allergenNotes: "none", reason: "trying to change food details" } });
+  check("the brand's rules apply to admins too: ordered box's food details locked (409), not logged", r.status === 409 && r.json.error.code === "DISCLOSURES_LOCKED" && !alog((x) => x.targetId === L3).length);
+  // cancel a box: two open orders, one already handed over
+  const LC = (await call("POST", `${B}/merchant/listings`, { tok: T.B, body: listingBody({ title: "Beta evening box", branchId: String(ids.B1), quantityTotal: 5 }) })).json.data.id;
+  const orderFor = async (who) => {
+    const hold = (await call("POST", `${B}/holds`, { tok: T[who], body: { listingId: LC, qty: 1, idempotencyKey: key() } })).json.data.hold;
+    return (await call("POST", `${B}/orders`, { tok: T[who], body: { holdId: hold.id, idempotencyKey: key(), acceptedTerms: true } })).json.data;
+  };
+  const oS8 = await orderFor("S4"), oS9 = await orderFor("S5"); // (S8 must stay without orders for the next section)
+  doc("SurplusOrder", oS9.id).state = "PICKUP_VERIFIED"; // handed over already
+  r = await call("POST", `${AB}/${LC}/cancel`, { tok: T.admin, body: { version: doc("SurplusListing", LC).version } });
+  check("cancel a box without a reason → 400, nothing changed", r.status === 400 && doc("SurplusListing", LC).status !== "closed" && doc("SurplusOrder", oS8.id).state === "ORDER_PLACED");
+  r = await call("POST", `${AB}/${LC}/cancel`, { tok: T.admin, body: { version: 0, reason: "the brand's oven broke down" } });
+  check("…with a stale version → 409, nothing changed", r.status === 409 && doc("SurplusListing", LC).status !== "closed");
+  r = await call("POST", `${AB}/${LC}/cancel`, { tok: T.admin, body: { version: doc("SurplusListing", LC).version, reason: "the brand's oven broke down" } });
+  check("admin cancels the box: closed, the open order cancelled, the handed-over one stays", r.status === 200 && r.json.data.closed && JSON.stringify(r.json.data.cancelled) === JSON.stringify([oS8.ref]) && JSON.stringify(r.json.data.stayed) === JSON.stringify([oS9.ref]) && r.json.data.failed.length === 0 && doc("SurplusListing", LC).status === "closed", r.text.slice(0, 200));
+  const cs8 = doc("SurplusOrder", oS8.id);
+  check("…the order: cancelled with the reason, the history names the admin", cs8.state === "MERCHANT_CANCELLED" && cs8.cancelReason === "the brand's oven broke down" && cs8.history.slice(-1)[0].byRole === "admin" && same(cs8.history.slice(-1)[0].by, ids.admin) && doc("SurplusOrder", oS9.id).state === "PICKUP_VERIFIED");
+  check("…logged: the box (closed) and the order, each with the reason", alog((x) => x.action === "surplus.listing.cancel" && x.targetId === LC && x.after.status === "closed").length === 1 && alog((x) => x.action === "surplus.order.cancel" && x.targetId === oS8.id && x.reason === "the brand's oven broke down").length === 1 && !alog((x) => x.targetId === oS9.id).length);
+  check("…the student is told", rows("SurplusNotificationOutbox", (x) => same(x.order, oS8.id) && x.eventType === "MERCHANT_CANCELLED" && same(x.recipient, ids.S4)).length >= 1);
+  r = await call("GET", `${B}/orders/${oS8.id}`, { tok: T.S4 });
+  check("…and sees why in the app", r.json.data.state === "MERCHANT_CANCELLED" && r.json.data.cancelReason === "the brand's oven broke down");
+  const nLogs2 = alog().length;
+  r = await call("POST", `${AB}/${LC}/cancel`, { tok: T.admin, body: { reason: "running it twice" } });
+  check("cancelling again: nothing left to cancel, nothing new logged", r.status === 200 && r.json.data.cancelled.length === 0 && alog().length === nLogs2);
+  r = await call("PATCH", `${AB}/${LB}`, { tok: T.admin, body: { version: lbNow().version, status: "published", reason: "complaint resolved" } });
+  check("admin republishes the paused box: logged as publish", r.status === 200 && r.json.data.status === "published" && alog((x) => x.action === "surplus.listing.publish" && x.targetId === LB).length === 1, r.text.slice(0, 160));
+
   // ---------- SURPLUS_CODE_SECRET ----------
   const errors = [];
   const origError = console.error;

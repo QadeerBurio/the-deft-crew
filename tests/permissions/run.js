@@ -341,6 +341,11 @@ const check = (name, ok, detail = "") => { results.push(!!ok); if (!ok || proces
     ["POST", `${SP}/merchant/verify-pickup`, { code: fx.CODE, branchId: String(ids.BR), markPaid: false }, ["B"], "only the listing's brand at its branch"],
     ["GET", `${SP}/merchant/summary`, null, ANY_BRAND],
     ["GET", `${SP}/admin/orders`, null, ["A"]],
+    // admin: every brand's listings (writes need a reason and are logged)
+    ["GET", `${SP}/admin/listings`, null, ["A"], "admin only"],
+    ["GET", `${SP}/admin/listings/${oid()}`, null, ["A"], "admin only (404 here: unknown listing)", { allow404: true }],
+    ["PATCH", `${SP}/admin/listings/${oid()}`, { version: 1, status: "paused", reason: "permission matrix" }, ["A"], "admin only (404 here: unknown listing)", { allow404: true }],
+    ["POST", `${SP}/admin/listings/${oid()}/cancel`, { version: 1, reason: "permission matrix" }, ["A"], "admin only (404 here: unknown listing)", { allow404: true }],
     ["GET", `${SP}/admin/no-shows`, null, ["A"]],
     ["GET", `${SP}/admin/cases`, null, ["A"]],
     ["POST", `${SP}/admin/cases/${fx.C1}/decide`, { decision: "no_action", note: "matrix" }, ["A"]],
