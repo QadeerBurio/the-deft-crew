@@ -346,6 +346,8 @@ const check = (name, ok, detail = "") => { results.push(!!ok); if (!ok || proces
     ["POST", `${SP}/merchant/orders/${fx.SO1}/verify-pickup`, { code: "AAAAAA", branchId: String(ids.BR) }, ["B"], "own order, own branch", { allow404: true }],
     ["POST", `${SP}/merchant/verify-pickup`, { code: fx.CODE, branchId: String(ids.BR), markPaid: false }, ["B"], "only the listing's brand at its branch"],
     ["GET", `${SP}/merchant/summary`, null, ANY_BRAND],
+    ["POST", `${SP}/merchant/listings/${oid()}/image`, { version: 1 }, ANY_BRAND, "brands: their own box's photo (400 here: no file)", { allow404: true }],
+    ["DELETE", `${SP}/merchant/listings/${oid()}/image`, { version: 1 }, ANY_BRAND, "brands: their own box's photo (404 here: unknown box)", { allow404: true }],
     ["GET", `${SP}/admin/orders`, null, ["A"]],
     // admin: every brand's listings (writes need a reason and are logged)
     ["GET", `${SP}/admin/listings`, null, ["A"], "admin only"],

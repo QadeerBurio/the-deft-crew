@@ -16,6 +16,8 @@
 //   GET    /support-cases/me
 // Brand (own listings / orders only; branch checked on every write):
 //   GET    /merchant/listings            POST /merchant/listings      PATCH /merchant/listings/:id
+//   POST   /merchant/listings/:id/image  multipart "image" + "version": the box's photo (images only, 5 MB; locked once ordered)
+//   DELETE /merchant/listings/:id/image  { version }: remove the photo
 //   GET    /merchant/orders              ?scope=live|today|all
 //   POST   /merchant/orders/:id/transition      { to, version, reason?, markPaid? }
 //   POST   /merchant/orders/:id/verify-pickup   { code | qr, branchId, markPaid }  (also /merchant/verify-pickup)
@@ -37,6 +39,8 @@ const policy = require("../services/surplus/policy");
 const inventory = require("../services/surplus/inventory");
 const orders = require("../services/surplus/orders");
 const adminLog = require("../services/adminActionLog");
+const nodePath = require("path");
+const { uploadOffer, deleteFromCloudinary } = require("../config/cloudinary");
 const cases = require("../services/surplus/cases");
 const { SurplusError } = inventory;
 
@@ -98,6 +102,7 @@ function listingView(l, brandInfo, here = null, full = false) {
     quantityLeft: Math.max(0, l.quantityAvailable), quantityTotal: l.quantityTotal,
     pickupStart: l.pickupStart, pickupEnd: l.pickupEnd, orderCutoff: l.orderCutoff,
     contentsMayVary: l.contentsMayVary !== false, allergens: l.allergens || [], dietary: l.dietary || [],
+    image: l.image?.url || null, // optional photo; null = no photo
     available: l.status === "published" && l.quantityAvailable > 0,
     status: l.status === "published" && l.quantityAvailable <= 0 ? "sold_out" : l.status,
     distanceKm: here && Array.isArray(coords) && coords.length === 2 ? km(here, coords) : null,
@@ -422,6 +427,52 @@ router.get("/admin/brands", ...admin, handle(async (req, res) => {
     const b = blocks.find((x) => String(x.brand) === id);
     return { ...(brands.get(id) || { id, name: "brand" }), blocked: !!b?.active, reason: b?.active ? b.reason : "", upheldCases: count(upheld, id), studentNoShows: count(noShows, id), listings: count(listings, id) };
   }).sort((a, b) => b.upheldCases - a.upheldCases));
+}));
+
+// ---------- a box's photo (optional) ----------
+// POST /merchant/listings/:id/image (multipart "image" + "version"), DELETE /merchant/listings/:id/image { version }.
+// The existing offer-image upload and its limits (images only: jpg, png, webp, heic...; at most 5 MB). Like the
+// food details, the photo can't change once a student has ordered. A refused upload's file is deleted again.
+const uploadsRoot = nodePath.join(__dirname, "..", "uploads");
+const imageUrlOf = (file) => {
+  const p = String(file?.path || file?.secure_url || "");
+  if (/^https:\/\//i.test(p)) return p;
+  const rel = nodePath.relative(uploadsRoot, p);
+  return p && rel && !rel.startsWith("..") && !nodePath.isAbsolute(rel) ? `/uploads/${rel.split(nodePath.sep).join("/")}` : "";
+};
+const dropFile = (publicId) => (publicId ? Promise.resolve(deleteFromCloudinary(publicId)).catch(() => {}) : Promise.resolve());
+const imageUpload = (req, res, next) => uploadOffer.single("image")(req, res, (err) => {
+  if (!err) return next();
+  if (err.code === "LIMIT_FILE_SIZE") return fail(req, res, 413, "IMAGE_TOO_LARGE", "The photo can be at most 5 MB");
+  return fail(req, res, 400, "INVALID_IMAGE", String(err.message || "Only image files are allowed").slice(0, 200));
+});
+async function ownListingForPhoto(req, res) {
+  const l = isId(req.params.id) ? await SurplusListing.findOne({ _id: req.params.id, brand: req.userId }).lean() : null;
+  if (!l) { fail(req, res, 404, "NOT_FOUND", "Listing not found"); return null; }
+  if (!Number.isInteger(Number(req.body?.version)) || Number(req.body.version) !== l.version) { fail(req, res, 409, "STALE_VERSION", "This listing changed meanwhile. Reload it and try again.", { version: l.version }); return null; }
+  if (["closed", "blocked"].includes(l.status)) { fail(req, res, 409, l.status === "closed" ? "LISTING_CLOSED" : "BRAND_BLOCKED", "This listing can't be changed"); return null; }
+  if (await SurplusOrder.exists({ listing: l._id })) { fail(req, res, 409, "DISCLOSURES_LOCKED", "Students have ordered this box: its photo can't change. Close it and create a new one."); return null; }
+  return l;
+}
+router.post("/merchant/listings/:id/image", ...brand, imageUpload, handle(async (req, res) => {
+  const uploaded = req.file?.filename || "";
+  if (!req.file) return fail(req, res, 400, "NO_IMAGE", "Choose a photo");
+  const l = await ownListingForPhoto(req, res);
+  if (!l) return dropFile(uploaded);
+  const url = imageUrlOf(req.file);
+  if (!url) { await dropFile(uploaded); return fail(req, res, 400, "INVALID_IMAGE", "The photo couldn't be stored"); }
+  const updated = await SurplusListing.findOneAndUpdate({ _id: l._id, version: l.version }, { $set: { image: { url, publicId: uploaded } }, $inc: { version: 1 } }, { returnDocument: "after" }).lean();
+  if (!updated) { await dropFile(uploaded); return fail(req, res, 409, "STALE_VERSION", "This listing changed meanwhile. Reload it and try again."); }
+  if (l.image?.publicId && l.image.publicId !== uploaded) await dropFile(l.image.publicId); // the replaced photo
+  ok(req, res, merchantListingView(updated));
+}));
+router.delete("/merchant/listings/:id/image", ...brand, handle(async (req, res) => {
+  const l = await ownListingForPhoto(req, res);
+  if (!l) return;
+  const updated = await SurplusListing.findOneAndUpdate({ _id: l._id, version: l.version }, { $set: { image: { url: "", publicId: "" } }, $inc: { version: 1 } }, { returnDocument: "after" }).lean();
+  if (!updated) return fail(req, res, 409, "STALE_VERSION", "This listing changed meanwhile. Reload it and try again.");
+  await dropFile(l.image?.publicId);
+  ok(req, res, merchantListingView(updated));
 }));
 
 // ---------- admin: every brand's listings ----------
