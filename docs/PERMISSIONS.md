@@ -14,6 +14,8 @@ Notes
   verified, so an admin never uses a company's free hire. Admins resolve hire disputes instead, with a reason:
   `HIRE_RESTORED` (dispute rejected, hire verified again; it counts for First Hire Free again, once) or `HIRE_REVOKED` (dispute upheld).
 - The submitted resume snapshot is visible to the candidate and the job's employer only; admins get 404.
+- Candidate matching (`FLAG_CAREER_MATCHING`) is employer-side decision support: the job's employer, or an admin (each read audited); never the candidate or another employer. It changes nothing on an application.
+- Ratings (`FLAG_CAREER_RATINGS`): only the two sides of an application rate each other (an admin can't). An employer's average is readable by anyone signed in with the flag, but only from 5 ratings and never with comments; `/me/received` returns only the caller's own ratings (an employer's anonymised). Only the person rated can report a rating; only an admin decides, with a reason.
 - The public loyalty program view is readable by anyone, including guests (read-only, no personal data).
 - 404 is used for "not yours" so ids of other people's resources can't be probed.
 
@@ -50,6 +52,15 @@ Notes
 | `GET /api/career/employers/me/analytics` | deny 401 | deny 403 | deny 403 | deny 403 | deny 403 | allow 200 | allow 200 | allow 200 |
 | `GET /api/career/admin/analytics` | deny 401 | deny 403 | deny 403 | deny 403 | deny 403 | deny 403 | deny 403 | allow 200 |
 | `GET /api/career/admin/disputes` (open hire disputes (admin only, audited)) | deny 401 | deny 403 | deny 403 | deny 403 | deny 403 | deny 403 | deny 403 | allow 200 |
+| `GET /api/career/matching/applications/:id` (the job's employer; an admin (audited)) | deny 401 | deny 404 | deny 404 | deny 404 | deny 404 | allow 200 | deny 404 | allow 200 |
+| `GET /api/career/matching/jobs/:id` (the job's employer) | deny 401 | deny 404 | deny 404 | deny 404 | deny 404 | allow 200 | deny 404 | deny 404 |
+| `GET /api/career/ratings/applications/:id` (the candidate and the job's employer (not an admin)) | deny 401 | allow 200 | deny 404 | deny 404 | deny 404 | allow 200 | deny 404 | deny 404 |
+| `POST /api/career/ratings` (the two sides only (409 here: no completed interview yet)) | deny 401 | allow 409 | deny 404 | deny 404 | deny 404 | allow 409 | deny 404 | deny 404 |
+| `GET /api/career/ratings/jobs/:id/employer` (anyone signed in with the flag: an average from 5 ratings, never comments) | deny 401 | allow 200 | allow 200 | allow 200 | allow 200 | allow 200 | allow 200 | allow 200 |
+| `GET /api/career/ratings/me/received` (own ratings only: students and employers) | deny 401 | allow 200 | allow 200 | deny 403 | deny 403 | allow 200 | allow 200 | deny 403 |
+| `POST /api/career/ratings/:id/report` (only the person rated (404 for a rating that isn't about them)) | deny 401 | deny 404 | deny 404 | deny 404 | deny 404 | deny 404 | deny 404 | deny 404 |
+| `GET /api/career/ratings/admin/reports` (admin (404 unless FLAG_CAREER_RATINGS is set)) | deny 401 | deny 403 | deny 403 | deny 403 | deny 403 | deny 403 | deny 403 | allow 200 |
+| `POST /api/career/ratings/admin/reports/:id/decide` (admin, with a reason (recorded)) | deny 401 | deny 403 | deny 403 | deny 403 | deny 403 | deny 403 | deny 403 | allow 409 |
 | `POST /api/career/admin/outbox/drain` | deny 401 | deny 403 | deny 403 | deny 403 | deny 403 | deny 403 | deny 403 | allow 200 |
 | `GET /api/career/resume/sources/:id` (own resume) | deny 401 | allow 200 | deny 404 | deny 403 | deny 403 | deny 403 | deny 403 | deny 403 |
 | `POST /api/career/resume/sources/:id/confirm` | deny 401 | allow 409 | deny 404 | deny 403 | deny 403 | deny 403 | deny 403 | deny 403 |
