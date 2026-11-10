@@ -136,6 +136,7 @@ app.use("/api/career", reqS("./routes/career.routes"));
 app.use("/api/surplus", reqS("./routes/surplus.routes"));
 app.use("/api/analytics", reqS("./routes/analytics.routes"));
 app.use("/api/admin/actions", reqS("./routes/adminActions.routes"));
+app.use("/api/admin/features", reqS("./routes/adminFeatures.routes"));
 
 const oid = () => new mongoose.Types.ObjectId();
 const ids = {};
@@ -272,6 +273,12 @@ const check = (name, ok, detail = "") => { results.push(!!ok); if (!ok || proces
     // the unified admin action log (read-only)
     ["GET", "/api/admin/actions", null, ["A"], "admin only"],
     ["GET", "/api/admin/actions/facets", null, ["A"], "admin only"],
+    // admin feature access per account (switching off what is already off: no change to the other rows' flags)
+    ["GET", "/api/admin/features/flags", null, ["A"], "admin only"],
+    ["GET", `/api/admin/features/account/${ids.B}`, null, ["A"], "admin only"],
+    ["GET", "/api/admin/features/flag/loyaltyV2", null, ["A"], "admin only"],
+    ["PUT", `/api/admin/features/account/${ids.B}/loyaltyV2`, { enabled: false, reason: "permission matrix" }, ["A"], "admin only: a brand can't switch its own features"],
+    ["POST", "/api/admin/features/bulk", { flag: "loyaltyV2", enabled: false, accountIds: [String(ids.B), String(ids.S)], reason: "permission matrix" }, ["A"], "admin only"],
     ["POST", `${L}/admin/reverse`, { redemptionId: fx.redemption, reason: "test" }, ["A"], "", { allow404: true }],
     // career timeline
     ["GET", `${C}/applications/me`, null, ANY_STUDENT, "own applications"],
