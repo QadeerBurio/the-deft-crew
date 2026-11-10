@@ -262,44 +262,50 @@ router.post("/merchant/listings", ...brand, handle(async (req, res) => {
   ok(req, res, merchantListingView(listing.toObject()), 201);
 }));
 
-router.patch("/merchant/listings/:id", ...brand, handle(async (req, res) => {
-  const b = req.body || {};
-  const l = isId(req.params.id) ? await SurplusListing.findOne({ _id: req.params.id, brand: req.userId }).lean() : null;
-  if (!l) return fail(req, res, 404, "NOT_FOUND", "Listing not found");
-  if (Number(b.version) !== l.version) return fail(req, res, 409, "STALE_VERSION", "This listing changed meanwhile. Reload it and try again.", { version: l.version });
-  if (l.status === "blocked") return fail(req, res, 403, "BRAND_BLOCKED", "This listing is paused by tdc");
-  if (l.status === "closed") return fail(req, res, 409, "LISTING_CLOSED", "This listing is closed");
-  const hasOrders = !!(await SurplusOrder.exists({ listing: l._id }));
-  if (hasOrders && DISCLOSURE_FIELDS.some((k) => b[k] !== undefined)) return fail(req, res, 409, "DISCLOSURES_LOCKED", "Students have ordered this box: its contents, allergens, price and pickup window can't change. Close it and create a new one.");
+// one listing edit, the same rules for the brand and for an admin: version check, closed / blocked listings,
+// food details locked once a student has ordered, quantity never below what's held or ordered, no publishing
+// while the brand is blocked or after the cutoff. Throws SurplusError; returns the listing after the change.
+async function patchListing(l, b, { session = null } = {}) {
+  if (!Number.isInteger(Number(b.version)) || Number(b.version) !== l.version) throw new SurplusError(409, "STALE_VERSION", "This listing changed meanwhile. Reload it and try again.", { version: l.version });
+  if (l.status === "blocked") throw new SurplusError(403, "BRAND_BLOCKED", "This listing is paused by tdc");
+  if (l.status === "closed") throw new SurplusError(409, "LISTING_CLOSED", "This listing is closed");
+  const hasOrders = !!(await SurplusOrder.exists({ listing: l._id }).session(session));
+  if (hasOrders && DISCLOSURE_FIELDS.some((k) => b[k] !== undefined)) throw new SurplusError(409, "DISCLOSURES_LOCKED", "Students have ordered this box: its contents, allergens, price and pickup window can't change. Close it and create a new one.");
   const set = Object.keys(b).some((k) => DISCLOSURE_FIELDS.includes(k) || k === "orderCutoff") ? listingFields(b, l) : {};
   const inc = { version: 1 };
-  const filter = { _id: l._id, brand: req.userId, version: l.version };
+  const filter = { _id: l._id, brand: l.brand, version: l.version };
   if (b.quantityTotal !== undefined) {
     const qty = Number(b.quantityTotal);
     const sold = l.quantityTotal - l.quantityAvailable;
-    if (!Number.isInteger(qty) || qty < 1 || qty > 500) return fail(req, res, 400, "INVALID_QTY", "Quantity must be 1 to 500 boxes");
-    if (qty < sold) return fail(req, res, 409, "BELOW_SOLD", `${sold} boxes are already held or ordered`);
+    if (!Number.isInteger(qty) || qty < 1 || qty > 500) throw new SurplusError(400, "INVALID_QTY", "Quantity must be 1 to 500 boxes");
+    if (qty < sold) throw new SurplusError(409, "BELOW_SOLD", `${sold} boxes are already held or ordered`);
     const delta = qty - l.quantityTotal;
     inc.quantityTotal = delta;
     inc.quantityAvailable = delta;
     if (delta < 0) filter.quantityAvailable = { $gte: -delta }; // a hold taken meanwhile wins
   }
   if (b.status !== undefined) {
-    if (!["published", "paused", "closed", "draft"].includes(b.status)) return fail(req, res, 400, "INVALID_STATUS", "status must be published, paused or closed");
+    if (!["published", "paused", "closed", "draft"].includes(b.status)) throw new SurplusError(400, "INVALID_STATUS", "status must be published, paused or closed");
     if (b.status === "published") {
-      if (await inventory.brandBlocked(req.userId)) return fail(req, res, 403, "BRAND_BLOCKED", "Your Surprise Box listings are paused by tdc. Contact support.");
-      if (new Date(set.orderCutoff || l.orderCutoff) <= new Date()) return fail(req, res, 409, "ORDERS_CLOSED", "The order cutoff has passed");
+      if (await inventory.brandBlocked(l.brand)) throw new SurplusError(403, "BRAND_BLOCKED", "Your Surprise Box listings are paused by tdc. Contact support.");
+      if (new Date(set.orderCutoff || l.orderCutoff) <= new Date()) throw new SurplusError(409, "ORDERS_CLOSED", "The order cutoff has passed");
       set.publishedAt = l.publishedAt || new Date();
     }
-    if (b.status === "draft" && hasOrders) return fail(req, res, 409, "HAS_ORDERS", "This listing has orders");
+    if (b.status === "draft" && hasOrders) throw new SurplusError(409, "HAS_ORDERS", "This listing has orders");
     set.status = b.status;
     if (b.status === "closed") set.closedAt = new Date();
   }
-  const updated = await SurplusListing.findOneAndUpdate(filter, { $set: set, $inc: inc }, { returnDocument: "after" }).lean();
-  if (!updated) return fail(req, res, 409, "STALE_VERSION", "This listing changed meanwhile (a student may have just held a box). Reload it and try again.");
-  if (updated.status === "published" && updated.quantityAvailable === 0) await SurplusListing.updateOne({ _id: l._id, status: "published", quantityAvailable: 0 }, { $set: { status: "sold_out" } });
-  if (updated.status === "sold_out" && updated.quantityAvailable > 0) await SurplusListing.updateOne({ _id: l._id, status: "sold_out" }, { $set: { status: "published" } });
-  ok(req, res, merchantListingView(await SurplusListing.findById(l._id).lean()));
+  const updated = await SurplusListing.findOneAndUpdate(filter, { $set: set, $inc: inc }, { returnDocument: "after", session }).lean();
+  if (!updated) throw new SurplusError(409, "STALE_VERSION", "This listing changed meanwhile (a student may have just held a box). Reload it and try again.");
+  if (updated.status === "published" && updated.quantityAvailable === 0) await SurplusListing.updateOne({ _id: l._id, status: "published", quantityAvailable: 0 }, { $set: { status: "sold_out" } }, { session });
+  if (updated.status === "sold_out" && updated.quantityAvailable > 0) await SurplusListing.updateOne({ _id: l._id, status: "sold_out" }, { $set: { status: "published" } }, { session });
+  return SurplusListing.findById(l._id).session(session).lean();
+}
+
+router.patch("/merchant/listings/:id", ...brand, handle(async (req, res) => {
+  const l = isId(req.params.id) ? await SurplusListing.findOne({ _id: req.params.id, brand: req.userId }).lean() : null;
+  if (!l) return fail(req, res, 404, "NOT_FOUND", "Listing not found");
+  ok(req, res, merchantListingView(await patchListing(l, req.body || {})));
 }));
 
 const dayBounds = (now = new Date()) => {
@@ -416,6 +422,99 @@ router.get("/admin/brands", ...admin, handle(async (req, res) => {
     const b = blocks.find((x) => String(x.brand) === id);
     return { ...(brands.get(id) || { id, name: "brand" }), blocked: !!b?.active, reason: b?.active ? b.reason : "", upheldCases: count(upheld, id), studentNoShows: count(noShows, id), listings: count(listings, id) };
   }).sort((a, b) => b.upheldCases - a.upheldCases));
+}));
+
+// ---------- admin: every brand's listings ----------
+// GET /admin/listings (?status=&brandId=&q=), GET /admin/listings/:id (with its orders), PATCH /admin/listings/:id
+// (edit / publish / pause / close, the brand's own rules), POST /admin/listings/:id/cancel (close it and cancel its
+// open orders). Every write needs a reason (5+ characters) and writes its AdminActionLog row in the same
+// transaction as the change; each cancelled order is its own logged write.
+const { withTransaction } = require("../utils/transaction");
+const adminReason = (b) => {
+  const r = String(b?.reason || "").trim();
+  if (r.length < 5) throw new SurplusError(400, "REASON_REQUIRED", "Give a reason (at least 5 characters)");
+  return r.slice(0, 500);
+};
+const ADMIN_LISTING_FIELDS = [...DISCLOSURE_FIELDS, "orderCutoff", "quantityTotal", "status"];
+const listingSummary = (l) => (l ? { status: l.status, title: l.title, price: l.price, listPrice: l.listPrice, quantityTotal: l.quantityTotal, quantityAvailable: l.quantityAvailable, pickupStart: l.pickupStart, pickupEnd: l.pickupEnd, version: l.version } : null);
+const orderCounts = async (ids) => {
+  const by = {};
+  for (const o of await SurplusOrder.find({ listing: { $in: ids } }).select("listing state").lean()) {
+    const k = String(o.listing);
+    by[k] = by[k] || { total: 0, open: 0 };
+    by[k].total += 1;
+    if (policy.ACTIVE.includes(o.state)) by[k].open += 1;
+  }
+  return by;
+};
+const adminListingView = (l, brands, counts) => ({ ...merchantListingView(l, { [String(l._id)]: counts[String(l._id)]?.total || 0 }), brand: brands.get(String(l.brand)) || { id: String(l.brand), name: "brand", logo: "" }, openOrders: counts[String(l._id)]?.open || 0 });
+
+router.get("/admin/listings", ...admin, handle(async (req, res) => {
+  const filter = {};
+  if (req.query.status && ["draft", "published", "paused", "sold_out", "closed", "blocked"].includes(String(req.query.status))) filter.status = String(req.query.status);
+  if (req.query.brandId) { if (!isId(req.query.brandId)) return ok(req, res, { listings: [] }); filter.brand = String(req.query.brandId); }
+  const list = await SurplusListing.find(filter).sort({ pickupStart: -1 }).limit(300).lean();
+  const [brands, counts] = await Promise.all([brandsById(list.map((l) => l.brand)), orderCounts(list.map((l) => l._id))]);
+  const q = String(req.query.q || "").trim().toLowerCase().slice(0, 80);
+  const rows = list.map((l) => adminListingView(l, brands, counts)).filter((l) => !q || l.title.toLowerCase().includes(q) || l.brand.name.toLowerCase().includes(q));
+  ok(req, res, { listings: rows });
+}));
+
+router.get("/admin/listings/:id", ...admin, handle(async (req, res) => {
+  const l = isId(req.params.id) ? await SurplusListing.findById(req.params.id).lean() : null;
+  if (!l) return fail(req, res, 404, "NOT_FOUND", "Listing not found");
+  const orders = await SurplusOrder.find({ listing: l._id }).sort({ createdAt: -1 }).limit(300).lean();
+  const [brands, counts, names] = await Promise.all([brandsById([l.brand]), orderCounts([l._id]), namesOf(orders.map((o) => o.student))]);
+  ok(req, res, { listing: adminListingView(l, brands, counts), orders: orders.map((o) => merchantOrderView(o, names.get(String(o.student)))) });
+}));
+
+router.patch("/admin/listings/:id", ...admin, handle(async (req, res) => {
+  const reason = adminReason(req.body);
+  const l = isId(req.params.id) ? await SurplusListing.findById(req.params.id).lean() : null;
+  if (!l) return fail(req, res, 404, "NOT_FOUND", "Listing not found");
+  const b = { ...(req.body || {}) };
+  delete b.reason;
+  const changed = Object.keys(b).filter((k) => ADMIN_LISTING_FIELDS.includes(k));
+  if (!changed.length) return fail(req, res, 400, "NOTHING_TO_CHANGE", "Nothing to change");
+  const action = changed.length === 1 && changed[0] === "status" ? `surplus.listing.${{ published: "publish", paused: "pause", closed: "close", draft: "unpublish" }[b.status] || "update"}` : "surplus.listing.update";
+  const { result } = await withTransaction(async (session) => {
+    const updated = await patchListing(l, b, { session });
+    await adminLog.record({ adminId: req.userId, action, targetType: "SurplusListing", targetId: String(l._id), before: adminLog.pick(listingSummary(l), [...changed, "version"]), after: adminLog.pick(listingSummary(updated), [...changed, "version"]), reason, requestId: req.id }, { session });
+    return updated;
+  });
+  const [brands, counts] = await Promise.all([brandsById([result.brand]), orderCounts([result._id])]);
+  ok(req, res, adminListingView(result, brands, counts));
+}));
+
+router.post("/admin/listings/:id/cancel", ...admin, handle(async (req, res) => {
+  const reason = adminReason(req.body);
+  const l = isId(req.params.id) ? await SurplusListing.findById(req.params.id).lean() : null;
+  if (!l) return fail(req, res, 404, "NOT_FOUND", "Listing not found");
+  if (l.status !== "closed" && Number(req.body?.version) !== l.version) return fail(req, res, 409, "STALE_VERSION", "This listing changed meanwhile. Reload it and try again.", { version: l.version });
+  // 1. close it (no new orders), logged with the reason
+  if (l.status !== "closed") {
+    await withTransaction(async (session) => {
+      const closed = await SurplusListing.findOneAndUpdate({ _id: l._id, version: l.version, status: { $ne: "closed" } }, { $set: { status: "closed", closedAt: new Date() }, $inc: { version: 1 } }, { returnDocument: "after", session }).lean();
+      if (!closed) throw new SurplusError(409, "STALE_VERSION", "This listing changed meanwhile. Reload it and try again.");
+      await adminLog.record({ adminId: req.userId, action: "surplus.listing.cancel", targetType: "SurplusListing", targetId: String(l._id), before: { status: l.status, version: l.version }, after: { status: "closed", version: closed.version }, reason, requestId: req.id }, { session });
+    });
+  }
+  // 2. cancel each open order that can still be cancelled, each with its own logged write; handed-over ones stay
+  const open = await SurplusOrder.find({ listing: l._id, state: { $in: policy.ACTIVE } }).lean();
+  const cancelled = [], stayed = [], failed = [];
+  for (const o of open) {
+    if (!policy.merchantNext(o.state).includes("MERCHANT_CANCELLED")) { stayed.push(o.ref); continue; }
+    try {
+      const { result: done } = await withTransaction(async (session) => {
+        const u = await orders.adminCancel(req.userId, o._id, { version: o.version, reason, session });
+        await adminLog.record({ adminId: req.userId, action: "surplus.order.cancel", targetType: "SurplusOrder", targetId: String(o._id), before: { state: o.state }, after: { state: u.state, listing: String(l._id) }, reason, requestId: req.id }, { session });
+        return u;
+      });
+      await orders.notifyCancelled(done).catch(() => {});
+      cancelled.push(o.ref);
+    } catch (err) { failed.push({ ref: o.ref, code: err.code || "ERROR", message: err.message }); }
+  }
+  ok(req, res, { listingId: String(l._id), closed: true, cancelled, stayed, failed });
 }));
 
 router.post("/admin/brands/:brandId/block", ...admin, handle(async (req, res) => {
