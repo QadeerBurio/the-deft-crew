@@ -26,8 +26,19 @@ class Expo {
 }
 const passThrough = () => (req, res, next) => next();
 const multerLike = { single: passThrough, array: passThrough, fields: passThrough, any: passThrough, none: passThrough };
+// the offer-image upload, controlled by headers (multer itself is not under test): x-test-image = a file name
+// ("big" = over 5 MB, "pdf" = not an image), x-test-version = the form's version field; deletions are recorded
+const deletedFiles = [];
+const testUploadOffer = { single: () => (req, res, next) => {
+  const t = req.headers["x-test-image"];
+  if (req.headers["x-test-version"] != null) req.body = { ...(req.body || {}), version: req.headers["x-test-version"] };
+  if (t === "big") return next(Object.assign(new Error("File too large"), { code: "LIMIT_FILE_SIZE" }));
+  if (t === "pdf") return next(new Error("Offer image: Only .jpg, .jpeg, .png, .webp, .heic files are allowed."));
+  if (t) req.file = { path: `https://res.cloudinary.com/testcloud/image/upload/${t}.jpg`, filename: `TDC_Offers/${t}` };
+  next();
+} };
 const cloudConfig = new Proxy(
-  { cloudinary: { config: () => ({ cloud_name: "testcloud" }), uploader: { destroy: async () => ({ result: "ok" }) }, url: () => "" }, hasCloudinary: true, deleteFromCloudinary: async () => ({}), getCloudinaryUrl: () => "", storage: {} },
+  { cloudinary: { config: () => ({ cloud_name: "testcloud" }), uploader: { destroy: async () => ({ result: "ok" }) }, url: () => "" }, hasCloudinary: true, deleteFromCloudinary: async (id) => { deletedFiles.push(id); return {}; }, getCloudinaryUrl: () => "", storage: {}, uploadOffer: testUploadOffer },
   { get: (t, k) => (k in t ? t[k] : multerLike) }
 );
 const origLoad = Module._load;
@@ -97,10 +108,10 @@ const token = (who, role) => jwt.sign({ id: String(ids[who]), role }, "test-only
 
 // ---------- HTTP ----------
 let PORT;
-function call(method, url, { body, tok } = {}) {
+function call(method, url, { body, tok, headers = {} } = {}) {
   return new Promise((resolve) => {
     const data = body != null ? JSON.stringify(body) : null;
-    const h = {};
+    const h = { ...headers };
     if (data != null) { h["content-type"] = "application/json"; h["content-length"] = Buffer.byteLength(data); }
     if (tok) h.authorization = `Bearer ${tok}`;
     const q = http.request({ host: "127.0.0.1", port: PORT, method, path: url, headers: h }, (res) => {
@@ -473,6 +484,36 @@ const inH = (h) => new Date(Date.now() + h * H).toISOString();
   check("cancelling again: nothing left to cancel, nothing new logged", r.status === 200 && r.json.data.cancelled.length === 0 && alog().length === nLogs2);
   r = await call("PATCH", `${AB}/${LB}`, { tok: T.admin, body: { version: lbNow().version, status: "published", reason: "complaint resolved" } });
   check("admin republishes the paused box: logged as publish", r.status === 200 && r.json.data.status === "published" && alog((x) => x.action === "surplus.listing.publish" && x.targetId === LB).length === 1, r.text.slice(0, 160));
+
+  // ---------- a box's photo (optional) ----------
+  const LP = (await call("POST", `${B}/merchant/listings`, { tok: T.B, body: listingBody({ title: "Beta photo box", branchId: String(ids.B1), quantityTotal: 4 }) })).json.data.id;
+  const lp = () => doc("SurplusListing", LP);
+  const up = (id, tok, name, version) => call("POST", `${B}/merchant/listings/${id}/image`, { tok, headers: { ...(name ? { "x-test-image": name } : {}), "x-test-version": String(version) } });
+  r = await call("GET", `${B}/listings`, { tok: T.S7 });
+  check("no photo: the box shows as before (image null)", r.json.data.listings.find((l) => l.id === LP)?.image === null);
+  r = await up(LP, T.B, null, lp().version);
+  check("no file → 400 NO_IMAGE", r.status === 400 && r.json.error.code === "NO_IMAGE");
+  r = await up(LP, T.B, "big", lp().version);
+  check("over 5 MB → 413 IMAGE_TOO_LARGE", r.status === 413 && r.json.error.code === "IMAGE_TOO_LARGE");
+  r = await up(LP, T.B, "pdf", lp().version);
+  check("not an image → 400 INVALID_IMAGE", r.status === 400 && r.json.error.code === "INVALID_IMAGE");
+  r = await up(LP, T.A, "intruder", lp().version);
+  check("another brand → 404, and its uploaded file is deleted", r.status === 404 && deletedFiles.includes("TDC_Offers/intruder") && !lp().image?.url);
+  r = await up(LP, T.S7, "student", lp().version);
+  check("a student → 403", r.status === 403);
+  r = await up(LP, T.B, "stale", lp().version - 1);
+  check("a stale version → 409, file deleted", r.status === 409 && deletedFiles.includes("TDC_Offers/stale"));
+  const v0 = lp().version;
+  r = await up(LP, T.B, "box1", v0);
+  check("the brand adds a photo: saved, version +1", r.status === 200 && r.json.data.image === "https://res.cloudinary.com/testcloud/image/upload/box1.jpg" && lp().version === v0 + 1 && lp().image.publicId === "TDC_Offers/box1");
+  r = await call("GET", `${B}/listings`, { tok: T.S7 });
+  check("students see the photo in the list", r.json.data.listings.find((l) => l.id === LP)?.image?.endsWith("/box1.jpg"));
+  r = await up(LP, T.B, "box2", lp().version);
+  check("replacing it: the new photo, the old file deleted", r.status === 200 && r.json.data.image.endsWith("/box2.jpg") && deletedFiles.includes("TDC_Offers/box1"));
+  r = await call("DELETE", `${B}/merchant/listings/${LP}/image`, { tok: T.B, body: { version: lp().version } });
+  check("removing it: no photo again, the file deleted", r.status === 200 && r.json.data.image === null && deletedFiles.includes("TDC_Offers/box2"));
+  r = await up(L3, T.A, "late", doc("SurplusListing", L3).version);
+  check("a box students have ordered: photo locked (409), file deleted", r.status === 409 && r.json.error.code === "DISCLOSURES_LOCKED" && deletedFiles.includes("TDC_Offers/late"));
 
   // ---------- SURPLUS_CODE_SECRET ----------
   const errors = [];
