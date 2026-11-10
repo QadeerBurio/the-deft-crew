@@ -261,6 +261,7 @@ const check = (name, ok, detail = "") => { results.push(!!ok); if (!ok || proces
     ["PATCH", `${L}/programs/${fx.P}`, { maxVisitsPerDay: 1 }, ["B", "A"], "owner or admin"],
     ["POST", `${L}/programs/${fx.P}/restart`, { version: 1 }, ["B", "A"], "owner or admin (409 here: the program is not ended)"],
     ["POST", `${L}/quotes`, { studentId: String(ids.S), offerId: String(oid()) }, ANY_BRAND, "own offers only (unknown offer -> 404)", { allow404: true }],
+    ["POST", `${L}/rewards/${oid()}/use`, { billAmount: 1000 }, ANY_BRAND, "brands: their own students' waiting rewards (unknown reward -> 404)", { allow404: true }],
     ["GET", `${L}/admin/ledger`, null, ["A"]],
     // admin: every brand's program (each write needs a reason and is logged)
     ["GET", `${L}/admin/programs`, null, ["A"], "admin only"],

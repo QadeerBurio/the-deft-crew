@@ -19,6 +19,7 @@ const LoyaltyProgram = require("../models/LoyaltyProgram");
 const LoyaltyLedger = require("../models/LoyaltyLedger");
 const LoyaltySnapshot = require("../models/LoyaltySnapshot");
 const LoyaltyProgramRestart = require("../models/LoyaltyProgramRestart");
+const LoyaltyReward = require("../models/LoyaltyReward");
 const Offer = require("../models/Offer");
 const Branch = require("../models/Branch");
 const { isEnabled } = require("../config/featureFlags");
@@ -113,7 +114,132 @@ function publicProgram(p) {
     terms: p.terms || "",
     startsAt: p.startsAt,
     endsAt: p.endsAt,
+    mode: modeOf(p),
+    reward: modeOf(p) === "reward" ? rewardView(p) : null,
   };
+}
+
+// ---------- reward mode: every N verified visits earn one reward ----------
+const modeOf = (p) => (p?.mode === "reward" ? "reward" : "tiers"); // no mode = tiers (programs from before)
+const REWARD_KINDS = ["percent", "amount", "item"];
+const capPctOf = (p) => Math.min(Number(p.maxDiscountPct ?? 100), p.adminMaxDiscountPct == null ? 100 : Number(p.adminMaxDiscountPct));
+function rewardLabel(r, p = null) {
+  if (!r) return "";
+  if (r.kind === "percent") return `${p ? Math.min(Number(r.value), capPctOf(p)) : r.value}% off`;
+  if (r.kind === "amount") return `PKR ${Number(r.value).toLocaleString("en-PK")} off`;
+  return String(r.item || "a free item");
+}
+function rewardView(p) {
+  const r = p.reward || {};
+  return {
+    visitsNeeded: r.visitsNeeded, kind: r.kind, value: r.kind === "percent" ? Math.min(Number(r.value), capPctOf(p)) : r.value ?? null,
+    item: r.kind === "item" ? r.item : "", label: rewardLabel(r, p), maxPerStudent: r.maxPerStudent ?? null, maxPerMonth: r.maxPerMonth ?? null,
+  };
+}
+const monthKey = (d) => { const k = new Date(new Date(d).getTime() + 5 * 3600e3); return `${k.getUTCFullYear()}-${k.getUTCMonth() + 1}`; }; // Karachi month
+
+// where a student stands on a reward program: stamps since their last used reward (the count restarts when a
+// reward is used; while one is waiting the card stays full), the waiting reward, and any limit reached
+async function rewardState(program, brandId, studentId, session = null) {
+  const after = Number(program.countAfterVersion) || 0;
+  const rewards = (await LoyaltyReward.find({ program: program._id, student: studentId, status: { $ne: "void" } }).sort({ earnedAt: 1 }).session(session).lean())
+    .filter((r) => r.programVersion > after); // rewards from an ended period never count or reopen
+  const lastUsed = [...rewards].reverse().find((r) => r.status === "used") || null;
+  const available = rewards.find((r) => r.status === "available") || null;
+  const since = lastUsed ? new Date(lastUsed.usedAt) : null;
+  const entries = await LoyaltyLedger.find({ brand: brandId, student: studentId }).session(session).lean();
+  const { visits, visitsToday } = tally(entries.filter((e) => !since || new Date(e.effectiveAt) > since), program);
+  const needed = Number(program.reward?.visitsNeeded) || 0;
+  const now = new Date();
+  const thisMonth = rewards.filter((r) => monthKey(r.earnedAt) === monthKey(now)).length;
+  const limit = program.reward?.maxPerStudent && rewards.length >= program.reward.maxPerStudent ? "program-limit"
+    : program.reward?.maxPerMonth && thisMonth >= program.reward.maxPerMonth ? "monthly-limit" : null;
+  return { stamps: visits, visitsToday, needed, available, limit, cycleKey: `${after}:${lastUsed ? lastUsed._id : "start"}`, earned: rewards.length };
+}
+// what the app and the brand see
+function stampsView(program, st, justEarned = false) {
+  const shown = Math.min(st.stamps, st.needed);
+  return {
+    mode: "reward",
+    stamps: st.available ? st.needed : shown,
+    needed: st.needed,
+    visitsToReward: st.available ? 0 : Math.max(0, st.needed - shown),
+    reward: rewardView(program),
+    available: st.available ? { id: String(st.available._id), label: st.available.label, kind: st.available.kind, value: st.available.value, item: st.available.item, earnedAt: st.available.earnedAt } : null,
+    limitReached: st.available ? null : st.limit,
+    justEarned: !!justEarned,
+  };
+}
+// after a counted visit: earn the reward when the card is full. One per cycle (unique cycleKey): a retry or a
+// simultaneous visit finds it already earned. Never throws into the visit that triggered it.
+async function earnRewardIfDue(program, brandId, studentId) {
+  if (modeOf(program) !== "reward") return null;
+  let earned = null;
+  try {
+    ({ result: earned } = await withTransaction(async (session) => {
+      const st = await rewardState(program, brandId, studentId, session);
+      if (st.available || st.limit || !st.needed || st.stamps < st.needed) return null;
+      const r = program.reward;
+      const [doc] = await LoyaltyReward.create([{
+        program: program._id, programVersion: program.version, brand: brandId, student: studentId, cycleKey: st.cycleKey, status: "available",
+        kind: r.kind, value: r.kind === "item" ? null : Number(r.value), item: r.kind === "item" ? r.item : "", label: rewardLabel(r, program), visitsNeeded: r.visitsNeeded, earnedAt: new Date(),
+      }], { session });
+      return doc.toObject();
+    }));
+  } catch (err) {
+    if (err?.code === 11000) return null; // already earned in this cycle
+    console.error(`[loyalty] earning a reward failed: ${err.message}`);
+    return null;
+  }
+  if (earned) await recordSafe("loyalty.reward.earned", String(earned._id), { subject: { kind: "LoyaltyReward", id: earned._id }, data: { brand: String(brandId), student: String(studentId), cycleKey: earned.cycleKey, label: earned.label } });
+  return earned;
+}
+// the brand applies a waiting reward at the till: one atomic available -> used change. A retry with the same
+// key gets the same answer; any other second use is refused. The admin cap still limits the money off.
+async function useReward({ rewardId, brandId, actor, billAmount = null, useKey = null }) {
+  if (!isId(rewardId)) throw new LoyaltyError(404, "NOT_FOUND", "Reward not found");
+  const r = await LoyaltyReward.findById(rewardId).lean();
+  if (!r || !same(r.brand, brandId)) throw new LoyaltyError(404, "NOT_FOUND", "Reward not found");
+  const key = useKey ? `use:${String(useKey).slice(0, 100)}` : null;
+  if (r.status === "used") {
+    if (key && r.useKey === key) return { reward: r, duplicate: true };
+    throw new LoyaltyError(409, "ALREADY_USED", "This reward was already used");
+  }
+  if (r.status !== "available") throw new LoyaltyError(409, "NOT_AVAILABLE", "This reward can't be used");
+  if (!enabledFor(brandId, r.student)) throw new LoyaltyError(409, "NOT_ENABLED", "Loyalty isn't on for this student");
+  const program = await withPeriod(await LoyaltyProgram.findById(r.program).lean());
+  if (!program || program.status !== "active" || r.programVersion <= (Number(program.countAfterVersion) || 0)) throw new LoyaltyError(409, "PROGRAM_NOT_ACTIVE", "This reward's program isn't running");
+  let bill = null;
+  if (billAmount != null && billAmount !== "") {
+    bill = Number(billAmount);
+    if (!Number.isFinite(bill) || bill < 0 || bill > 10000000) throw new LoyaltyError(400, "INVALID_BILL", "The bill must be a positive amount");
+  }
+  const cap = capPctOf(program);
+  let saved = null;
+  if (r.kind === "percent" && bill != null) saved = Math.round((bill * Math.min(Number(r.value), cap)) / 100);
+  if (r.kind === "amount") saved = bill != null ? Math.min(Number(r.value), bill, program.adminMaxDiscountPct != null ? Math.round((bill * program.adminMaxDiscountPct) / 100) : Infinity) : Number(r.value);
+  const now = new Date();
+  let used;
+  try {
+    ({ result: used } = await withTransaction(async (session) => {
+      const u = await LoyaltyReward.findOneAndUpdate(
+        { _id: r._id, status: "available" },
+        { $set: { status: "used", usedAt: now, usedBy: isId(actor) ? actor : null, useKey: key || `use:${r._id}`, billAmount: bill, savedAmount: saved } },
+        { new: true, session }
+      ).lean();
+      if (!u) throw new LoyaltyError(409, "ALREADY_USED", "This reward was already used");
+      return u;
+    }));
+  } catch (err) {
+    if (err?.code === 11000 || err?.code === "ALREADY_USED") {
+      const again = await LoyaltyReward.findById(r._id).lean();
+      if (again?.status === "used" && key && again.useKey === key) return { reward: again, duplicate: true };
+      throw new LoyaltyError(409, "ALREADY_USED", "This reward was already used");
+    }
+    throw err;
+  }
+  await recordSafe("loyalty.reward.used", String(r._id), { actor: isId(actor) ? actor : null, subject: { kind: "LoyaltyReward", id: r._id }, data: { brand: String(brandId), student: String(r.student), savedAmount: saved } });
+  return { reward: used, duplicate: false };
 }
 
 const running = (p, now = new Date()) => p && p.status === "active" && (!p.startsAt || new Date(p.startsAt) <= now) && (!p.endsAt || now <= new Date(p.endsAt));
@@ -171,6 +297,8 @@ async function standing(brandId, studentId) {
   if (!enabledFor(brandId, studentId)) return { enabled: false, reason: "not-enabled" };
   const program = await activeProgram(brandId);
   if (!program) return { enabled: false, reason: "no-program" };
+  // reward mode: "progress" stays null (app builds from before reward mode then show no card rather than a wrong one)
+  if (modeOf(program) === "reward") return { enabled: true, program: publicProgram(program), progress: null, stamps: stampsView(program, await rewardState(program, brandId, studentId)) };
   const { visits } = tally(await ledgerOf(brandId, studentId), program);
   return { enabled: true, program: publicProgram(program), progress: progressOf(program, visits) };
 }
@@ -184,6 +312,12 @@ async function quoteFor({ brandId, studentId, offerId, branchId = null }) {
   if (!program) return no("no-program");
   if (offerId && !offerCovered(program, offerId)) return no("offer-not-in-program");
   if (!branchCovered(program, branchId)) return no("branch-not-in-program");
+  if (modeOf(program) === "reward") {
+    // the visit gets the offer's usual discount; the reward is separate (the brand applies a waiting one)
+    const st = await rewardState(program, brandId, studentId);
+    const countsAsVisit = !program.maxVisitsPerDay || st.visitsToday < program.maxVisitsPerDay;
+    return { applies: false, mode: "reward", reason: "reward-mode", programId: String(program._id), programVersion: program.version, countsAsVisit, ...stampsView(program, st) };
+  }
   const { visits, visitsToday } = tally(await ledgerOf(brandId, studentId), program);
   const pr = progressOf(program, visits);
   const countsAsVisit = !program.maxVisitsPerDay || visitsToday < program.maxVisitsPerDay;
@@ -260,15 +394,20 @@ async function onVerifiedRedemption(redemptionId, opts = {}) {
       const progress = await rebuildSnapshot(program, brandId, studentId, session);
       return { entry: entry.toObject(), progress };
     });
+    let rewardProgress = null;
+    if (counts && modeOf(program) === "reward") {
+      const earned = await earnRewardIfDue(program, brandId, studentId);
+      rewardProgress = stampsView(program, await rewardState(program, brandId, studentId), !!earned);
+    }
     if (counts) {
       await recordSafe("loyalty.credited", String(redemptionId), {
         actor: row.actor, subject: { kind: "LoyaltyLedger", id: result.entry._id },
         data: { brand: String(brandId), student: String(studentId), visitNumber: row.visitNumber, tier: tier.name, source: row.source },
       });
       // push + in-app, once per ledger row (services/loyaltyNotify.js); never fails the credit
-      await require("./loyaltyNotify").notifyRow(result.entry, result.progress, { thisVisitPct: pctOf(program, tier) });
+      await require("./loyaltyNotify").notifyRow(result.entry, rewardProgress || result.progress, { thisVisitPct: rewardProgress ? null : pctOf(program, tier) });
     }
-    return { credited: counts, reason: row.reason, visitNumber: row.visitNumber, entry: result.entry, progress: result.progress };
+    return { credited: counts, reason: row.reason, visitNumber: row.visitNumber, entry: result.entry, progress: result.progress, ...(rewardProgress ? { stamps: rewardProgress } : {}) };
   } catch (err) {
     if (dayKeyTaken) await releaseSlot(dayKeyTaken);
     if (err?.code === 11000) return { credited: false, duplicate: true, entry: await LoyaltyLedger.findOne({ idempotencyKey: key }).lean() };
@@ -330,7 +469,37 @@ async function reverseRedemption({ redemptionId, reason, actor }) {
 }
 
 // ---------- program writes (routes/loyalty.routes.js) ----------
-const RULE_FIELDS = ["tiers", "eligibleOfferIds", "branchIds", "maxDiscountPct", "adminMaxDiscountPct", "maxVisitsPerDay", "resetMonths", "terms", "startsAt", "endsAt", "status"];
+const RULE_FIELDS = ["tiers", "eligibleOfferIds", "branchIds", "maxDiscountPct", "adminMaxDiscountPct", "maxVisitsPerDay", "resetMonths", "terms", "startsAt", "endsAt", "status", "mode", "reward"];
+
+// reward settings: visits needed 2-20, what (% off within the cap, PKR off, or a named item), optional limits
+function cleanReward(raw, capPct) {
+  const r = raw && typeof raw === "object" ? raw : {};
+  const n = Number(r.visitsNeeded);
+  if (!Number.isInteger(n) || n < 2 || n > 20) throw new LoyaltyError(400, "INVALID_REWARD", "Visits needed must be a whole number from 2 to 20");
+  if (!REWARD_KINDS.includes(r.kind)) throw new LoyaltyError(400, "INVALID_REWARD", "The reward must be % off, PKR off or a free item");
+  const out = { visitsNeeded: n, kind: r.kind, value: null, item: "", maxPerStudent: null, maxPerMonth: null };
+  if (r.kind === "percent") {
+    const v = Number(r.value);
+    if (!(v >= 1 && v <= 100)) throw new LoyaltyError(400, "INVALID_REWARD", "The % off must be 1 to 100");
+    if (v > capPct) throw new LoyaltyError(400, "OVER_MAX_DISCOUNT", `The reward can't be more than ${capPct}% off`);
+    out.value = v;
+  } else if (r.kind === "amount") {
+    const v = Number(r.value);
+    if (!Number.isInteger(v) || v < 1 || v > 100000) throw new LoyaltyError(400, "INVALID_REWARD", "The PKR off must be a whole amount from 1 to 100,000");
+    out.value = v;
+  } else {
+    const item = String(r.item || "").trim();
+    if (item.length < 2 || item.length > 80) throw new LoyaltyError(400, "INVALID_REWARD", "Name the free item (2 to 80 characters)");
+    out.item = item;
+  }
+  for (const [k, max] of [["maxPerStudent", 100], ["maxPerMonth", 31]]) {
+    if (r[k] == null || r[k] === "") continue;
+    const v = Number(r[k]);
+    if (!Number.isInteger(v) || v < 1 || v > max) throw new LoyaltyError(400, "INVALID_REWARD", `${k} must be a whole number from 1 to ${max}, or empty`);
+    out[k] = v;
+  }
+  return out;
+}
 
 async function cleanInput(body, brandId, current = null, isAdmin = false) {
   const out = {};
@@ -388,6 +557,18 @@ async function cleanInput(body, brandId, current = null, isAdmin = false) {
   );
   if (has("tiers")) out.tiers = validateTiers(body.tiers, isAdmin ? 100 : cap);
   else if (has("maxDiscountPct") && current && !isAdmin) validateTiers(current.tiers, cap);
+  if (has("mode")) {
+    if (!["tiers", "reward"].includes(body.mode)) throw new LoyaltyError(400, "INVALID_MODE", "mode must be tiers or reward");
+    out.mode = body.mode;
+  }
+  const mode = out.mode || modeOf(current);
+  // the % reward always stays within the brand's maximum and the admin cap
+  const rewardCap = Math.min(out.maxDiscountPct ?? current?.maxDiscountPct ?? 100, (has("adminMaxDiscountPct") ? out.adminMaxDiscountPct : current?.adminMaxDiscountPct) ?? 100);
+  if (has("reward")) out.reward = cleanReward(body.reward, rewardCap);
+  else if (mode === "reward" && (has("mode") || has("maxDiscountPct") || has("adminMaxDiscountPct"))) {
+    if (!current?.reward?.visitsNeeded) throw new LoyaltyError(400, "INVALID_REWARD", "Set up the reward: visits needed and what they earn");
+    if (current.reward.kind === "percent" && Number(current.reward.value) > rewardCap && !(has("adminMaxDiscountPct") && isAdmin)) throw new LoyaltyError(400, "OVER_MAX_DISCOUNT", `The reward can't be more than ${rewardCap}% off`);
+  }
   return out;
 }
 
@@ -510,7 +691,15 @@ async function analytics(brandId, { from = null, to = null } = {}) {
     members, // students with at least one counted visit (in the reset window)
     repeatCustomers: repeat, // members with 2 or more
     tierCounts, // members by the tier of their latest visit
+    ...(modeOf(program) === "reward" ? { rewards: await rewardCounts(program) } : {}),
   };
+}
+
+// reward numbers for the brand (current program period): earned, used, waiting
+async function rewardCounts(program) {
+  const after = Number(program.countAfterVersion) || 0;
+  const list = (await LoyaltyReward.find({ program: program._id, status: { $ne: "void" } }).select("status programVersion").lean()).filter((r) => r.programVersion > after);
+  return { earned: list.length, used: list.filter((r) => r.status === "used").length, waiting: list.filter((r) => r.status === "available").length };
 }
 
 module.exports = {
@@ -529,6 +718,9 @@ module.exports = {
   rebuildSnapshot,
   createProgram,
   restartProgram,
+  useReward,
+  earnRewardIfDue,
+  modeOf,
   withPeriod,
   updateProgram,
   analytics,

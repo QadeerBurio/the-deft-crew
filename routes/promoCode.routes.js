@@ -529,7 +529,7 @@ router.post("/verify", auth, async (req, res) => {
 
     // 🚫 engagement hook removed here — only /confirm-redemption awards points
     // one loyalty visit for this verified redemption
-    const loyaltyResult = quote.applies ? await loyalty.creditSafe(redemptionId, { source: "promo-verify", actor: req.userId, discountPct: loyaltyPct }) : null;
+    const loyaltyResult = quote.applies || quote.mode === "reward" ? await loyalty.creditSafe(redemptionId, { source: "promo-verify", actor: req.userId, discountPct: quote.applies ? loyaltyPct : null }) : null;
 
     res.json({
       success: true,
@@ -1164,7 +1164,7 @@ router.post("/confirm-redemption", auth, async (req, res) => {
     }
 
     // one loyalty visit for this verified redemption
-    const loyaltyResult = quote.applies ? await loyalty.creditSafe(redemptionId, { source: "promo-confirm", actor: req.userId, discountPct: loyaltyPct }) : null;
+    const loyaltyResult = quote.applies || quote.mode === "reward" ? await loyalty.creditSafe(redemptionId, { source: "promo-confirm", actor: req.userId, discountPct: quote.applies ? loyaltyPct : null }) : null;
 
     res.json({
       success: true,
