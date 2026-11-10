@@ -294,6 +294,7 @@ const check = (name, ok, detail = "") => { results.push(!!ok); if (!ok || proces
     ["GET", `${C}/employers/me/analytics`, null, [...ANY_EMPLOYER, "A"]],
     ["GET", `${C}/admin/analytics`, null, ["A"]],
     ["GET", `${C}/admin/disputes`, null, ["A"], "open hire disputes (admin only, audited)"],
+    ["GET", `${C}/employers/me/interviews`, null, ["E", "E2"], "employers: their own interviews only"],
     // admin views across employers (read-only, audited)
     ["GET", `${C}/admin/applications`, null, ["A"], "candidates by stage (admin only, audited)"],
     ["GET", `${C}/admin/interviews`, null, ["A"], "interviews (admin only, audited)"],

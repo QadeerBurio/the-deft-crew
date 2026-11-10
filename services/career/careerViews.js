@@ -23,8 +23,9 @@ async function lookups(rows, { jobKey = "job", employerKey = "employer", candida
   return { jobs: new Map(jobs.map((j) => [String(j._id), j])), users: new Map(users.map((u) => [String(u._id), u])) };
 }
 
-// filters: employerId (scope; null = every employer, admin only), jobId, status, from / to (interview start), limit
-async function listInterviews({ employerId = null, jobId = null, status = null, from = null, to = null, limit = 300 } = {}) {
+// filters: employerId (scope; null = every employer, admin only), jobId, status, from / to (interview start), limit;
+// withJoin: also how to join (place / link), for the employer's own list only
+async function listInterviews({ employerId = null, jobId = null, status = null, from = null, to = null, limit = 300, withJoin = false } = {}) {
   const q = {};
   if (employerId) q.employer = employerId;
   if (jobId) q.job = jobId;
@@ -43,6 +44,7 @@ async function listInterviews({ employerId = null, jobId = null, status = null, 
       candidate: { id: String(iv.candidate), firstName: firstName(users.get(String(iv.candidate))?.name) },
       startsAt: iv.startsAt, endsAt: iv.endsAt, timezone: iv.timezone || "Asia/Karachi", mode: iv.mode, status: iv.status, active: !!iv.active,
       completedAt: iv.completedAt || null, rescheduled: (iv.history || []).length,
+      ...(withJoin ? { location: iv.location || "", meetingLink: iv.meetingLink || "" } : {}),
     };
   });
 }

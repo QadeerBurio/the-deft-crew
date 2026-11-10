@@ -106,7 +106,7 @@ for the server, manual for the device / real service · **N/A** = not in this pi
 | No regression to discounts, QR verification, jobs, scholarships, events, confessions, networking, portals | 19 server suites incl. `live-security`, `brand-online-store`, `social-push`, `streak-reminders`, `perf-server`; app suites incl. events, tickets, social push; portal headless checks | auto (+ manual smoke) |
 | Admin actions audited | `loyalty` (reversal with admin + reason), `career` (admin writes audited), `surplus` (case decisions, brand blocks), `first-hire-free`: "every admin decision is in the audit with its reason" | auto |
 | Analytics reconcile to authoritative events | `analytics`: 46 checks reconciling each card with seeded records, Resume Studio included ("tailoring: 6 started in range …"; "factual check: 2 of 6 suggestions blocked …"; "time to draft …: p50 20 s, p95 120 s"); per-user limit on `/api/analytics/*` (`rate-limits`: "admin: 3 overviews → 200, the 4th → 429"; default 60 per 10 minutes) | auto |
-| Permissions | `permissions`: 110 routes × 8 roles (880) | auto |
+| Permissions | `permissions`: 111 routes × 8 roles (888) | auto |
 | Concurrency | `load`: 7 scenarios, 0 duplicates | auto |
 | Security | `security` (fuzz) + `docs/SECURITY_REVIEW.md` | auto + review |
 | Accessibility | portal: `npm run check:portal`, axe WCAG 2 A/AA, 0 violations on the new pages (the Resume Studio card and the hire disputes page and dialog included); app: `app/a11y-pilot` | auto (+ manual screen reader pass, below) |
