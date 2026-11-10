@@ -258,6 +258,7 @@ const check = (name, ok, detail = "") => { results.push(!!ok); if (!ok || proces
     ["GET", `${L}/programs/mine`, null, ANY_BRAND, "own program"],
     ["POST", `${L}/programs`, {}, ANY_BRAND, "own program only"],
     ["PATCH", `${L}/programs/${fx.P}`, { maxVisitsPerDay: 1 }, ["B", "A"], "owner or admin"],
+    ["POST", `${L}/programs/${fx.P}/restart`, { version: 1 }, ["B", "A"], "owner or admin (409 here: the program is not ended)"],
     ["POST", `${L}/quotes`, { studentId: String(ids.S), offerId: String(oid()) }, ANY_BRAND, "own offers only (unknown offer -> 404)", { allow404: true }],
     ["GET", `${L}/admin/ledger`, null, ["A"]],
     ["POST", `${L}/admin/reverse`, { redemptionId: fx.redemption, reason: "test" }, ["A"], "", { allow404: true }],
