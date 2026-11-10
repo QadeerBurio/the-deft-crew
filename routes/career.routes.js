@@ -25,6 +25,10 @@
 //   POST /admin/outbox/drain               admin: deliver notifications that are due (also runs after each event)
 //   GET  /admin/disputes                   admin: open hire disputes (audited); resolved with POST /applications/:id/events
 //                                          HIRE_RESTORED / HIRE_REVOKED and a reason. 404 unless FLAG_CAREER_TIMELINE is set
+//   GET  /admin/applications               admin: candidates by stage across employers (?stage&employerId&jobId; audited)
+//   GET  /admin/interviews                 admin: interviews across employers (?status&employerId&jobId&from&to; audited)
+//   GET  /admin/hires                      admin: hires across employers (?employerId&jobId&from&to; audited)
+//                                          these three: 404 unless FLAG_CAREER_TIMELINE is set
 //   GET  /employers/me/analytics           employer: my funnel; GET /admin/analytics admin: all (audited)
 //                                          ?from&to (applications whose timeline started then), from events only
 const express = require("express");
@@ -38,6 +42,7 @@ const interviews = require("../services/career/careerInterviewService");
 const offers = require("../services/career/careerOfferService");
 const notifications = require("../services/career/careerNotificationService");
 const analytics = require("../services/career/careerAnalyticsService");
+const views = require("../services/career/careerViews");
 const { recordSafe } = require("../services/domainEvents");
 
 const router = express.Router();
@@ -278,6 +283,72 @@ router.get("/admin/disputes", auth, role("admin"), handle(async (req, res) => {
     .sort((a, b) => new Date(a.disputedAt) - new Date(b.disputedAt));
   await recordSafe("career.admin.access", `${req.userId}:disputes:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`, { actor: req.userId, subject: { kind: "CareerDisputes", id: null }, data: { action: "read:disputes", count: out.length } });
   ok(req, res, { disputes: out });
+}));
+
+// ---------- admin: candidates by stage, interviews, hires (read-only, across employers, audited) ----------
+const STAGES = ["applied", "reviewed", "shortlisted", "interview", "offer", "hired", "rejected", "withdrawn"];
+const adminFilters = (req, res) => {
+  for (const k of ["employerId", "jobId"]) if (req.query[k] && !isId(req.query[k])) { fail(req, res, 400, "INVALID_ID", `Invalid ${k}`); return null; }
+  return { employerId: req.query.employerId || null, jobId: req.query.jobId || null };
+};
+const auditRead = (req, what, data) => recordSafe("career.admin.access", `${req.userId}:${what}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`, { actor: req.userId, subject: { kind: "CareerAdminView", id: null }, data: { action: `read:${what}`, ...data } });
+
+router.get("/admin/applications", auth, role("admin"), handle(async (req, res) => {
+  if (!pilotConfigured()) return fail(req, res, 404, "CAREER_OFF", "The hiring timeline isn't set up");
+  const f = adminFilters(req, res);
+  if (!f) return;
+  const stage = STAGES.includes(String(req.query.stage || "")) ? String(req.query.stage) : null;
+  const jobQuery = {};
+  if (f.employerId) jobQuery.postedBy = f.employerId;
+  if (f.jobId) jobQuery._id = f.jobId;
+  const jobs = await Job.find(jobQuery).select("title companyName postedBy isExternal archivedAt").limit(2000).lean();
+  const byJob = new Map(jobs.map((j) => [String(j._id), j]));
+  const apps = await JobApplication.find({ jobId: { $in: jobs.map((j) => j._id) } }).select("jobId userId status appliedAt fullName").sort({ appliedAt: -1 }).limit(2000).lean();
+  const stateOf = await statesFor(apps);
+  const counts = Object.fromEntries(STAGES.map((s) => [s, 0]));
+  const rows = [];
+  const employerIds = new Set();
+  for (const a of apps) {
+    const job = byJob.get(String(a.jobId));
+    const s = stateOf(a);
+    counts[s.stage] = (counts[s.stage] || 0) + 1;
+    if (stage && s.stage !== stage) continue;
+    if (rows.length >= 300) continue;
+    if (job?.postedBy) employerIds.add(String(job.postedBy));
+    rows.push({ a, job, s });
+  }
+  const employers = new Map((await User.find({ _id: { $in: [...employerIds] } }).select("name companyName").lean()).map((u) => [String(u._id), u.companyName || u.name || ""]));
+  await auditRead(req, "applications", { stage, employerId: f.employerId, jobId: f.jobId, count: rows.length });
+  ok(req, res, {
+    counts,
+    total: apps.length,
+    applications: rows.map(({ a, job, s }) => ({
+      applicationId: String(a._id), appliedAt: a.appliedAt, stage: s.stage,
+      job: { id: String(a.jobId), title: job?.title || "", archived: !!job?.archivedAt },
+      employer: { id: job?.postedBy ? String(job.postedBy) : null, name: (job?.postedBy && employers.get(String(job.postedBy))) || job?.companyName || "" },
+      candidate: { id: String(a.userId), firstName: String(a.fullName || "candidate").trim().split(/\s+/)[0] },
+      interview: s.interview?.status && s.interview.status !== "none" ? { status: s.interview.status, startsAt: s.interview.startsAt || null } : null,
+      onTimeline: timeline.flagOn(a.userId, "student"),
+    })),
+  });
+}));
+
+router.get("/admin/interviews", auth, role("admin"), handle(async (req, res) => {
+  if (!pilotConfigured()) return fail(req, res, 404, "CAREER_OFF", "The hiring timeline isn't set up");
+  const f = adminFilters(req, res);
+  if (!f) return;
+  const list = await views.listInterviews({ ...f, status: req.query.status, from: req.query.from, to: req.query.to });
+  await auditRead(req, "interviews", { ...f, count: list.length });
+  ok(req, res, { interviews: list });
+}));
+
+router.get("/admin/hires", auth, role("admin"), handle(async (req, res) => {
+  if (!pilotConfigured()) return fail(req, res, 404, "CAREER_OFF", "The hiring timeline isn't set up");
+  const f = adminFilters(req, res);
+  if (!f) return;
+  const list = await views.listHires({ ...f, from: req.query.from, to: req.query.to });
+  await auditRead(req, "hires", { ...f, count: list.length });
+  ok(req, res, { hires: list });
 }));
 
 router.post("/admin/outbox/drain", auth, role("admin"), handle(async (req, res) => {
