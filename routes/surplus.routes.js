@@ -36,6 +36,7 @@ const { isEnabled } = require("../config/featureFlags");
 const policy = require("../services/surplus/policy");
 const inventory = require("../services/surplus/inventory");
 const orders = require("../services/surplus/orders");
+const adminLog = require("../services/adminActionLog");
 const cases = require("../services/surplus/cases");
 const { SurplusError } = inventory;
 
@@ -396,7 +397,9 @@ router.get("/admin/cases", ...admin, handle(async (req, res) => {
 router.post("/admin/cases/:id/decide", ...admin, handle(async (req, res) => {
   if (!isId(req.params.id)) return fail(req, res, 404, "NOT_FOUND", "Case not found");
   const { decision, note } = req.body || {};
-  ok(req, res, caseView(await cases.decideCase(req.userId, req.params.id, { decision, note })));
+  const decided = caseView(await cases.decideCase(req.userId, req.params.id, { decision, note }));
+  await adminLog.recordSafe({ adminId: req.userId, action: "surplus.case.decide", targetType: "SurplusSupportCase", targetId: String(req.params.id), before: { status: "open" }, after: { status: decided.status, decision: decided.decision }, reason: note, requestId: req.id });
+  ok(req, res, decided);
 }));
 
 router.get("/admin/brands", ...admin, handle(async (req, res) => {
@@ -420,6 +423,7 @@ router.post("/admin/brands/:brandId/block", ...admin, handle(async (req, res) =>
   const target = isId(req.params.brandId) ? await User.findOne({ _id: req.params.brandId, role: "brand" }).select("_id").lean() : null;
   if (!target) return fail(req, res, 404, "NOT_FOUND", "Brand not found");
   const r = await cases.setBrandBlock(req.userId, req.params.brandId, { blocked: blocked === true, reason });
+  await adminLog.recordSafe({ adminId: req.userId, action: blocked === true ? "surplus.brand.block" : "surplus.brand.unblock", targetType: "Brand", targetId: String(req.params.brandId), before: { blocked: blocked !== true }, after: { blocked: r.block.active, listingsChanged: r.listingsChanged }, reason, requestId: req.id });
   ok(req, res, { brandId: String(req.params.brandId), blocked: r.block.active, reason: r.block.active ? r.block.reason : "", listingsChanged: r.listingsChanged });
 }));
 

@@ -218,6 +218,7 @@ const goodS = { communication: 5, respect: 4, clarity: 3 };
   check("deciding without a reason: 400", r.status === 400 && r.json?.error?.code === "REASON_REQUIRED");
   const hiddenEvents = rows("DomainEvent", (e) => e.type === "career.rating.hidden").length;
   r = await call("POST", `/api/career/ratings/admin/reports/${repE.id}/decide`, { tok: T.A, body: { action: "hide", reason: "the candidate's interview was with another company" } });
+  check("…and in the admin action log", rows("AdminActionLog", (x) => x.action === "career.rating.report.decide" && x.targetId === String(repE.id) && x.after.action === "hide" && x.reason === "the candidate's interview was with another company").length === 1);
   check("admin hides it with a reason: the rating is hidden, the decision recorded (report + DomainEvent)", r.status === 200 && rows("CareerRating", (x) => same(x._id, lowOne._id))[0].status === "hidden" && rows("CareerRating", (x) => same(x._id, lowOne._id))[0].hiddenReason && rows("DomainEvent", (e) => e.type === "career.rating.hidden").length === hiddenEvents + 1);
   r = await call("GET", `/api/career/ratings/jobs/${J}/employer`, { tok: T.S2 });
   check("…a hidden rating no longer counts: 4 left, so the average is no longer shown", r.json.data.count === 4 && r.json.data.shown === false);

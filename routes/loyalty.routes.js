@@ -22,6 +22,7 @@ const LoyaltyProgram = require("../models/LoyaltyProgram");
 const LoyaltyLedger = require("../models/LoyaltyLedger");
 const { isEnabled } = require("../config/featureFlags");
 const loyalty = require("../services/loyalty");
+const adminLog = require("../services/adminActionLog");
 
 const router = express.Router();
 const isId = (v) => mongoose.Types.ObjectId.isValid(String(v || ""));
@@ -120,6 +121,10 @@ router.patch("/programs/:id", auth, role("brand", "admin"), handle(async (req, r
   const body = { ...(req.body || {}) };
   delete body.brand;
   const updated = await loyalty.updateProgram(p, body, req.userId, isAdmin);
+  if (isAdmin) {
+    const changed = Object.keys(body).filter((k) => k !== "version" && k !== "reason");
+    await adminLog.recordSafe({ adminId: req.userId, action: "loyalty.program.update", targetType: "LoyaltyProgram", targetId: String(p._id), before: adminLog.pick(p, changed), after: adminLog.pick(updated, changed), reason: body.reason, requestId: req.id });
+  }
   ok(req, res, { ...loyalty.publicProgram(updated), brandMaxDiscountPct: updated.maxDiscountPct, adminMaxDiscountPct: updated.adminMaxDiscountPct });
 }));
 
@@ -131,6 +136,7 @@ router.post("/programs/:id/restart", auth, role("brand", "admin"), handle(async 
   if (!isAdmin && String(p.brand) !== String(req.userId)) return fail(req, res, 403, "NOT_YOUR_PROGRAM", "This program belongs to another brand");
   if (!isAdmin && !flagOn(req.userId, "brand")) return fail(req, res, 404, "LOYALTY_OFF", "Loyalty is not available for your brand yet");
   const updated = await loyalty.restartProgram(p, req.body || {}, req.userId, isAdmin);
+  if (isAdmin) await adminLog.recordSafe({ adminId: req.userId, action: "loyalty.program.restart", targetType: "LoyaltyProgram", targetId: String(p._id), before: { status: p.status, version: p.version }, after: { status: updated.status, version: updated.version }, reason: req.body?.reason, requestId: req.id });
   ok(req, res, { ...loyalty.publicProgram(updated), brandMaxDiscountPct: updated.maxDiscountPct, adminMaxDiscountPct: updated.adminMaxDiscountPct });
 }));
 
@@ -178,6 +184,7 @@ router.get("/admin/ledger", auth, role("admin"), handle(async (req, res) => {
 router.post("/admin/reverse", auth, role("admin"), handle(async (req, res) => {
   const { redemptionId, reason } = req.body || {};
   const out = await loyalty.reverseRedemption({ redemptionId, reason, actor: req.userId });
+  await adminLog.recordSafe({ adminId: req.userId, action: "loyalty.visit.reverse", targetType: "LoyaltyLedger", targetId: String(out.entry.reverses), before: { counted: true }, after: { counted: false, reversalId: String(out.entry._id), visitsDelta: out.entry.visitsDelta }, reason, requestId: req.id });
   ok(req, res, { reversal: { id: String(out.entry._id), visitsDelta: out.entry.visitsDelta, reason: out.entry.reason }, progress: out.progress }, 201);
 }));
 
