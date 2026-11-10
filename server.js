@@ -67,7 +67,9 @@ app.use("/assets/dots",
 // ---------------- DATABASE ----------------
 // Background jobs: each one can be switched off with JOB_<NAME>=off, all with BACKGROUND_JOBS=off, and
 // in staging all are off unless switched on by name (config/featureFlags.js)
-const { jobEnabled, describeJobs } = require("./config/featureFlags");
+const { jobEnabled, describeJobs, describeFlags } = require("./config/featureFlags");
+// one line per feature flag: rule types and counts only, never the ids (config/featureFlags.js)
+for (const line of describeFlags()) console.log(line);
 
 connectDB().then(() => {
   console.log(describeJobs());

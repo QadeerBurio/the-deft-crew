@@ -10,6 +10,11 @@
 //     roles:admin,brand             these roles
 //     users:<id>,<id>               these user ids (ids:<id>,<id> is the same rule)
 //   e.g. FLAG_META_EVENTS="roles:admin;10%". A missing or unreadable value uses the flag's default.
+//   Forgiving about how the value was typed or pasted: quotes (" or ') around the whole value, a rule or an id are
+//   dropped; rules may also be on separate lines; ids / roles may be separated by commas, spaces or line breaks,
+//   and a line that doesn't start a rule continues the list above it. So two "Copy ids" outputs pasted one under
+//   the other ("ids:a,b" newline "ids:c") work. At startup, describeFlags() logs one line per flag: rule types and
+//   counts only, never the ids.
 //   GET /api/app/flags/me returns the "client" flags for the signed-in user (routes/appFlags.routes.js).
 //
 // BACKGROUND JOBS (whole server)
@@ -74,29 +79,87 @@ const OFF = new Set(["off", "false", "0", "no"]);
 // 0..99, stable for a user and a flag
 const bucket = (flag, userId) => crypto.createHash("sha1").update(`${flag}:${userId}`).digest().readUInt16BE(0) % 100;
 
-function ruleMatches(flag, rule, user) {
-  const r = rule.trim();
-  const lower = r.toLowerCase();
-  if (ON.has(lower)) return true;
-  if (OFF.has(lower) || !r) return false;
-  const pct = /^(\d{1,3})%$/.exec(r);
-  if (pct) return !!user?.id && bucket(flag, user.id) < Number(pct[1]);
-  if (lower.startsWith("roles:")) return !!user?.role && r.slice(6).split(",").map((x) => x.trim()).includes(user.role);
-  if (lower.startsWith("users:")) return !!user?.id && r.slice(6).split(",").map((x) => x.trim()).includes(String(user.id));
-  if (lower.startsWith("ids:")) return !!user?.id && r.slice(4).split(",").map((x) => x.trim()).includes(String(user.id));
-  return null; // unreadable
+// quotes around a value, a rule or an id: "x", 'x', and the typographic ones a phone or a doc may add
+// (each end on its own: '"ids:a";"ids:b"' leaves half-quoted rules once the outer pair is gone; ids never hold quotes)
+const unquote = (s) => String(s).trim().replace(/^["'\u201c\u201d\u2018\u2019\s]+/, "").replace(/["'\u201c\u201d\u2018\u2019\s]+$/, "");
+// ("ids:" inside a list is another pasted "Copy ids" output: its ids join the list)
+const listOf = (s) => String(s).split(/[\s,]+/).map(unquote).map((x) => unquote(x.replace(/^(ids|users):/i, ""))).filter(Boolean);
+
+/**
+ * A flag's value as rules: [{ type: "on" | "off" | "pct" | "roles" | "ids" | "unreadable", pct?, items? }].
+ * Rules split on ";" and line breaks; a line (not a ";" part) that doesn't start a rule continues the ids / roles
+ * list on the line above it.
+ */
+function parseRules(raw) {
+  const rules = [];
+  const segments = unquote(raw).split(";").flatMap((part) => part.split(/\r?\n|\r/).map((s, i) => ({ s: unquote(s), continues: i > 0 }))).filter((x) => x.s);
+  for (const { s: seg, continues } of segments) {
+    const lower = seg.toLowerCase();
+    const prev = continues ? rules[rules.length - 1] : null;
+    if (ON.has(lower)) rules.push({ type: "on" });
+    else if (OFF.has(lower)) rules.push({ type: "off" });
+    else if (/^\d{1,3}%$/.test(seg)) rules.push({ type: "pct", pct: Number(seg.slice(0, -1)) });
+    else if (lower.startsWith("roles:")) rules.push({ type: "roles", items: listOf(seg.slice(6)) });
+    else if (lower.startsWith("users:")) rules.push({ type: "ids", items: listOf(seg.slice(6)) });
+    else if (lower.startsWith("ids:")) rules.push({ type: "ids", items: listOf(seg.slice(4)) });
+    else if (prev && (prev.type === "ids" || prev.type === "roles") && !seg.includes(":")) prev.items.push(...listOf(seg)); // the list goes on
+    else rules.push({ type: "unreadable" });
+  }
+  return rules;
 }
+
+function ruleMatches(flag, rule, user) {
+  switch (rule.type) {
+    case "on": return true;
+    case "off": return false;
+    case "pct": return !!user?.id && bucket(flag, user.id) < rule.pct;
+    case "roles": return !!user?.role && rule.items.includes(user.role);
+    case "ids": return !!user?.id && rule.items.includes(String(user.id));
+    default: return null; // unreadable
+  }
+}
+
+const rawValue = (flag) => {
+  const def = FLAGS[flag];
+  let raw = process.env[envName("FLAG", flag)];
+  if (raw == null && def?.legacyEnv) raw = process.env[def.legacyEnv];
+  return raw;
+};
 
 /** Is a flag on for this user ({ id, role } or nothing)? Unknown flag → false. */
 function isEnabled(flag, user = null) {
   const def = FLAGS[flag];
   if (!def) return false;
-  let raw = process.env[envName("FLAG", flag)];
-  if (raw == null && def.legacyEnv) raw = process.env[def.legacyEnv];
-  if (raw == null || !String(raw).trim()) return def.default;
-  const results = String(raw).split(";").map((rule) => ruleMatches(flag, rule, user));
-  if (results.every((x) => x === null)) return def.default; // nothing readable: keep the default
+  const raw = rawValue(flag);
+  if (raw == null || !unquote(raw)) return def.default;
+  const results = parseRules(raw).map((rule) => ruleMatches(flag, rule, user));
+  if (!results.length || results.every((x) => x === null)) return def.default; // nothing readable: keep the default
   return results.some((x) => x === true);
+}
+
+/** Startup lines, one per flag: rule types and counts only (never the ids), e.g. "[flags] FLAG_LOYALTY_V2: 3 ids" */
+function describeFlags() {
+  const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+  return Object.keys(FLAGS).map((flag) => {
+    const name = envName("FLAG", flag);
+    const def = FLAGS[flag].default ? "on" : "off";
+    const raw = rawValue(flag);
+    if (raw == null) return `[flags] ${name}: not set, using ${def}`;
+    if (!unquote(raw)) return `[flags] ${name}: empty, using ${def}`;
+    const rules = parseRules(raw);
+    const readable = rules.filter((r) => r.type !== "unreadable");
+    if (!readable.length) return `[flags] ${name}: unreadable value, using ${def}`;
+    const parts = [];
+    if (readable.some((r) => r.type === "on")) parts.push("on for everyone");
+    if (readable.some((r) => r.type === "off")) parts.push("off");
+    for (const r of readable.filter((x) => x.type === "pct")) parts.push(`${r.pct}% of users`);
+    const roles = new Set(readable.filter((r) => r.type === "roles").flatMap((r) => r.items));
+    if (roles.size) parts.push(plural(roles.size, "role"));
+    const ids = new Set(readable.filter((r) => r.type === "ids").flatMap((r) => r.items));
+    if (readable.some((r) => r.type === "ids")) parts.push(plural(ids.size, "id"));
+    const bad = rules.length - readable.length;
+    return `[flags] ${name}: ${parts.join(", ")}${bad ? `; ${plural(bad, "unreadable rule")} ignored` : ""}`;
+  });
 }
 
 /** The client flags for one user, for GET /api/app/flags/me */
@@ -128,4 +191,4 @@ function describeJobs() {
   return `[jobs] ${isStaging() ? "staging" : "production"}: on ${on.join(", ") || "none"}; off ${off.join(", ") || "none"}`;
 }
 
-module.exports = { FLAGS, JOBS, isEnabled, clientFlags, publicFlags, jobEnabled, describeJobs, isStaging, envName };
+module.exports = { FLAGS, JOBS, isEnabled, clientFlags, publicFlags, jobEnabled, describeJobs, describeFlags, parseRules, isStaging, envName };
