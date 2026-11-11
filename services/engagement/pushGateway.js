@@ -27,8 +27,15 @@ async function send(userId, msg) {
   try {
     // Admin/system pushes (skipCaps) don't need an engagement profile.
     // Many users never got one, which made test pushes silently skip them.
-    const profile = (await EngagementProfile.findOne({ user: userId })) || (skipCaps ? {} : null);
-    if (!profile) return { sent: false, reason: 'no_profile' };
+    let profile = (await EngagementProfile.findOne({ user: userId })) || (skipCaps ? {} : null);
+    if (!profile) {
+      // No engagement profile (accounts from before profiles were made at signup): make the default one now, the
+      // same as signup does (engine.ensureProfile), and go on. Caps, quiet hours and opt-outs then apply as usual.
+      // Never for an account that doesn't exist. (required here: engine.js requires this file)
+      if (!(await User.exists({ _id: userId }))) return { sent: false, reason: 'no_user' };
+      profile = await require('./engine').ensureProfile(userId);
+      if (!profile) return { sent: false, reason: 'no_profile' };
+    }
 
     if (pref && profile.notifPrefs && profile.notifPrefs[pref] === false) {
       return { sent: false, reason: 'pref_off' };
