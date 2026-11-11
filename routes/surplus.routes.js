@@ -19,6 +19,9 @@
 //   GET    /merchant/listings            POST /merchant/listings      PATCH /merchant/listings/:id
 //   POST   /merchant/listings/:id/image  multipart "image" + "version": the box's photo (images only, 5 MB; locked once ordered)
 //   DELETE /merchant/listings/:id/image  { version }: remove the photo
+//   POST   /merchant/listings/:id/cancel { reason, version }: cancel the box: closed (no new orders), and every open
+//                                         order not yet handed over cancelled with the reason (the student is told);
+//                                         handed-over orders stay. Same as the admin cancel, for the brand's own box.
 //   GET    /merchant/orders              ?scope=live|today|all
 //   POST   /merchant/orders/:id/transition      { to, version, reason?, markPaid? }
 //   POST   /merchant/orders/:id/verify-pickup   { code | qr, branchId, markPaid }  (also /merchant/verify-pickup)
@@ -321,6 +324,31 @@ async function patchListing(l, b, { session = null } = {}) {
   if (updated.status === "sold_out" && updated.quantityAvailable > 0) await SurplusListing.updateOne({ _id: l._id, status: "sold_out" }, { $set: { status: "published" } }, { session });
   return SurplusListing.findById(l._id).session(session).lean();
 }
+
+router.post("/merchant/listings/:id/cancel", ...brand, handle(async (req, res) => {
+  const reason = String(req.body?.reason || "").trim();
+  if (reason.length < 5) return fail(req, res, 400, "REASON_REQUIRED", "Tell the students why (at least 5 characters)");
+  const l = isId(req.params.id) ? await SurplusListing.findOne({ _id: req.params.id, brand: req.userId }).lean() : null;
+  if (!l) return fail(req, res, 404, "NOT_FOUND", "Listing not found");
+  if (l.status === "blocked") return fail(req, res, 403, "BRAND_BLOCKED", "This listing is paused by tdc");
+  if (l.status !== "closed" && Number(req.body?.version) !== l.version) return fail(req, res, 409, "STALE_VERSION", "This listing changed meanwhile. Reload it and try again.", { version: l.version });
+  // 1. close it (no new holds or orders)
+  if (l.status !== "closed") {
+    const closed = await SurplusListing.findOneAndUpdate({ _id: l._id, brand: req.userId, version: l.version, status: { $nin: ["closed", "blocked"] } }, { $set: { status: "closed", closedAt: new Date() }, $inc: { version: 1 } }, { returnDocument: "after" }).lean();
+    if (!closed) return fail(req, res, 409, "STALE_VERSION", "This listing changed meanwhile. Reload it and try again.");
+  }
+  // 2. each open order the brand can still cancel: the brand's own cancel (reason to the student, push + in-app)
+  const open = await SurplusOrder.find({ listing: l._id, brand: req.userId, state: { $in: policy.ACTIVE } }).lean();
+  const cancelled = [], stayed = [], failed = [];
+  for (const o of open) {
+    if (!policy.merchantNext(o.state).includes("MERCHANT_CANCELLED")) { stayed.push(o.ref); continue; }
+    try {
+      await orders.merchantTransition(req.userId, o._id, { to: "MERCHANT_CANCELLED", version: o.version, reason: reason.slice(0, 300) });
+      cancelled.push(o.ref);
+    } catch (err) { failed.push({ ref: o.ref, code: err.code || "ERROR", message: err.message }); }
+  }
+  ok(req, res, { listingId: String(l._id), closed: true, cancelled, stayed, failed });
+}));
 
 router.patch("/merchant/listings/:id", ...brand, handle(async (req, res) => {
   const l = isId(req.params.id) ? await SurplusListing.findOne({ _id: req.params.id, brand: req.userId }).lean() : null;
