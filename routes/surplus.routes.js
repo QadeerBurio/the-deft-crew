@@ -4,7 +4,8 @@
 // Replies: { success: true, data, requestId } or { success: false, error: { code, message, ... }, requestId }.
 //
 // Student:
-//   GET    /listings                     boxes to pick up (?lat&lng for distance, ?city)
+//   GET    /listings                     boxes to pick up (?lat&lng for distance; ?scope=city: the student's own
+//                                         city from their profile; ?city=<name>; neither: every city, as before)
 //   GET    /listings/:id                 one box with every disclosure
 //   POST   /holds                        { listingId, qty, idempotencyKey } -> held for 10 minutes
 //   DELETE /holds/:id                    release a hold
@@ -143,19 +144,28 @@ function merchantOrderView(o, studentName) {
 const namesOf = async (ids) => new Map((await User.find({ _id: { $in: [...new Set(ids.map(String))] } }).select("name").lean()).map((u) => [String(u._id), u.name]));
 
 // ---------- student ----------
+// a city as people type it: "Karachi", " karachi ", "Karachi, Pakistan" and "Karāchi" are the same city
+const cityName = (s) => String(s || "").split(",")[0].normalize("NFKD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ").trim().slice(0, 60);
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+// matches a listing's city written any of those ways (the branch's city is free text too)
+const cityFilter = (name) => ({ $regex: `^\\s*${escapeRe(name).replace(/ /g, "\\s+")}\\s*(,.*)?$`, $options: "i" });
 router.get("/listings", ...student, handle(async (req, res) => {
   const now = new Date();
   const lat = Number(req.query.lat), lng = Number(req.query.lng);
   const here = Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180 ? [lng, lat] : null;
   const filter = { status: { $in: ["published", "sold_out"] }, pickupEnd: { $gt: now } };
-  if (req.query.city) filter["location.city"] = String(req.query.city).slice(0, 60);
+  // which city: ?city=<name>, or ?scope=city for the student's own (profile location); no city known: every city
+  let city = "";
+  if (req.query.city) city = cityName(req.query.city);
+  else if (req.query.scope === "city") city = cityName((await User.findById(req.userId).select("location").lean())?.location);
+  if (city) filter["location.city"] = cityFilter(city);
   let list = await SurplusListing.find(filter).sort({ pickupStart: 1 }).limit(200).lean();
   const blocked = new Set((await SurplusBrandBlock.find({ active: true }).select("brand").lean()).map((b) => String(b.brand)));
   list = list.filter((l) => !blocked.has(String(l.brand)) && inventory.flagOn(l.brand));
   const brands = await brandsById(list.map((l) => l.brand));
   let out = list.map((l) => listingView(l, brands.get(String(l.brand)), here));
   if (here) out = out.sort((a, b) => (a.distanceKm ?? 1e9) - (b.distanceKm ?? 1e9));
-  ok(req, res, { listings: out.slice(0, 100), policy: { holdMinutes: policy.HOLD_MINUTES, maxPerListing: policy.MAX_PER_LISTING, payment: "pay_at_pickup" } });
+  ok(req, res, { listings: out.slice(0, 100), city: city || null, scope: city ? "city" : "all", policy: { holdMinutes: policy.HOLD_MINUTES, maxPerListing: policy.MAX_PER_LISTING, payment: "pay_at_pickup" } });
 }));
 
 router.get("/listings/:id", ...student, handle(async (req, res) => {

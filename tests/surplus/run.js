@@ -548,6 +548,31 @@ const inH = (h) => new Date(Date.now() + h * H).toISOString();
   check("and the earlier order shows its code again", /^[A-Z2-9]{6}$/.test(r.json.data.pickup?.code || ""));
   console.error = origError;
 
+  // ---------- the student's own city (?scope=city) ----------
+  console.log("── city: the student's own by default in the new app, every city for older apps");
+  const LHR = oid(), LHR_BRANCH = oid();
+  const soon = new Date(Date.now() + 2 * 3600e3), later = new Date(Date.now() + 5 * 3600e3);
+  fake.seed(coll("SurplusListing"), [{ _id: LHR, brand: ids.A, branch: LHR_BRANCH, title: "Alpha Lahore box", allergenNotes: "none known", quantityTotal: 3, quantityAvailable: 3, listPrice: 900, price: 400, currency: "PKR", pickupStart: soon, pickupEnd: later, orderCutoff: new Date(later.getTime() - 30 * 60000), status: "published", location: { city: "lahore", address: "Mall Road", branchName: "Alpha Mall Road" }, version: 1, publishedAt: new Date(), createdAt: new Date(), updatedAt: new Date() }]);
+  const setLoc = (k, v) => { const u = rows("User", (x) => same(x._id, ids[k]))[0]; if (v === undefined) delete u.location; else u.location = v; };
+  const cityTitles = (res) => (res.json?.data?.listings || []).map((l) => l.title);
+  setLoc("S5", "Lahore, Pakistan"); setLoc("S7", " karachi "); setLoc("S8", ""); setLoc("S9", undefined);
+  r = await call("GET", `${B}/listings`, { tok: T.S5 });
+  check("no scope (older app builds): every city, as before", cityTitles(r).includes("Alpha Lahore box") && cityTitles(r).some((t) => t !== "Alpha Lahore box") && r.json.data.scope === "all" && r.json.data.city === null, cityTitles(r).join(", "));
+  r = await call("GET", `${B}/listings?scope=city`, { tok: T.S5 });
+  check("Lahore student, scope=city: only Lahore boxes, and says which city", cityTitles(r).length >= 1 && cityTitles(r).every((t) => t === "Alpha Lahore box") && r.json.data.city === "Lahore" && r.json.data.scope === "city", JSON.stringify({ t: cityTitles(r), c: r.json?.data?.city }));
+  r = await call("GET", `${B}/listings?scope=city`, { tok: T.S7 });
+  check("\" karachi \" (as typed): Karachi boxes, never the Lahore one", cityTitles(r).length >= 1 && !cityTitles(r).includes("Alpha Lahore box") && r.json.data.city === "karachi", JSON.stringify({ t: cityTitles(r), c: r.json?.data?.city }));
+  r = await call("GET", `${B}/listings?scope=city`, { tok: T.S8 });
+  check("an empty location: every city (scope all), nothing hidden", cityTitles(r).includes("Alpha Lahore box") && r.json.data.scope === "all", r.json?.data?.scope);
+  r = await call("GET", `${B}/listings?scope=city`, { tok: T.S9 });
+  check("no location field at all: every city", cityTitles(r).includes("Alpha Lahore box") && r.json.data.scope === "all", r.json?.data?.scope);
+  r = await call("GET", `${B}/listings?city=${encodeURIComponent("LAHORE, Punjab")}`, { tok: T.S7 });
+  check("?city= ignores case and the part after a comma", cityTitles(r).length === 1 && cityTitles(r)[0] === "Alpha Lahore box", cityTitles(r).join(", "));
+  r = await call("GET", `${B}/listings?city=${encodeURIComponent("La.ore")}`, { tok: T.S7 });
+  check("?city= is text, not a pattern (\"La.ore\" finds nothing)", cityTitles(r).length === 0, cityTitles(r).join(", "));
+  r = await call("GET", `${B}/listings?scope=city`, { tok: T.S6 });
+  check("scope=city still needs the flag (S6 not in the pilot → 404)", r.status === 404);
+
   // ---------- leak scan ----------
   const leaky = responses.filter((x) => x.leaks.length);
   check(`leak scan: ${responses.length} responses, no contact details, code hashes or pickup codes outside the student's own order`, leaky.length === 0, leaky.map((x) => `${x.url} ${x.leaks.join(",")}`).slice(0, 5).join(" | "));
