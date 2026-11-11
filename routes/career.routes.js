@@ -271,7 +271,8 @@ router.get("/admin/analytics", auth, role("admin"), handle(async (req, res) => {
 
 // open hire disputes: the candidate disputed a verified hire and no admin has decided yet. Names and the job only
 // (no contact details); the timeline itself is read with GET /applications/:id/timeline (audited per application).
-const pilotConfigured = () => !["", "off", "false", "0", "no"].includes(String(process.env.FLAG_CAREER_TIMELINE || "").trim().toLowerCase());
+// set up = the Railway value, or any admin access (config/featureFlags.js pilotConfigured)
+const pilotConfigured = () => require("../config/featureFlags").pilotConfigured("careerTimeline");
 router.get("/admin/disputes", auth, role("admin"), handle(async (req, res) => {
   if (!pilotConfigured()) return fail(req, res, 404, "CAREER_OFF", "The hiring timeline isn't set up");
   const appIds = await CareerApplicationEvent.distinct("application", { type: "HIRE_DISPUTED" });
