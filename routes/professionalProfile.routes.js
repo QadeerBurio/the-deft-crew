@@ -14,7 +14,9 @@ router.get('/me', auth, async (req, res) => {
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
     const profile = await ProfessionalProfile.findOne({ userId });
-    res.json({ profile: profile || null, hasProfile: !!profile });
+    // a profile holding only the career opt-in (discoverable) isn't a Skillshare profile: onboarding still shows
+    if (!profile || ProfessionalProfile.isBlank(profile)) return res.json({ profile: null, hasProfile: false });
+    res.json({ profile, hasProfile: true });
   } catch (err) {
     console.error('Error fetching professional profile:', err);
     res.status(500).json({ error: 'Internal Server Error' });
@@ -24,7 +26,8 @@ router.get('/me', auth, async (req, res) => {
 // GET /professional-profile/:userId - view someone else's public profile
 router.get('/:userId', async (req, res) => {
   try {
-    const profile = await ProfessionalProfile.findOne({ userId: req.params.userId, isComplete: true });
+    // complete profiles only; never the career opt-in (who chose to be found by employers is not public)
+    const profile = await ProfessionalProfile.findOne({ userId: req.params.userId, isComplete: true }).select('-discoverable');
     if (!profile) return res.status(404).json({ error: 'Profile not found' });
     res.json({ profile });
   } catch (err) {
@@ -105,7 +108,10 @@ router.delete('/', auth, async (req, res) => {
     const userId = getUserId(req);
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
-    await ProfessionalProfile.findOneAndDelete({ userId });
+    // the Skillshare profile goes; the career opt-in (discoverable), if on, stays as a blank profile, which reads as
+    // no Skillshare profile everywhere
+    const deleted = await ProfessionalProfile.findOneAndDelete({ userId });
+    if (deleted?.discoverable) await ProfessionalProfile.create({ userId, discoverable: true });
     res.json({ success: true });
   } catch (err) {
     console.error('Error deleting professional profile:', err);

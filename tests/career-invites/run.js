@@ -140,6 +140,33 @@ const same = (a, b) => String(a) === String(b);
   check("discoverable: true turns it on", r.status === 200 && rows("ProfessionalProfile", (p) => same(p.userId, ids.D1))[0].discoverable === true);
   check("…the new profile stays incomplete (the Skillshare onboarding is unaffected)", rows("ProfessionalProfile", (p) => same(p.userId, ids.D1))[0].isComplete === false);
 
+  console.log("── 1b. the opt-in never makes a Skillshare profile");
+  r = await call("GET", "/api/professional-profile/me", { t: T.D1 });
+  check("D1 (opted in, no Skillshare profile before): GET /me says no profile (hasProfile false, profile null): onboarding still shows", r.status === 200 && r.json.hasProfile === false && r.json.profile === null, r.text.slice(0, 160));
+  r = await call("GET", `/api/professional-profile/${ids.D1}`);
+  check("…the public profile route returns nothing (404)", r.status === 404);
+  // N1: a complete Skillshare profile, then the opt-in
+  fake.seed(coll("ProfessionalProfile"), [{ _id: oid(), userId: ids.N1, fullName: "Nida R.", headline: "Designer", bio: "I design apps", skills: ["Figma"], portfolioLinks: [], interestedCategories: [], servicesProvided: ["UI design"], startingRate: 2000, rateCurrency: "PKR", lastCompletedStep: 5, isComplete: true, discoverable: false }]);
+  const n1Before = JSON.stringify({ ...rows("ProfessionalProfile", (p) => same(p.userId, ids.N1))[0], discoverable: undefined, updatedAt: undefined });
+  r = await call("POST", "/api/professional-profile", { t: T.N1, body: { discoverable: true } });
+  r = await call("POST", "/api/professional-profile", { t: T.N1, body: { discoverable: false } });
+  const n1After = JSON.stringify({ ...rows("ProfessionalProfile", (p) => same(p.userId, ids.N1))[0], discoverable: undefined, updatedAt: undefined });
+  check("an existing complete profile: toggling the opt-in changes nothing else", n1Before === n1After, `${n1Before} vs ${n1After}`);
+  r = await call("GET", "/api/professional-profile/me", { t: T.N1 });
+  check("…GET /me still returns it (hasProfile true, complete)", r.json?.hasProfile === true && r.json.profile?.isComplete === true && r.json.profile?.fullName === "Nida R.");
+  await call("POST", "/api/professional-profile", { t: T.N1, body: { discoverable: true } });
+  r = await call("GET", `/api/professional-profile/${ids.N1}`);
+  check("…its public profile is shown as before, without the career opt-in", r.status === 200 && r.json.profile?.fullName === "Nida R." && !("discoverable" in (r.json.profile || {})), r.text.slice(0, 200));
+  const attach = reqS("./utils/attachProfessionalProfiles");
+  const cards = [{ ownerId: { _id: ids.D1, name: "Ayesha Khan", headline: "own headline" } }, { ownerId: { _id: ids.N1, name: "Nida Raza", headline: "" } }];
+  await attach(cards, "ownerId");
+  check("listings / chat: an opt-in-only profile changes nothing (own name and headline stay); a complete one overlays as before", cards[0].ownerId.name === "Ayesha Khan" && cards[0].ownerId.headline === "own headline" && cards[1].ownerId.name === "Nida R." && cards[1].ownerId.headline === "Designer", JSON.stringify(cards));
+  r = await call("DELETE", "/api/professional-profile", { t: T.N1 });
+  const n1Left = rows("ProfessionalProfile", (p) => same(p.userId, ids.N1));
+  r = await call("GET", "/api/professional-profile/me", { t: T.N1 });
+  check("deleting the Skillshare profile keeps the career opt-in (a blank profile), and /me then says no profile", n1Left.length === 1 && n1Left[0].discoverable === true && !n1Left[0].fullName && r.json?.hasProfile === false);
+  await call("POST", "/api/professional-profile", { t: T.N1, body: { discoverable: false } }); // (N1 stays out of the suggestions below)
+
   console.log("── 2. suggested candidates: only who opted in, matches strongly and hasn't applied; anonymous");
   r = await E(`/api/career/matching/jobs/${ids.J}/suggested`);
   const C = r.json?.data?.candidates || [];

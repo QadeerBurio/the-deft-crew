@@ -29,9 +29,11 @@ async function attachProfessionalProfiles(docs, path = 'ownerId') {
 
   if (ownerIds.length === 0) return docs;
 
-  const profiles = await ProfessionalProfile.find({ userId: { $in: ownerIds } })
-    .select('userId fullName photoUrl headline')
-    .lean();
+  const profiles = (await ProfessionalProfile.find({ userId: { $in: ownerIds } })
+    .select('userId fullName photoUrl headline isComplete lastCompletedStep startingRate bio university fieldOfStudy skills portfolioLinks interestedCategories servicesProvided')
+    .lean())
+    // a profile holding only the career opt-in isn't a Skillshare profile: the user's own name / photo / headline stay
+    .filter((p) => !ProfessionalProfile.isBlank(p));
 
   const profileMap = {};
   profiles.forEach((p) => { profileMap[p.userId.toString()] = p; });
