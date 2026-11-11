@@ -171,6 +171,19 @@ const titles = (list) => (list || []).map((j) => j.title);
   r = await call("GET", `/api/resume/${ids.R1}/recommendations`, T.S2);
   check("someone else's resume → 404 (as before)", r.status === 404);
 
+  console.log("── 3b. /recommendations/top and /recommendations/:resumeId each reach their own handler");
+  hybridCalls.length = 0;
+  r = await call("GET", "/api/jobs/recommendations/top?limit=1", T.S2);
+  check("/top (pilot student): its own handler, not a resume id: 200, top 1 from the skill-evidence matcher", r.status === 200 && r.json?.engine === "skill-evidence-1" && r.json.hasResume === true && r.json.recommendations.length === 1 && r.json.total === 1, `${r.status} ${r.text.slice(0, 160)}`);
+  r = await call("GET", "/api/jobs/recommendations/top", T.OUT);
+  check("/top (outside the pilot): its own handler, the older engine, not 'Resume not found'", r.status === 200 && r.json?.recommendations?.[0]?.title === "From the older engine" && r.json.hasResume === true && hybridCalls.includes(String(ids.OUT)), `${r.status} ${r.text.slice(0, 160)}`);
+  r = await call("GET", "/api/jobs/recommendations/top", T.S3);
+  check("/top without a resume: the featured fallback (hasResume false), not a 404", r.status === 200 && r.json?.hasResume === false, `${r.status} ${r.text.slice(0, 120)}`);
+  r = await call("GET", `/api/jobs/recommendations/${ids.R2}`, T.S2);
+  check("/:resumeId still reaches its own handler (paged reply with page / totalPages)", r.status === 200 && r.json.page === 1 && typeof r.json.totalPages === "number" && r.json.hasResume === undefined);
+  const jobsRoutes = require("fs").readFileSync(require("path").join(SERVER, "routes", "jobs.routes.js"), "utf8");
+  check("/recommendations/top is registered before /recommendations/:resumeId", jobsRoutes.indexOf('router.get("/recommendations/top"') > 0 && jobsRoutes.indexOf('router.get("/recommendations/top"') < jobsRoutes.indexOf('router.get("/recommendations/:resumeId"'));
+
   console.log("── 4. the cache: a resume or job change gives a fresh score");
   let x = await recs.recommend(ids.S2, { limit: 0, all: true });
   check("before: Full-stack intern 40%", x.recommendations.find((j) => j.title === "Full-stack intern").matchPercentage === 40);
