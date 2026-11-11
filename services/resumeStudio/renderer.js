@@ -135,7 +135,10 @@ function render(content, { draft = false } = {}) {
 
   // ---------- header ----------
   const pi = c.personalInfo;
-  para(`${pi.firstName} ${pi.lastName}`, { font: "Helvetica-Bold", size: 18, gap: 0 });
+  // the name: an English name is drawn exactly as before Urdu support (no line gap: English PDFs stay byte-identical)
+  const fullName = `${pi.firstName} ${pi.lastName}`;
+  if (urdu.hasArabic(fullName)) para(fullName, { font: "Helvetica-Bold", size: 18, gap: 0 });
+  else doc.font("Helvetica-Bold").fontSize(18).fillColor(INK).text(safe(fullName), MARGIN, doc.y, { width });
   if (pi.title) para(pi.title, { size: 11, color: MUTED, gap: 1 });
   // a location written in Urdu gets its own line under the contacts (it can't share their left-to-right row)
   const urduLocation = pi.location && urdu.hasArabic(pi.location) ? pi.location : "";
