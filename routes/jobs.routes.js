@@ -1257,42 +1257,7 @@ router.get("/recommendations", authMiddleware, async (req, res) => {
   }
 });
 
-// Get recommendations for a specific resume (hybrid AI engine)
-router.get("/recommendations/:resumeId", authMiddleware, async (req, res) => {
-  try {
-    const { resumeId } = req.params;
-    const { limit = 10, page = 1 } = req.query;
-
-    const Resume = require('../models/Resume');
-    const resume = await Resume.findOne({ _id: resumeId, user: req.userId }).select('_id careerProfile');
-    if (!resume) {
-      return res.status(404).json({ recommendations: [], message: 'Resume not found' });
-    }
-
-    const startIndex = (parseInt(page) - 1) * parseInt(limit);
-    // students with FLAG_CAREER_MATCHING: the skill-evidence matcher, same reply
-    if (await require("../services/career/recommendations").isPilotStudent(req.userId)) {
-      const r = await require("../services/career/recommendations").recommend(req.userId, { resumeId, limit: 0 });
-      return res.json({ recommendations: r.recommendations.slice(startIndex, startIndex + parseInt(limit)), total: r.recommendations.length, page: parseInt(page), totalPages: Math.ceil(r.recommendations.length / parseInt(limit)), engine: "skill-evidence-1", isEnriched: false });
-    }
-    const allRecs = await getHybridRecommendations(resumeId, req.userId, {
-      limit: startIndex + parseInt(limit) + 10
-    });
-
-    res.json({
-      recommendations: allRecs.slice(startIndex, startIndex + parseInt(limit)),
-      total: allRecs.length,
-      page: parseInt(page),
-      totalPages: Math.ceil(allRecs.length / parseInt(limit)),
-      engine: resume.careerProfile?.isEnriched ? 'hybrid_vector' : 'hybrid_skill',
-      isEnriched: !!resume.careerProfile?.isEnriched
-    });
-  } catch (error) {
-    console.error('Recommendations error:', error);
-    res.status(500).json({ error: error.message, recommendations: [], message: 'Failed to get recommendations' });
-  }
-});
-
+// (registered before /recommendations/:resumeId, which would otherwise take "top" as a resume id)
 // Get top recommended jobs for dashboard (hybrid AI engine)
 router.get("/recommendations/top", authMiddleware, async (req, res) => {
   try {
@@ -1329,6 +1294,43 @@ router.get("/recommendations/top", authMiddleware, async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
+// Get recommendations for a specific resume (hybrid AI engine)
+router.get("/recommendations/:resumeId", authMiddleware, async (req, res) => {
+  try {
+    const { resumeId } = req.params;
+    const { limit = 10, page = 1 } = req.query;
+
+    const Resume = require('../models/Resume');
+    const resume = await Resume.findOne({ _id: resumeId, user: req.userId }).select('_id careerProfile');
+    if (!resume) {
+      return res.status(404).json({ recommendations: [], message: 'Resume not found' });
+    }
+
+    const startIndex = (parseInt(page) - 1) * parseInt(limit);
+    // students with FLAG_CAREER_MATCHING: the skill-evidence matcher, same reply
+    if (await require("../services/career/recommendations").isPilotStudent(req.userId)) {
+      const r = await require("../services/career/recommendations").recommend(req.userId, { resumeId, limit: 0 });
+      return res.json({ recommendations: r.recommendations.slice(startIndex, startIndex + parseInt(limit)), total: r.recommendations.length, page: parseInt(page), totalPages: Math.ceil(r.recommendations.length / parseInt(limit)), engine: "skill-evidence-1", isEnriched: false });
+    }
+    const allRecs = await getHybridRecommendations(resumeId, req.userId, {
+      limit: startIndex + parseInt(limit) + 10
+    });
+
+    res.json({
+      recommendations: allRecs.slice(startIndex, startIndex + parseInt(limit)),
+      total: allRecs.length,
+      page: parseInt(page),
+      totalPages: Math.ceil(allRecs.length / parseInt(limit)),
+      engine: resume.careerProfile?.isEnriched ? 'hybrid_vector' : 'hybrid_skill',
+      isEnriched: !!resume.careerProfile?.isEnriched
+    });
+  } catch (error) {
+    console.error('Recommendations error:', error);
+    res.status(500).json({ error: error.message, recommendations: [], message: 'Failed to get recommendations' });
+  }
+});
+
 
 // ==================== PERSONALISED JOB FEED ====================
 
