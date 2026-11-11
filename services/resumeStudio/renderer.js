@@ -7,10 +7,13 @@
 //   - a heading is never left alone at the bottom of a page (keep-with-next)
 //   - "DRAFT - not approved" on previews only; an approved version renders without it
 // Freshers (no work experience) get Projects and Education before Experience.
+// Urdu (Arabic script) is drawn with an embedded open-licensed font, right to left (services/pdfText/urdu.js);
+// if that isn't possible the Urdu lines are left out and pdfStatus() tells the student before export.
 // Bump RENDERER_VERSION whenever the output changes: approved versions record the version they used.
 const PDFDocument = require("pdfkit");
+const urdu = require("../pdfText/urdu");
 
-const RENDERER_VERSION = "ats-classic-1";
+const RENDERER_VERSION = "ats-classic-2";
 const MARGIN = 50;
 const BODY = 10;
 const SMALL = 9;
@@ -25,6 +28,19 @@ const safe = (s) => String(s ?? "")
   .normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
   .replace(/[^\x09\x0a\x0d\x20-\x7e\xa0-\xff]/g, "")
   .replace(/\s+/g, " ").trim();
+// the same clean-up for text that has Urdu in it: the Latin parts as above, the Arabic-script parts kept as typed
+const ARABIC_RUN = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]+/g;
+const safeKeepingUrdu = (s) => {
+  const parts = [];
+  let last = 0;
+  const t = String(s ?? "");
+  for (const m of t.matchAll(ARABIC_RUN)) {
+    parts.push(safe(t.slice(last, m.index)), m[0]);
+    last = m.index + m[0].length;
+  }
+  parts.push(safe(t.slice(last)));
+  return parts.filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+};
 const month = (ym) => {
   const m = /^(\d{4})-(\d{2})$/.exec(ym || "");
   return m ? `${MONTHS[Number(m[2]) - 1]} ${m[1]}` : safe(ym);
@@ -44,7 +60,7 @@ const shownUrl = (u) => String(u).replace(/^https?:\/\//i, "").replace(/\/$/, ""
  */
 function render(content, { draft = false } = {}) {
   const c = content;
-  const doc = new PDFDocument({ size: "A4", margins: { top: MARGIN, bottom: MARGIN, left: MARGIN, right: MARGIN }, info: { Title: safe(`${c.personalInfo.firstName} ${c.personalInfo.lastName} - Resume`), Creator: "TDC Resume Studio" } });
+  const doc = new PDFDocument({ size: "A4", margins: { top: MARGIN, bottom: MARGIN, left: MARGIN, right: MARGIN }, info: { Title: safeKeepingUrdu(`${c.personalInfo.firstName} ${c.personalInfo.lastName} - Resume`), Creator: "TDC Resume Studio" } });
   const chunks = [];
   doc.on("data", (b) => chunks.push(b));
   const done = new Promise((resolve, reject) => { doc.on("end", () => resolve(Buffer.concat(chunks))); doc.on("error", reject); });
@@ -63,13 +79,37 @@ function render(content, { draft = false } = {}) {
   doc.on("pageAdded", draftMark);
 
   const ensure = (h) => { if (doc.y + h > bottom()) doc.addPage(); };
+  // Urdu: drawn right to left with the embedded font; if it can't be, the Latin parts stay (pdfStatus warns)
+  const urduOk = urdu.supported();
+  const urduPara = (text, { x, w, font, size, color }) => {
+    const t = safeKeepingUrdu(text);
+    if (!t) return;
+    // left-aligned like every other line, so the resume reads top to bottom as one column (text extraction
+    // and ATS parsers read a right-aligned Urdu line as a separate column, after everything else)
+    urdu.paragraph(doc, t, { x, y: doc.y, width: w, size, latinFont: font, color, lineGap: 1, bottom: bottom(), align: "left" });
+  };
   const para = (text, { font = "Helvetica", size = BODY, color = INK, gap = 2, indent = 0 } = {}) => {
+    if (urdu.hasArabic(text)) {
+      if (urduOk) { urduPara(text, { x: MARGIN + indent, w: width - indent, font, size, color }); doc.y += gap; return; }
+      text = urdu.withoutArabic(text).text;
+    }
     const t = safe(text);
     if (!t) return;
     doc.font(font).fontSize(size).fillColor(color).text(t, MARGIN + indent, doc.y, { width: width - indent, lineGap: 1 });
     doc.y += gap;
   };
   const bullet = (text) => {
+    if (urdu.hasArabic(text)) {
+      if (urduOk) {
+        const t = safeKeepingUrdu(text);
+        ensure(urdu.heightOf(doc, t, { width: width - 12, size: BODY }));
+        doc.circle(MARGIN + 4, doc.y + 8, 1.6).fill(INK);
+        urduPara(t, { x: MARGIN + 12, w: width - 12, font: "Helvetica", size: BODY, color: INK });
+        doc.y += 1;
+        return;
+      }
+      text = urdu.withoutArabic(text).text;
+    }
     const t = safe(text);
     if (!t) return;
     doc.font("Helvetica").fontSize(BODY);
@@ -95,12 +135,17 @@ function render(content, { draft = false } = {}) {
 
   // ---------- header ----------
   const pi = c.personalInfo;
-  doc.font("Helvetica-Bold").fontSize(18).fillColor(INK).text(safe(`${pi.firstName} ${pi.lastName}`), MARGIN, doc.y, { width });
+  // the name: an English name is drawn exactly as before Urdu support (no line gap: English PDFs stay byte-identical)
+  const fullName = `${pi.firstName} ${pi.lastName}`;
+  if (urdu.hasArabic(fullName)) para(fullName, { font: "Helvetica-Bold", size: 18, gap: 0 });
+  else doc.font("Helvetica-Bold").fontSize(18).fillColor(INK).text(safe(fullName), MARGIN, doc.y, { width });
   if (pi.title) para(pi.title, { size: 11, color: MUTED, gap: 1 });
+  // a location written in Urdu gets its own line under the contacts (it can't share their left-to-right row)
+  const urduLocation = pi.location && urdu.hasArabic(pi.location) ? pi.location : "";
   const contacts = [
     pi.email && link(pi.email, `mailto:${pi.email}`),
     pi.phone && link(pi.phone, null),
-    pi.location && link(pi.location, null),
+    pi.location && !urduLocation && link(pi.location, null),
     pi.linkedin && link(shownUrl(pi.linkedin), fullUrl(pi.linkedin)),
     pi.github && link(shownUrl(pi.github), fullUrl(pi.github)),
     pi.portfolio && link(shownUrl(pi.portfolio), fullUrl(pi.portfolio)),
@@ -125,6 +170,7 @@ function render(content, { draft = false } = {}) {
     doc.x = MARGIN;
     doc.y = y + lineH + 4;
   }
+  if (urduLocation) para(urduLocation, { size: SMALL, gap: 4 });
 
   // ---------- sections ----------
   const summary = () => { if (c.professionalSummary.summary) { section("Summary"); para(c.professionalSummary.summary); } };
@@ -169,6 +215,7 @@ function render(content, { draft = false } = {}) {
     section("Certifications");
     for (const ct of c.certifications) {
       const line = [ct.name, ct.organization, ct.issueDate && `Issued ${month(ct.issueDate)}`].filter(Boolean).join("  |  ");
+      if (urdu.hasArabic(line)) { ensure(20); para(line, { gap: 0 }); continue; }
       doc.font("Helvetica").fontSize(BODY).fillColor(INK);
       ensure(14);
       doc.text(safe(line), MARGIN, doc.y, { width, link: ct.credentialUrl ? fullUrl(ct.credentialUrl) : null });
@@ -189,4 +236,7 @@ function render(content, { draft = false } = {}) {
   return done;
 }
 
-module.exports = { render, RENDERER_VERSION, safe };
+/** What to tell the student before exporting this content: { urdu: none | included | not_included, message } */
+const pdfStatus = (content) => urdu.pdfStatus(content);
+
+module.exports = { render, RENDERER_VERSION, safe, pdfStatus };
