@@ -4,13 +4,16 @@
 // rows), then delivers what's due in CareerNotificationOutbox: new rows, failed ones whose backoff has
 // passed, pushes held back by quiet hours. Delivery only ever touches outbox rows; the business event
 // (CareerApplicationEvent) is never written again. Each row is claimed atomically, so two servers (or two
-// ticks) never deliver the same row twice. Task: interview reminders 24 h / 1 h (careerReminderService).
+// ticks) never deliver the same row twice. Tasks: interview reminders 24 h / 1 h (careerReminderService), and
+// "a new job that matches your skills" alerts (jobAlerts, their own CareerJobAlert rows).
 const notifications = require("./careerNotificationService");
 
 const INTERVAL_MS = 5 * 60 * 1000;
 const tasks = []; // async (now) => summary, run before each drain
 const addTask = (name, fn) => tasks.push({ name, fn });
 addTask("reminders", require("./careerReminderService").queueDueReminders);
+// "a new job that matches your skills" alerts waiting for quiet hours to end, or retried after an error (CareerJobAlert)
+addTask("jobAlerts", async (now) => (await require("./jobAlerts").drain({ limit: 500, now })).filter((x) => x.status === "sent").length);
 
 let timer = null;
 let running = false;
