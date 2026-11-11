@@ -236,6 +236,15 @@ const rand = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 21474836
   r = await call("GET", `/api/career/matching/jobs/${J}?sort=relevance`, { tok: T.E });
   const order = r.json.data.applications.map((a) => a.applicationId);
   check("?sort=relevance: highest estimate first, no-match last, still all three (none hidden)", order.length === 3 && order[0] === String(A1) && order[2] === String(A3), JSON.stringify(r.json.data.applications.map((a) => a.match?.score)));
+  // match quality per job: bands from the estimate, counted in a summary
+  const qm = reqS("./services/career/matchingService");
+  check("quality bands: 70+ strong, 40-69 medium, under 40 weak, no estimate insufficient", qm.qualityOf(100) === "strong" && qm.qualityOf(70) === "strong" && qm.qualityOf(69) === "medium" && qm.qualityOf(40) === "medium" && qm.qualityOf(39) === "weak" && qm.qualityOf(0) === "weak" && qm.qualityOf(null) === "insufficient");
+  const sum = r.json.data.summary;
+  const apps = r.json.data.applications;
+  const counted = (band) => apps.filter((a) => a.match && a.match.quality === band).length;
+  check("the reply's summary counts each band from the rows, applicants outside the pilot apart, total = all applications", sum && sum.total === apps.length && sum.outsidePilot === apps.filter((a) => !a.match).length && ["strong", "medium", "weak", "insufficient"].every((b) => sum[b] === counted(b)) && sum.strong + sum.medium + sum.weak + sum.insufficient + sum.outsidePilot === sum.total && sum.thresholds.strong === 70 && sum.thresholds.medium === 40, JSON.stringify(sum));
+  check("each match row carries its band, the same as its score's", apps.filter((a) => a.match).every((a) => a.match.quality === qm.qualityOf(a.match.score)));
+  check("the summary says it's an estimate, not a judgment", /estimate/i.test(sum?.note || "") && /not a judgment/i.test(sum?.note || ""));
   check("matching never changes an application (no status written, nothing rejected)", rows("JobApplication").map((a) => a.status).join() === statusesBefore);
   r = await call("GET", `/api/career/matching/jobs/${J}`, { tok: T.E2 });
   check("another employer can't list this job (404)", r.status === 404);
