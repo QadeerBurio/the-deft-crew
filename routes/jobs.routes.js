@@ -1223,6 +1223,11 @@ router.get("/recommendations", authMiddleware, async (req, res) => {
     console.log(`[${new Date().toISOString()}] 📄 User resume found (ID: ${resume._id}). Calculating hybrid recommendations...`);
     const startIndex = (parseInt(page) - 1) * parseInt(limit);
     
+    // students with FLAG_CAREER_MATCHING: the skill-evidence matcher (services/career/recommendations.js), same reply
+    if (await require("../services/career/recommendations").isPilotStudent(req.userId)) {
+      const r = await require("../services/career/recommendations").recommend(req.userId, { resumeId: resume._id, limit: 0, isExternal: true });
+      return res.json({ recommendations: r.recommendations.slice(startIndex, startIndex + parseInt(limit)), total: r.recommendations.length, page: parseInt(page), totalPages: Math.ceil(r.recommendations.length / parseInt(limit)), hasResume: true, engine: "skill-evidence-1", isEnriched: false });
+    }
     const recsStart = Date.now();
     const allRecs = await getHybridRecommendations(resume._id.toString(), req.userId, {
       limit: startIndex + parseInt(limit) + 10,  // fetch a bit extra for pagination
@@ -1261,6 +1266,11 @@ router.get("/recommendations/:resumeId", authMiddleware, async (req, res) => {
     }
 
     const startIndex = (parseInt(page) - 1) * parseInt(limit);
+    // students with FLAG_CAREER_MATCHING: the skill-evidence matcher, same reply
+    if (await require("../services/career/recommendations").isPilotStudent(req.userId)) {
+      const r = await require("../services/career/recommendations").recommend(req.userId, { resumeId, limit: 0 });
+      return res.json({ recommendations: r.recommendations.slice(startIndex, startIndex + parseInt(limit)), total: r.recommendations.length, page: parseInt(page), totalPages: Math.ceil(r.recommendations.length / parseInt(limit)), engine: "skill-evidence-1", isEnriched: false });
+    }
     const allRecs = await getHybridRecommendations(resumeId, req.userId, {
       limit: startIndex + parseInt(limit) + 10
     });
@@ -1298,6 +1308,11 @@ router.get("/recommendations/top", authMiddleware, async (req, res) => {
       });
     }
 
+    // students with FLAG_CAREER_MATCHING: the skill-evidence matcher, same reply
+    if (await require("../services/career/recommendations").isPilotStudent(req.userId)) {
+      const r = await require("../services/career/recommendations").recommend(req.userId, { resumeId: resume._id, limit: parseInt(limit) });
+      return res.json({ recommendations: r.recommendations, total: r.recommendations.length, hasResume: true, engine: "skill-evidence-1" });
+    }
     const recs = await getHybridRecommendations(resume._id.toString(), req.userId, { limit: parseInt(limit) });
     res.json({
       recommendations: recs,
@@ -1346,10 +1361,14 @@ router.get('/feed', authMiddleware, async (req, res) => {
       });
     }
 
-    // With resume: use hybrid engine
+    // With resume: use hybrid engine (students with FLAG_CAREER_MATCHING: every open job in skill-evidence order,
+    // highest estimate first, nothing hidden; the same filters and paging below)
     const pageNum = parseInt(page);
     const pageSize = parseInt(limit);
-    const allRecs = await getHybridRecommendations(resume._id.toString(), req.userId, {
+    const pilotFeed = await require("../services/career/recommendations").isPilotStudent(req.userId);
+    const allRecs = pilotFeed
+      ? (await require("../services/career/recommendations").recommend(req.userId, { resumeId: resume._id, limit: 0, all: true })).recommendations
+      : await getHybridRecommendations(resume._id.toString(), req.userId, {
       limit: pageNum * pageSize + 20
     });
 
@@ -1377,8 +1396,8 @@ router.get('/feed', authMiddleware, async (req, res) => {
       page: pageNum,
       totalPages: Math.ceil(filtered.length / pageSize),
       hasResume: true,
-      engine: resume.careerProfile?.isEnriched ? 'hybrid_vector' : 'hybrid_skill',
-      isEnriched: !!resume.careerProfile?.isEnriched
+      engine: pilotFeed ? "skill-evidence-1" : resume.careerProfile?.isEnriched ? 'hybrid_vector' : 'hybrid_skill',
+      isEnriched: pilotFeed ? false : !!resume.careerProfile?.isEnriched
     });
   } catch (err) {
     console.error('[Feed] error:', err);

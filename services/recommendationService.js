@@ -1,4 +1,9 @@
 // services/recommendationService.js
+// TODO(after the career matching pilot): remove this engine. It reads the whole resume through embeddings and
+// filters by location, which docs/MATCHING_FAIRNESS.md rules out; students with FLAG_CAREER_MATCHING already get the
+// skill-evidence matcher (services/career/recommendations.js). Callers left for students outside the pilot:
+//   routes/jobs.routes.js  GET /api/jobs/recommendations, /recommendations/:resumeId, /recommendations/top, /feed
+//                          (getHybridRecommendations) and /similar/:jobId (getSimilarJobs)
 // ============================================================
 // Redesigned Production-Grade Hybrid Recommendation Engine
 // ============================================================

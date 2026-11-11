@@ -271,6 +271,8 @@ const check = (name, ok, detail = "") => { results.push(!!ok); if (!ok || proces
     ["PATCH", `${L}/admin/programs/${fx.P}`, { terms: "matrix", version: 1, reason: "permission matrix" }, ["A"], "admin only (409 here: stale version)"],
     ["POST", `${L}/admin/programs/${fx.P}/restart`, { version: 1, reason: "permission matrix" }, ["A"], "admin only (409 here: not ended)"],
     // the unified admin action log (read-only)
+    // job recommendations from the skill-evidence matcher (students in the matching pilot)
+    ["GET", "/api/career/matching/recommended", null, ANY_STUDENT, "students only"],
     ["GET", "/api/admin/actions", null, ["A"], "admin only"],
     ["GET", "/api/admin/actions/facets", null, ["A"], "admin only"],
     // admin feature access per account (switching off what is already off: no change to the other rows' flags)

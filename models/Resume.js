@@ -625,6 +625,9 @@ resumeSchema.methods.getTargetIndustries = function () {
 };
 
 // Static method for recommendations
+// TODO(after the career matching pilot): remove. Matches on location and free-text regexes; students with
+// FLAG_CAREER_MATCHING already get services/career/recommendations.js. Caller left (students outside the pilot):
+//   routes/resume.routes.js  GET /api/resume/:id/recommendations
 resumeSchema.statics.getRecommendedJobs = async function (resumeId) {
   try {
     const resume = await this.findById(resumeId);
