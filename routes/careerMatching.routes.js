@@ -7,6 +7,8 @@
 //   GET /jobs/:jobId          every application on the employer's job with its estimate and criteria counts.
 //                             ?sort=newest (default) | relevance (estimate high to low, "insufficient" last, ties
 //                             newest first). Applications outside the pilot are listed too, with match: null.
+//                             Each match has a quality band (strong >= 70, medium 40-69, weak < 40, insufficient), and
+//                             summary counts them: an estimate from the resumes, not a judgment of the candidates.
 //   GET /recommended              ?limit= (max 30): open jobs that match the signed-in student's resume (score >= 60, no
 //                                 mandatory criterion "not met"), with the matched skills and where the resume shows
 //                                 them. Students with FLAG_CAREER_MATCHING only (404 MATCHING_OFF otherwise).
@@ -128,13 +130,14 @@ router.get("/jobs/:jobId", auth, signedIn, handle(async (req, res) => {
   const rows = [];
   for (const app of apps) {
     const s = pilot(job, app) ? await matchFor(app, job) : null;
-    rows.push({ applicationId: String(app._id), appliedAt: app.appliedAt, match: s ? { score: s.relevance.score, insufficient: s.relevance.insufficient, label: s.relevance.label, mandatorySummary: s.mandatorySummary, computedAt: s.computedAt } : null });
+    rows.push({ applicationId: String(app._id), appliedAt: app.appliedAt, match: s ? { score: s.relevance.score, quality: matching.qualityOf(s.relevance.score), insufficient: s.relevance.insufficient, label: s.relevance.label, mandatorySummary: s.mandatorySummary, computedAt: s.computedAt } : null });
   }
   if (sort === "relevance") {
     const key = (r) => (r.match && r.match.score != null ? r.match.score : -1);
     rows.sort((a, b) => key(b) - key(a) || new Date(b.appliedAt) - new Date(a.appliedAt));
   }
-  ok(req, res, { sort, modelVersion: matching.MODEL_VERSION, formula: matching.FORMULA, applications: rows });
+  const summary = { ...matching.qualitySummary(rows), note: "An estimate from each resume's skill evidence, not a judgment of the candidates. Nobody is ranked out or hidden." };
+  ok(req, res, { sort, modelVersion: matching.MODEL_VERSION, formula: matching.FORMULA, summary, applications: rows });
 }));
 
 module.exports = router;

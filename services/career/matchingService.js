@@ -211,8 +211,24 @@ function match(job, profile, opts = {}) {
   };
 }
 
+// ---------- match quality per job (a summary for the employer, never a decision) ----------
+// strong: the resume shows evidence for at least 70% of the job's listed skills; medium: 40-69%; weak: under 40%;
+// insufficient: no estimate (the job lists no skills or the resume is too thin). Mandatory criteria are shown
+// separately and don't change the band, like the estimate itself.
+const QUALITY = { strong: 70, medium: 40 };
+const qualityOf = (score) => (score == null ? "insufficient" : score >= QUALITY.strong ? "strong" : score >= QUALITY.medium ? "medium" : "weak");
+/** rows: [{ match: null | { score } }] → { strong, medium, weak, insufficient, outsidePilot, total, thresholds } */
+function qualitySummary(rows) {
+  const out = { strong: 0, medium: 0, weak: 0, insufficient: 0, outsidePilot: 0, total: rows.length, thresholds: { ...QUALITY } };
+  for (const r of rows) {
+    if (!r.match) out.outsidePilot += 1;
+    else out[qualityOf(r.match.score)] += 1;
+  }
+  return out;
+}
+
 const sha = (v) => crypto.createHash("sha256").update(canonical(v)).digest("hex");
 const jobFingerprint = (job) => sha({ v: MODEL_VERSION, title: clean(job.title), skills: (job.skills || []).map(clean), requirements: (job.requirements || []).map(clean), minExperience: Number(job.minExperience) || 0, education: job.education || "" });
 const profileFingerprint = (profile, statedYears = null) => sha({ v: MODEL_VERSION, profile, statedYears });
 
-module.exports = { MODEL_VERSION, FORMULA, profileOf, match, mandatoryCriteria, experienceMonths, degreeLevel, canon, termRe, jobFingerprint, profileFingerprint };
+module.exports = { MODEL_VERSION, FORMULA, profileOf, match, mandatoryCriteria, experienceMonths, degreeLevel, canon, termRe, jobFingerprint, profileFingerprint, QUALITY, qualityOf, qualitySummary };
