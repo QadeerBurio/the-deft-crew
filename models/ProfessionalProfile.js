@@ -25,6 +25,9 @@ const professionalProfileSchema = new mongoose.Schema({
   lastCompletedStep: { type: Number, default: 0, min: 0, max: 5 },
   isComplete: { type: Boolean, default: false },
   completedAt: { type: Date },
+  // FLAG_CAREER_MATCHING: let employers find me by my skills and invite me to apply (services/career/invites.js).
+  // Off by default; employers only ever see an anonymous label and skills until the student applies.
+  discoverable: { type: Boolean, default: false },
 }, { timestamps: true });
 
 professionalProfileSchema.index( { unique: true });

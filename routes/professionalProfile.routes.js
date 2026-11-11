@@ -42,7 +42,7 @@ router.post('/', auth, async (req, res) => {
     const {
       photoUrl, fullName, headline, university, fieldOfStudy, bio,
       skills, portfolioLinks, interestedCategories, servicesProvided,
-      startingRate, rateCurrency, workMode, availabilityPerWeek, lastCompletedStep,
+      startingRate, rateCurrency, workMode, availabilityPerWeek, lastCompletedStep, discoverable,
     } = req.body;
 
     const update = {
@@ -61,6 +61,8 @@ router.post('/', auth, async (req, res) => {
       ...(workMode !== undefined && { workMode }),
       ...(availabilityPerWeek !== undefined && { availabilityPerWeek }),
       ...(lastCompletedStep !== undefined && { lastCompletedStep }),
+      // "let employers invite me to apply" (career matching pilot): a real true / false only
+      ...(typeof discoverable === "boolean" && { discoverable }),
     };
 
     const profile = await ProfessionalProfile.findOneAndUpdate(
