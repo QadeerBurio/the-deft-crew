@@ -116,6 +116,8 @@ router.post("/add", authMiddleware, isAdminOrEmployee, async (req, res) => {
 
         // 🧠 Fire-and-forget: generate embedding for semantic search
         setImmediate(() => generateJobEmbedding(newJob._id.toString()));
+        // FLAG_CAREER_MATCHING: tell pilot students whose skills strongly match (services/career/jobAlerts.js; never throws)
+        if (newJob.active) require("../services/career/jobAlerts").onJobLive(newJob.toObject());
         
         res.status(201).json({ message: "Job posted successfully", data: newJob });
     } catch (err) {
@@ -246,6 +248,8 @@ router.patch("/toggle/:id", authMiddleware, isAdminOrEmployee, async (req, res) 
 
         job.active = !job.active;
         await job.save();
+        // switched on: pilot students whose skills strongly match hear about it (never twice for the same job)
+        if (job.active) require("../services/career/jobAlerts").onJobLive(job.toObject());
         
         res.json({ message: `Job ${job.active ? 'activated' : 'deactivated'}`, active: job.active });
     } catch (err) {
