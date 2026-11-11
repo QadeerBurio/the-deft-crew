@@ -41,7 +41,8 @@ const signedIn = async (req, res, next) => {
   next();
 };
 const flagged = (req, res, next) => (ratings.flagOn(req.userId, req.ratingRole) ? next() : fail(req, res, 404, "RATINGS_OFF", "Ratings aren't available for your account yet"));
-const pilotConfigured = () => !["", "off", "false", "0", "no"].includes(String(process.env.FLAG_CAREER_RATINGS || "").trim().toLowerCase());
+// set up = the Railway value, or any admin access (config/featureFlags.js pilotConfigured)
+const pilotConfigured = () => require("../config/featureFlags").pilotConfigured("careerRatings");
 const admin = (req, res, next) => {
   if (req.ratingRole !== "admin") return fail(req, res, 403, "FORBIDDEN", "Not allowed for your account");
   if (!pilotConfigured()) return fail(req, res, 404, "RATINGS_OFF", "Ratings aren't set up");

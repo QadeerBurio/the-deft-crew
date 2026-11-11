@@ -45,7 +45,8 @@ const POLICY_TEXT =
 const isId = (v) => mongoose.Types.ObjectId.isValid(String(v || ""));
 const same = (a, b) => String(a) === String(b);
 const flagOn = (userId) => isEnabled("employerFirstHireFree", { id: String(userId) });
-const pilotConfigured = () => !["", "off", "false", "0", "no"].includes(String(process.env.FLAG_EMPLOYER_FIRST_HIRE_FREE || "").trim().toLowerCase());
+// set up = the Railway value, or any admin access (config/featureFlags.js pilotConfigured)
+const pilotConfigured = () => require("../../config/featureFlags").pilotConfigured("employerFirstHireFree");
 
 // ---------- company details ----------
 const FREE_MAIL = /^(gmail|googlemail|yahoo|ymail|rocketmail|outlook|hotmail|live|msn|windowslive|icloud|me|mac|aol|proton|protonmail|pm|gmx|yandex|mail|zoho|zohomail|rediffmail|inbox|tutanota|tuta|fastmail|hushmail|qq|163|126|sina|naver|daum|hanmail|web|t-online|orange|free|laposte|libero|virgilio|seznam|wp|o2|interia|onet|rambler|ukr|bigpond|optusnet|shaw|rogers|sympatico|comcast|verizon|att|sbcglobal|bellsouth|cox|charter|earthlink|juno|netzero|lycos|excite|aim|email|usa|post|consultant|engineer|myself|dr|cyber)\./i;

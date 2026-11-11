@@ -194,6 +194,20 @@ function railwayCoversRole(flag, role) {
   return parseRules(raw).some((r) => r.type === "on" || (r.type === "roles" && r.items.includes(role)));
 }
 
+/**
+ * Is a pilot "set up" (its admin pages and admin routes shown)? The Railway value is set and isn't the kill switch,
+ * OR any account has admin access to the flag. Before admin access existed this read the variable alone, so removing
+ * FLAG_SURPLUS_BOXES hid the admin pages even with brands and students turned on from the portal. With no admin
+ * access, the answer is exactly the old one (any value other than empty / off / false / 0 / no).
+ */
+function pilotConfigured(flag) {
+  if (!FLAGS[flag]) return false;
+  if (isKilled(flag)) return false;
+  const raw = rawValue(flag);
+  if (raw != null && unquote(raw) && !OFF.has(unquote(raw).toLowerCase())) return true;
+  return !!FLAGS[flag].grant && (adminAccess.get(flag)?.size || 0) > 0;
+}
+
 /** The Railway ids listed for a flag (for counting only; never logged) */
 function railwayIds(flag) {
   const raw = rawValue(flag);
@@ -263,5 +277,5 @@ function describeJobs() {
 
 module.exports = {
   FLAGS, JOBS, isEnabled, clientFlags, publicFlags, jobEnabled, describeJobs, describeFlags, parseRules, isStaging, envName,
-  flagState, isKilled, railwayIds, railwayCoversRole, setAdminAccess, applyAdminAccess, adminAccessCounts, describeAdminAccess,
+  flagState, isKilled, railwayIds, railwayCoversRole, pilotConfigured, setAdminAccess, applyAdminAccess, adminAccessCounts, describeAdminAccess,
 };

@@ -44,10 +44,14 @@ const { uploadOffer, deleteFromCloudinary } = require("../config/cloudinary");
 const cases = require("../services/surplus/cases");
 const { SurplusError } = inventory;
 
-// the pilot is configured but the pickup-code secret isn't: say so at startup (holds and orders are refused)
-if (!["", "off", "false", "0", "no"].includes(String(process.env.FLAG_SURPLUS_BOXES || "").trim().toLowerCase()) && !require("../services/surplus/pickupCode").configured()) {
-  require("../services/surplus/pickupCode").logNotConfigured("startup");
-}
+// the pilot is configured but the pickup-code secret isn't: say so at startup (holds and orders are refused).
+// Checked here (the Railway value) and again once admin access has loaded (server.js), logged at most once a minute.
+const warnIfNoPickupSecret = (where = "startup") => {
+  if (require("../config/featureFlags").pilotConfigured("surplusBoxes") && !require("../services/surplus/pickupCode").configured()) {
+    require("../services/surplus/pickupCode").logNotConfigured(where);
+  }
+};
+warnIfNoPickupSecret();
 
 const router = express.Router();
 const isId = (v) => mongoose.Types.ObjectId.isValid(String(v || ""));
@@ -69,7 +73,8 @@ const handle = (fn) => async (req, res) => {
 };
 
 // signed in, the flag on for this user, the role from the database (never from the token alone)
-const pilotConfigured = () => !["", "off", "false", "0", "no"].includes(String(process.env.FLAG_SURPLUS_BOXES || "").trim().toLowerCase());
+// set up = the Railway value, or any admin access (config/featureFlags.js pilotConfigured)
+const pilotConfigured = () => require("../config/featureFlags").pilotConfigured("surplusBoxes");
 const gate = (role) => async (req, res, next) => {
   if (req.isGuest || !isId(req.userId)) return fail(req, res, 401, "SIGN_IN", "Sign in first");
   const u = await User.findById(req.userId).select("role brandApprovalStatus name").lean();
@@ -578,3 +583,4 @@ router.post("/admin/brands/:brandId/block", ...admin, handle(async (req, res) =>
 }));
 
 module.exports = router;
+module.exports.warnIfNoPickupSecret = warnIfNoPickupSecret;

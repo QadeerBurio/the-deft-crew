@@ -76,7 +76,9 @@ const featureAccess = require("./services/featureAccess");
 featureAccess.expectLoad();
 
 connectDB().then(() => {
-  featureAccess.start();
+  // after admin access has loaded: a Surprise Box pilot set up only from the admin portal still gets the
+  // "pickup-code secret missing" warning
+  featureAccess.start().then(() => require("./routes/surplus.routes").warnIfNoPickupSecret("after admin access loaded")).catch(() => {});
   console.log(describeJobs());
 
   // Automated event ingestion (hourly, plus a pass 10s after start)
