@@ -32,4 +32,14 @@ const professionalProfileSchema = new mongoose.Schema({
 
 professionalProfileSchema.index( { unique: true });
 
+// A profile with nothing Skillshare uses: never completed, no onboarding step, no name, headline, bio, photo,
+// university, field, skills, links, categories, services or rate. Saving only "let employers invite me to apply"
+// (discoverable) leaves exactly this; it reads as no Skillshare profile everywhere (GET /me, listings, chat).
+const has = (v) => (Array.isArray(v) ? v.some((x) => String(x || "").trim()) : !!String(v || "").trim());
+professionalProfileSchema.statics.isBlank = function (p) {
+  if (!p) return true;
+  if (p.isComplete || (p.lastCompletedStep || 0) > 0 || (p.startingRate || 0) > 0) return false;
+  return !["fullName", "headline", "bio", "photoUrl", "university", "fieldOfStudy", "skills", "portfolioLinks", "interestedCategories", "servicesProvided"].some((k) => has(p[k]));
+};
+
 module.exports = mongoose.model('ProfessionalProfile', professionalProfileSchema);
