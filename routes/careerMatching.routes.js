@@ -9,6 +9,9 @@
 //                             newest first). Applications outside the pilot are listed too, with match: null.
 //                             Each match has a quality band (strong >= 70, medium 40-69, weak < 40, insufficient), and
 //                             summary counts them: an estimate from the resumes, not a judgment of the candidates.
+//   GET /recommended              ?limit= (max 30): open jobs that match the signed-in student's resume (score >= 60, no
+//                                 mandatory criterion "not met"), with the matched skills and where the resume shows
+//                                 them. Students with FLAG_CAREER_MATCHING only (404 MATCHING_OFF otherwise).
 // A match is computed once per (job version, resume version) and stored (CareerMatchSnapshot): a change to the
 // job or to the candidate's resume gives a new fingerprint and a fresh computation; nothing else does.
 const express = require("express");
@@ -90,6 +93,19 @@ const view = (s) => ({
   evidenceSummary: s.evidenceSummary,
   note: "Decision support only: an estimate from the resume, not a hiring prediction. Nothing is rejected or hidden automatically.",
 });
+
+router.get("/recommended", auth, signedIn, handle(async (req, res) => {
+  const recs = require("../services/career/recommendations");
+  if (req.matchRole !== "student") return fail(req, res, 404, "NOT_FOUND", "Recommendations are for students");
+  if (!recs.inPilot(req.userId)) return fail(req, res, 404, "MATCHING_OFF", "Recommendations aren't available for your account yet");
+  const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 10, 1), 30);
+  const r = await recs.recommend(req.userId, { limit });
+  ok(req, res, {
+    modelVersion: matching.MODEL_VERSION, formula: matching.FORMULA, minScore: recs.DEFAULT_MIN_SCORE, hasResume: r.hasResume,
+    note: "Jobs whose listed skills your resume shows evidence for. An estimate from your resume, not a promise of an interview.",
+    recommendations: r.recommendations,
+  });
+}));
 
 router.get("/applications/:id", auth, signedIn, handle(async (req, res) => {
   if (!isId(req.params.id)) return fail(req, res, 404, "NOT_FOUND", "Application not found");

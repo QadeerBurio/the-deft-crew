@@ -939,7 +939,11 @@ router.get('/:id/recommendations', auth, async (req, res) => {
       });
     }
 
-    const recommendations = await Resume.getRecommendedJobs(req.params.id);
+    // students with FLAG_CAREER_MATCHING: the skill-evidence matcher (services/career/recommendations.js), same reply
+    const recsSvc = require("../services/career/recommendations");
+    const recommendations = (await recsSvc.isPilotStudent(req.user._id))
+      ? (await recsSvc.recommend(req.user._id, { resumeId: req.params.id, limit: 20 })).recommendations
+      : await Resume.getRecommendedJobs(req.params.id);
 
     res.json({
       success: true,
