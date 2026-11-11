@@ -573,6 +573,46 @@ const inH = (h) => new Date(Date.now() + h * H).toISOString();
   r = await call("GET", `${B}/listings?scope=city`, { tok: T.S6 });
   check("scope=city still needs the flag (S6 not in the pilot → 404)", r.status === 404);
 
+  // ---------- the brand cancels a whole box ----------
+  console.log("── the brand cancels a box: closed, open orders cancelled with the reason, handed-over ones stay");
+  for (const k of ["X1", "X2", "X3"]) ids[k] = oid();
+  fake.seed(coll("User"), ["X1", "X2", "X3"].map((k) => user(ids[k], "student", `Student ${k}`)));
+  process.env.FLAG_SURPLUS_BOXES += `,${ids.X1},${ids.X2},${ids.X3}`;
+  for (const k of ["X1", "X2", "X3"]) T[k] = token(k, "student");
+  r = await call("POST", `${B}/merchant/listings`, { tok: T.B, body: listingBody({ branchId: String(ids.B1), title: "Beta cancel box", quantityTotal: 6 }) });
+  const CB = r.json?.data?.id;
+  check("setup: Beta lists a box", r.status === 201 && !!CB, r.text.slice(0, 120));
+  const cancelOrderFor = async (k) => {
+    const h = (await call("POST", `${B}/holds`, { tok: T[k], body: { listingId: CB, qty: 1, idempotencyKey: key() } })).json?.data?.hold;
+    return (await call("POST", `${B}/orders`, { tok: T[k], body: { holdId: h?.id, idempotencyKey: key(), acceptedTerms: true } })).json?.data;
+  };
+  const ox1 = await cancelOrderFor("X1"), ox2 = await cancelOrderFor("X2"), ox3 = await cancelOrderFor("X3");
+  check("setup: three students ordered", !!(ox1?.id && ox2?.id && ox3?.id), JSON.stringify([ox1?.id, ox2?.id, ox3?.id]));
+  // X2's order confirmed by the brand; X3's handed over (verified at the counter: stays)
+  r = await call("POST", `${B}/merchant/orders/${ox2.id}/transition`, { tok: T.B, body: { to: "CONFIRMED", version: doc("SurplusOrder", ox2.id).version } });
+  rows("SurplusOrder", (o) => same(o._id, ox3.id))[0].state = "PICKUP_VERIFIED";
+  const cancelBoxVersion = () => doc("SurplusListing", CB).version;
+  r = await call("POST", `${B}/merchant/listings/${CB}/cancel`, { tok: T.A, body: { reason: "kitchen closed early", version: cancelBoxVersion() } });
+  check("another brand can't cancel it → 404, nothing changed", r.status === 404 && doc("SurplusListing", CB).status === "published");
+  r = await call("POST", `${B}/merchant/listings/${CB}/cancel`, { tok: T.X1, body: { reason: "kitchen closed early", version: cancelBoxVersion() } });
+  check("a student can't → 403", r.status === 403);
+  r = await call("POST", `${B}/merchant/listings/${CB}/cancel`, { tok: T.B, body: { reason: "oops", version: cancelBoxVersion() } });
+  check("a reason under 5 characters → 400 REASON_REQUIRED", r.status === 400 && r.json.error.code === "REASON_REQUIRED");
+  r = await call("POST", `${B}/merchant/listings/${CB}/cancel`, { tok: T.B, body: { reason: "kitchen closed early", version: cancelBoxVersion() - 1 } });
+  check("a stale version → 409 STALE_VERSION", r.status === 409 && r.json.error.code === "STALE_VERSION");
+  const cancelPushesBefore = rows("SurplusNotificationOutbox", (x) => x.eventType === "MERCHANT_CANCELLED").length;
+  r = await call("POST", `${B}/merchant/listings/${CB}/cancel`, { tok: T.B, body: { reason: "kitchen closed early", version: cancelBoxVersion() } });
+  const cbd = r.json?.data || {};
+  check("cancel → 200: the box closed; the placed and the confirmed order cancelled; the handed-over one stays", r.status === 200 && doc("SurplusListing", CB).status === "closed" && cbd.cancelled?.length === 2 && cbd.stayed?.length === 1 && cbd.failed?.length === 0, JSON.stringify(cbd));
+  check("…each cancelled order has the reason the student sees", [ox1, ox2].every((o) => { const x = doc("SurplusOrder", o.id); return x.state === "MERCHANT_CANCELLED" && x.cancelReason === "kitchen closed early"; }));
+  check("…the handed-over order is untouched", doc("SurplusOrder", ox3.id).state === "PICKUP_VERIFIED");
+  const cancelOutboxRows = rows("SurplusNotificationOutbox", (x) => x.eventType === "MERCHANT_CANCELLED");
+  check("…each of the two students is told once (push + in-app)", cancelOutboxRows.length - cancelPushesBefore === 4 && [ox1, ox2].every((o) => cancelOutboxRows.filter((x) => same(x.order, o.id) && x.channel === "push").length === 1), cancelOutboxRows.length - cancelPushesBefore);
+  r = await call("POST", `${B}/merchant/listings/${CB}/cancel`, { tok: T.B, body: { reason: "kitchen closed early" } });
+  check("cancelling again (already closed): nothing new, no second message", r.status === 200 && r.json.data.cancelled.length === 0 && rows("SurplusNotificationOutbox", (x) => x.eventType === "MERCHANT_CANCELLED").length === cancelOutboxRows.length);
+  r = await call("POST", `${B}/holds`, { tok: T.X1, body: { listingId: CB, qty: 1, idempotencyKey: key() } });
+  check("the closed box takes no new holds", r.status === 409 || r.status === 404, r.status);
+
   // ---------- leak scan ----------
   const leaky = responses.filter((x) => x.leaks.length);
   check(`leak scan: ${responses.length} responses, no contact details, code hashes or pickup codes outside the student's own order`, leaky.length === 0, leaky.map((x) => `${x.url} ${x.leaks.join(",")}`).slice(0, 5).join(" | "));

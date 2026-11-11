@@ -348,6 +348,7 @@ const check = (name, ok, detail = "") => { results.push(!!ok); if (!ok || proces
     ["GET", `${SP}/merchant/listings`, null, ANY_BRAND, "own listings"],
     ["POST", `${SP}/merchant/listings`, { branchId: String(ids.BR), title: "x", allergenNotes: "none known", quantityTotal: 1, listPrice: 10, price: 5, pickupStart: inHours(5), pickupEnd: inHours(6) }, ["B"], "own branch"],
     ["PATCH", `${SP}/merchant/listings/${fx.L2}`, { version: 999 }, ["B"], "own listing"],
+    ["POST", `${SP}/merchant/listings/${fx.L2}/cancel`, { reason: "permission matrix", version: 999 }, ["B"], "own listing only (409 here: stale version, nothing cancelled)"],
     ["GET", `${SP}/merchant/orders`, null, ANY_BRAND, "own orders"],
     ["POST", `${SP}/merchant/orders/${fx.SO1}/transition`, { to: "CONFIRMED", version: 999 }, ["B"], "own order"],
     ["POST", `${SP}/merchant/orders/${fx.SO1}/verify-pickup`, { code: "AAAAAA", branchId: String(ids.BR) }, ["B"], "own order, own branch", { allow404: true }],
