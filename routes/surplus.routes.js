@@ -46,6 +46,9 @@ const adminLog = require("../services/adminActionLog");
 const nodePath = require("path");
 const { uploadOffer, deleteFromCloudinary } = require("../config/cloudinary");
 const cases = require("../services/surplus/cases");
+const announcements = require("../services/surplus/announcements");
+// "a new box near you": only on a box's first publish (publishedAt from empty to set); never fails the request
+const announceIfFirstPublish = (before, after) => { if (!before?.publishedAt && after?.publishedAt && after.status === "published") announcements.onPublished(after); };
 const { SurplusError } = inventory;
 
 // the pilot is configured but the pickup-code secret isn't: say so at startup (holds and orders are refused).
@@ -147,11 +150,8 @@ function merchantOrderView(o, studentName) {
 const namesOf = async (ids) => new Map((await User.find({ _id: { $in: [...new Set(ids.map(String))] } }).select("name").lean()).map((u) => [String(u._id), u.name]));
 
 // ---------- student ----------
-// a city as people type it: "Karachi", " karachi ", "Karachi, Pakistan" and "Karāchi" are the same city
-const cityName = (s) => String(s || "").split(",")[0].normalize("NFKD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ").trim().slice(0, 60);
-const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-// matches a listing's city written any of those ways (the branch's city is free text too)
-const cityFilter = (name) => ({ $regex: `^\\s*${escapeRe(name).replace(/ /g, "\\s+")}\\s*(,.*)?$`, $options: "i" });
+// a city as people type it ("Karachi", " karachi ", "Karachi, Pakistan" are the same): services/surplus/city.js
+const { cityName, cityFilter } = require("../services/surplus/city");
 router.get("/listings", ...student, handle(async (req, res) => {
   const now = new Date();
   const lat = Number(req.query.lat), lng = Number(req.query.lng);
@@ -282,6 +282,7 @@ router.post("/merchant/listings", ...brand, handle(async (req, res) => {
     status: publish ? "published" : "draft", publishedAt: publish ? new Date() : null,
     location: { city: branch.city || "", address: branch.location || "", branchName: branch.name || "", geo: branch.geo?.coordinates?.length === 2 ? { type: "Point", coordinates: branch.geo.coordinates } : undefined },
   });
+  if (publish) announcements.onPublished(listing.toObject());
   ok(req, res, merchantListingView(listing.toObject()), 201);
 }));
 
@@ -353,7 +354,9 @@ router.post("/merchant/listings/:id/cancel", ...brand, handle(async (req, res) =
 router.patch("/merchant/listings/:id", ...brand, handle(async (req, res) => {
   const l = isId(req.params.id) ? await SurplusListing.findOne({ _id: req.params.id, brand: req.userId }).lean() : null;
   if (!l) return fail(req, res, 404, "NOT_FOUND", "Listing not found");
-  ok(req, res, merchantListingView(await patchListing(l, req.body || {})));
+  const updated = await patchListing(l, req.body || {});
+  announceIfFirstPublish(l, updated);
+  ok(req, res, merchantListingView(updated));
 }));
 
 const dayBounds = (now = new Date()) => {
@@ -576,6 +579,7 @@ router.patch("/admin/listings/:id", ...admin, handle(async (req, res) => {
     await adminLog.record({ adminId: req.userId, action, targetType: "SurplusListing", targetId: String(l._id), before: adminLog.pick(listingSummary(l), [...changed, "version"]), after: adminLog.pick(listingSummary(updated), [...changed, "version"]), reason, requestId: req.id }, { session });
     return updated;
   });
+  announceIfFirstPublish(l, result);
   const [brands, counts] = await Promise.all([brandsById([result.brand]), orderCounts([result._id])]);
   ok(req, res, adminListingView(result, brands, counts));
 }));

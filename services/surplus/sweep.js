@@ -6,7 +6,7 @@
 //   3. orders not collected by the end of the window become NO_SHOW (recorded, never a ban)
 //   4. orders verified at handover but never marked paid complete 2 hours after the window
 //   5. pickup reminders 30 minutes before the window opens are queued
-//   6. the notification outbox is drained
+//   6. the notification outbox is drained (and "a new box near you" announcements that are due)
 // Each step is a conditional update, so two servers (or two ticks) never do the same thing twice.
 const SurplusListing = require("../../models/SurplusListing");
 const SurplusOrder = require("../../models/SurplusOrder");
@@ -73,6 +73,8 @@ async function tick(now = new Date()) {
       ["noShows", () => markNoShows(now)],
       ["autoCompleted", () => completeVerified(now)],
       ["remindersQueued", () => queueReminders(now)],
+      // "a new box near you" pushes waiting for quiet hours to end, or retried after an error
+      ["announcementsDelivered", async () => (await require("./announcements").drain({ limit: 500, now })).filter((x) => x.status === "sent").length],
     ];
     for (const [name, fn] of steps) {
       try { out[name] = await fn(); } catch (err) { console.error(`[surplus sweep] ${name} failed: ${err.message}`); }
