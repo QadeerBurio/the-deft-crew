@@ -54,6 +54,7 @@ const Match = require("../models/Match");
 const Resume = require("../models/Resume");
 const SkillGapCache = require("../models/SkillGapCache");
 const ProfessionalProfile = require("../models/ProfessionalProfile");
+const CareerInvite = require("../models/CareerInvite");
 const JobApplication = require("../models/JobApplication");
 const JobInteraction = require("../models/JobInteraction");
 const Application = require("../models/Application");
@@ -327,6 +328,7 @@ async function deleteInDatabase({ id, role, deletionId, ghost, session }) {
   await del(SkillGapCache, { resumeId: { $in: resumes.map((x) => x._id) } });
   await del(Resume, { user: id });
   await del(ProfessionalProfile, { userId: id });
+  await del(CareerInvite, { $or: [{ student: id }, { employer: id }] }); // invites to apply, either side
   await del(JobApplication, { userId: id });
   // hiring timeline and Resume Studio (services/career/retentionService.js): timeline rows keep their types and
   // times with the placeholder id (employers' funnel counts stay); outcomes, notifications, drafts and versions go

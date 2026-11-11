@@ -130,6 +130,7 @@ app.use("/api/jobs", reqS("./routes/jobs.routes"));
 app.use("/api/loyalty", reqS("./routes/loyalty.routes"));
 app.use("/api/career/resume", reqS("./routes/careerResume.routes"));
 app.use("/api/career/matching", reqS("./routes/careerMatching.routes"));
+app.use("/api/career/invites", reqS("./routes/careerInvites.routes"));
 app.use("/api/career/ratings", reqS("./routes/careerRatings.routes"));
 app.use("/api/career", reqS("./routes/careerTrial.routes"));
 app.use("/api/career", reqS("./routes/career.routes"));
@@ -312,6 +313,11 @@ const check = (name, ok, detail = "") => { results.push(!!ok); if (!ok || proces
     // candidate matching (decision support; the employer's side only)
     ["GET", `/api/career/matching/applications/${fx.A1}`, null, ["E", "A"], "the job's employer; an admin (audited)"],
     ["GET", `/api/career/matching/jobs/${ids.J1}`, null, ["E"], "the job's employer"],
+    // suggested candidates and invites to apply (anonymous to the employer; the student decides)
+    ["GET", `/api/career/matching/jobs/${ids.J1}/suggested`, null, ["E"], "the job's employer"],
+    ["POST", `/api/career/matching/jobs/${ids.J1}/suggested/0123456789abcdef0123456789abcdef/invite`, {}, ["E"], "the job's employer (404 here: not a suggested candidate)", { allow404: true }],
+    ["GET", "/api/career/invites/me", null, ANY_STUDENT, "own invites"],
+    ["POST", `/api/career/invites/${oid()}/respond`, { response: "declined" }, ANY_STUDENT, "own invites only (404 here: no such invite)", { allow404: true }],
     // mutual ratings
     ["GET", `/api/career/ratings/applications/${fx.A1}`, null, ["S", "E"], "the candidate and the job's employer (not an admin)"],
     ["POST", "/api/career/ratings", { applicationId: String(fx.A1), kind: "interview", answers: { communication: 4, respect: 4, clarity: 4 } }, ["S", "E"], "the two sides only (409 here: no completed interview yet)"],

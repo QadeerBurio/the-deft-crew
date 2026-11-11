@@ -12,6 +12,11 @@
 //   GET /recommended              ?limit= (max 30): open jobs that match the signed-in student's resume (score >= 60, no
 //                                 mandatory criterion "not met"), with the matched skills and where the resume shows
 //                                 them. Students with FLAG_CAREER_MATCHING only (404 MATCHING_OFF otherwise).
+//   GET /jobs/:jobId/suggested    students who opted in (discoverable), haven't applied and match 70%+ of the job's
+//                                 skills: an anonymous label, the estimate, matched skills and the resume section only
+//                                 (never a name, university, city, contact or id). The job's employer, with
+//                                 FLAG_CAREER_MATCHING and FLAG_CAREER_TIMELINE.
+//   POST /jobs/:jobId/suggested/:token/invite   invite one to apply (max 20 per job a day); the student decides
 // A match is computed once per (job version, resume version) and stored (CareerMatchSnapshot): a change to the
 // job or to the candidate's resume gives a new fingerprint and a fresh computation; nothing else does.
 const express = require("express");
@@ -106,6 +111,17 @@ router.get("/recommended", auth, signedIn, handle(async (req, res) => {
     recommendations: r.recommendations,
   });
 }));
+
+const inviteHandle = (fn) => handle(async (req, res) => {
+  const invites = require("../services/career/invites");
+  if (req.matchRole !== "employee") return fail(req, res, 404, "NOT_FOUND", "Job not found");
+  try { ok(req, res, await fn(invites, req)); } catch (err) {
+    if (err instanceof invites.InviteError) return fail(req, res, err.status, err.code, err.message);
+    throw err;
+  }
+});
+router.get("/jobs/:jobId/suggested", auth, signedIn, inviteHandle((invites, req) => (isId(req.params.jobId) ? invites.suggested(req.params.jobId, req.userId) : Promise.reject(new invites.InviteError(404, "NOT_FOUND", "Job not found")))));
+router.post("/jobs/:jobId/suggested/:token/invite", auth, signedIn, inviteHandle((invites, req) => (isId(req.params.jobId) ? invites.invite(req.params.jobId, req.userId, req.params.token) : Promise.reject(new invites.InviteError(404, "NOT_FOUND", "Job not found")))));
 
 router.get("/applications/:id", auth, signedIn, handle(async (req, res) => {
   if (!isId(req.params.id)) return fail(req, res, 404, "NOT_FOUND", "Application not found");

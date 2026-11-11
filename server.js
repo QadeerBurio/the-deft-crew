@@ -276,6 +276,7 @@ app.use("/api/traveler", require("./routes/traveler.routes"));
 app.use("/api/resume", require("./routes/resume.routes"));
 app.use('/api/career/resume', require('./routes/careerResume.routes')); // AI Resume Studio, before /api/career (FLAG_RESUME_STUDIO_V2)
 app.use('/api/career/matching', require('./routes/careerMatching.routes')); // candidate matching, before /api/career (FLAG_CAREER_MATCHING)
+app.use('/api/career/invites', require('./routes/careerInvites.routes')); // a student's invites to apply, before /api/career (FLAG_CAREER_MATCHING)
 app.use("/api/brand-approval", require("./routes/brandApproval.routes"));
 app.use("/api/promo-codes", require("./routes/promoCode.routes"));
 app.use("/api/shopify-app", require("./routes/shopifyApp.routes"));
