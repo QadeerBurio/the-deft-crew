@@ -13,6 +13,8 @@ const schema = new mongoose.Schema({
   title: { type: String, required: true, trim: true, maxlength: 80 },
   description: { type: String, default: "", trim: true, maxlength: 600 }, // what's typically inside
   contentsMayVary: { type: Boolean, default: true },
+  // optional photo (the existing offer-image upload: images only, 5 MB); none = the box shows as before
+  image: { url: { type: String, default: "" }, publicId: { type: String, default: "" } },
   allergens: { type: [String], default: [] }, // e.g. ["gluten", "dairy", "nuts"]
   allergenNotes: { type: String, default: "", trim: true, maxlength: 400 },
   dietary: { type: [String], default: [] }, // e.g. ["vegetarian", "halal"]

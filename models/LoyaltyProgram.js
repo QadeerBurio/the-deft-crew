@@ -4,6 +4,8 @@
 // applied is capped by maxDiscountPct (set by the brand) and adminMaxDiscountPct (admin override, if set).
 // Every rule change bumps `version` and keeps the previous rules in `history`; ledger rows store the
 // version they were credited under. Visits: services/loyalty.js, from LoyaltyLedger.
+// mode: "tiers" (the discount grows with visits; the default, and what a program without a mode is) or "reward"
+// (every reward.visitsNeeded verified visits earn one reward: % off, PKR off or a free item; models/LoyaltyReward.js).
 const mongoose = require("mongoose");
 
 const tierSchema = new mongoose.Schema(
@@ -20,6 +22,16 @@ const loyaltyProgramSchema = new mongoose.Schema(
   {
     brand: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, unique: true },
     status: { type: String, enum: ["draft", "active", "paused", "ended"], default: "draft", index: true },
+    mode: { type: String, enum: ["tiers", "reward"], default: "tiers" },
+    // reward mode only ("kind", not "type": Mongoose reads "type" as a type declaration)
+    reward: {
+      visitsNeeded: { type: Number, default: null, min: 2, max: 20 },
+      kind: { type: String, enum: ["percent", "amount", "item", null], default: null },
+      value: { type: Number, default: null, min: 0 }, // percent 1-100, or PKR
+      item: { type: String, default: "", trim: true, maxlength: 80 }, // the free item
+      maxPerStudent: { type: Number, default: null, min: 1, max: 100 }, // rewards per student in this program period
+      maxPerMonth: { type: Number, default: null, min: 1, max: 31 }, // rewards per student per Karachi month
+    },
     tiers: { type: [tierSchema], default: [] },
     // empty = every offer / branch of the brand
     eligibleOfferIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "Offer" }],

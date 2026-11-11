@@ -47,7 +47,7 @@ for the server, manual for the device / real service · **N/A** = not in this pi
 | Employer can't access another employer's applicants | `career`: "employer B → 404 for employer A's applicant"; `permissions`: every career row (other employer denied) | auto |
 | Historical hiring evidence survives job archival | `career`: "employer deletes a job (archived)"; "its application's timeline is still there" | auto |
 | Notification retries can't duplicate state transitions | `career`: "the retry delivers it (attempt 2); no timeline event written again"; "… stops after 5 attempts" | auto |
-| No regressions to existing jobs, resumes, portals | All server suites (24) + app suites + `npm run check:portal` (13) green on every merge | auto (+ manual smoke below) |
+| No regressions to existing jobs, resumes, portals | All server suites (27) + app suites (18) + `npm run check:portal` (15) green on every merge | auto (+ manual smoke below) |
 | Career data retention (2 years) and account deletion | `career-retention` (27): dry run writes nothing; "the hiring funnel counts are exactly the same before and after"; public outcomes skipped; logs counts only. `admin-delete-account`: "hiring timeline: S's 5 events kept … with a placeholder instead of S"; "S's Resume Studio drafts, versions, sent snapshots … deleted" | auto; **merged** (dry run until `CAREER_RETENTION_MODE=apply`); the first dry-run log line is **not seen yet** (see "Gaps": production background jobs are off) |
 
 ## Resume Studio (plan 9 + handoff 8 + handoff 11)
@@ -79,13 +79,34 @@ for the server, manual for the device / real service · **N/A** = not in this pi
 | Retention policies; no accidental public URLs | Draft TTL 30 days, used versions 2 years (TTL indexes): `resume-studio/run`: "approved draft: no expiry; open draft: expires in ~30 days"; approved versions over 2 years old that nothing uses are emptied by the retention job (`career-retention`, dry run until apply); PDFs are served only through authorised routes (no public storage URLs) | partial (TTL deletion itself happens in MongoDB: check in staging, below) |
 | PDF rendering can't be abused | `rate-limits`: "the 5th PDF (preview or export, one shared count) → 429 RATE_LIMITED"; "10 simultaneous exports from one student: exactly 4 rendered" (test limit; default 30 per 10 minutes, `RATE_LIMIT_RESUME_PDF_MAX` / `_WINDOW_MIN`) | auto |
 
+## Candidate matching, ratings, loyalty notifications, drag and drop, Urdu PDFs
+| Criterion | Proof | Status |
+|---|---|---|
+| Matching: mandatory criteria shown separately (met / not met / unknown) | `career-matching`: "mandatory criteria shown separately: education met (BS), 'Must know React' met with its evidence …"; "a fresher on a 2-year job: experience 'not met' as a criterion, and the estimate is unchanged by it"; "a bachelor's still in progress: 'unknown', not 'not met'" | auto |
+| Matching: weighted relevance as evidence (matched / missing / unknown with the resume text) | `career-matching`: "evidence lists: matched with the resume text, missing for the rest, and an estimate with its formula"; "an empty resume: every skill unknown, no number ('insufficient information'), never 0%" | auto |
+| Matching: decision support only (no auto-reject, nobody hidden, no probability, default newest) | `career-matching`: "matching never changes an application (no status written, nothing rejected)"; "the job list, default order: newest first, every application listed …"; "?sort=relevance: … still all three (none hidden)"; "no 'probability', 'chance' or 'likely to be hired' anywhere in the replies"; portal `career`: "sort by relevance: newest first by default, matching order for one job, both still listed" | auto |
+| Matching: model version, evidence summary and time logged; recomputed when the skills or the job change | `career-matching`: "…logged as a snapshot: model version, both fingerprints, evidence summary, timestamp"; "the candidate adds TypeScript … → recomputed …"; "the employer edits the job (adds Docker) → recomputed …"; "…changing only their name doesn't recompute" | auto |
+| Matching: never ranks on name, gender, photo, age, university or city | `career-matching`: "name, gender, city, university, age and photo never change the estimate, the evidence or the criteria (10 variants)"; "…they aren't even in what the matcher reads"; a mutation that reads the university name makes it fail | auto |
+| Matching: fairness review (freshers vs experienced, sparse vs full, universities / cities) | `career-matching` cohort (60 skill sets × 16 ways, identical results; equal means per group) and `docs/MATCHING_FAIRNESS.md` | auto + report |
+| Matching: only the job's employer (and admin, audited) sees it | `career-matching`: "another employer → 404; the student → 404"; "an admin can read it; the read is audited"; `permissions`: matching rows | auto |
+| Ratings: after a completed interview and a verified hire, once per side per event, 14 days | `career-ratings`: "the candidate: the completed interview and the verified hire, both open …"; "5 simultaneous submissions of the same rating: one saved …"; "a different rating for the same event: 409 ALREADY_RATED"; "15 days after the interview: 409 WINDOW_CLOSED"; "an interview disputed after being recorded as completed can't be rated" | auto |
+| Ratings: 1-5 on the fixed questions, comment ≤ 300, profanity refused | `career-ratings`: "answers must be the rater's 3 questions, whole stars 1-5 …"; "a comment over 300 characters → 400"; "a comment with profanity → 400 COMMENT_NOT_ALLOWED, nothing saved"; the filter (English, Roman Urdu, disguised spellings, no false hits on "class", "assessment") | auto |
+| Ratings: private; an employer's average only from 5, rounded, no comments; students' ratings never shown to other employers | `career-ratings`: "2 released ratings: not shown …"; "5 released ratings: shown, rounded to half a star …, and no comment anywhere"; "a student's ratings are never shown to another employer"; "…saved private and not released yet (the employer hasn't rated)" | auto |
+| Ratings: no automatic penalties | `career-ratings`: "ratings changed nothing else: every application's status is as it was" | auto |
+| Ratings: report and admin hide with a reason (audited) | `career-ratings`: "only the person rated can report it"; "admin hides it with a reason: … recorded (report + DomainEvent)"; "…a hidden rating no longer counts"; portal `ratings`: report and hide flows | auto |
+| Ratings: portal (rate candidates, own average, admin reports) and app (rate the employer, average on job details from 5) | portal `ratings` + `a11y-ratings`; app `career-pilot`: "save is off until every question has stars"; "it sends the application, the interview and the three answers …"; "job details: the employer's average from 6 ratings"; "fewer than 5 ratings: nothing shown" | auto |
+| Loyalty notifications: visit credited, tier unlocked, visit reversed; exactly once per ledger row | `loyalty-push`: "3 visits: 3 notices, the third says 'Visit 3 at Alpha Cafe' / '2 more visits to 25%.'"; "visit 5 makes the next visit 25%: …unlocked 25%…"; "an admin reverses visit 6 …"; "the credit hook 5 more times at once + a direct call for the same row: still one notice, one push" | auto |
+| Loyalty notifications: through pushGateway (quiet hours, settings), new "loyalty" switch default on; tap opens the loyalty card | `loyalty-push`: "…each pushed through the gateway as a transactional 'loyalty' message"; "quiet hours: … the in-app notification is still there"; "settings: a pilot student sees the new 'loyalty' switch, on by default"; "switched off: no push, still in-app"; app `career-pilot`: "push tap: opens the brand's screen (its loyalty card)" | auto (+ manual on a phone: needs the `pushes` job on, see Gaps) |
+| Kanban drag and drop: same transitions as the buttons, invalid drops snap back, buttons kept, axe passes | portal `career`: "drop Zara on Shortlisted: the same event the button sends …"; "drop Zara on Offer (not allowed from Applied): snaps back with the reason, nothing sent"; "drop Zara on Interview: … schedule-interview dialog"; "drop on Rejected asks first"; `a11y-career` | auto |
+| Urdu in resume PDFs: correct shaping, extractable, warning if not possible | `resume-urdu` (23): every Urdu letter extracts as itself, mixed lines keep every word, reading order, English-only PDFs unchanged; fallback: Urdu left out (never garbled), `pdf.urdu = not_included` + message before export, `X-Resume-Warning`; app `career-pilot`: the warning before export. Rendered images checked by hand. | auto; **built, waiting for approval** (`feat/urdu-resume-pdf`, changes PDFs for everyone) |
+
 ## Platform (plan 9)
 | Criterion | Proof | Status |
 |---|---|---|
 | No regression to discounts, QR verification, jobs, scholarships, events, confessions, networking, portals | 19 server suites incl. `live-security`, `brand-online-store`, `social-push`, `streak-reminders`, `perf-server`; app suites incl. events, tickets, social push; portal headless checks | auto (+ manual smoke) |
 | Admin actions audited | `loyalty` (reversal with admin + reason), `career` (admin writes audited), `surplus` (case decisions, brand blocks), `first-hire-free`: "every admin decision is in the audit with its reason" | auto |
 | Analytics reconcile to authoritative events | `analytics`: 46 checks reconciling each card with seeded records, Resume Studio included ("tailoring: 6 started in range …"; "factual check: 2 of 6 suggestions blocked …"; "time to draft …: p50 20 s, p95 120 s"); per-user limit on `/api/analytics/*` (`rate-limits`: "admin: 3 overviews → 200, the 4th → 429"; default 60 per 10 minutes) | auto |
-| Permissions | `permissions`: 85 routes × 8 roles (680) | auto |
+| Permissions | `permissions`: 114 routes × 8 roles (912) | auto |
 | Concurrency | `load`: 7 scenarios, 0 duplicates | auto |
 | Security | `security` (fuzz) + `docs/SECURITY_REVIEW.md` | auto + review |
 | Accessibility | portal: `npm run check:portal`, axe WCAG 2 A/AA, 0 violations on the new pages (the Resume Studio card and the hire disputes page and dialog included); app: `app/a11y-pilot` | auto (+ manual screen reader pass, below) |
@@ -111,6 +132,23 @@ for the server, manual for the device / real service · **N/A** = not in this pi
 10. **Product sign-off**: the owner signs the decisions listed below.
 
 ## Gaps (no proof yet)
+- **Pushes are off in production.** The startup line now reads `[jobs] production: on none` (the `APP_ENV` fix
+  worked), but every job is still off, `pushes` included: `BACKGROUND_JOBS=off` or `JOB_*=off` are set. Until
+  `pushes` (and `careerOutbox`, `surplusSweep`, `careerRetention`) are on:
+  - loyalty notifications are in-app only;
+  - hiring reminders don't go out;
+  - Surprise Box holds don't expire;
+  - the retention dry run never runs.
+- **Urdu in resume PDFs: built and tested, not merged** (`feat/urdu-resume-pdf`, waiting for approval: it changes
+  PDFs for everyone). Until then Urdu is dropped from ATS PDFs, as before.
+- **Matching reads spelling, not meaning.** A skill spelled differently from the job (outside the alias list) shows
+  as missing. The employer sees the evidence, not only the number (`docs/MATCHING_FAIRNESS.md`, "Limits").
+- **Ratings with very few candidates.** An employer sees its ratings anonymised from 5, but with only a handful of
+  interviews a comment could still point to a person. Admins can hide a rating on report.
+- **Real-device checks for the new features** (manual):
+  - a rating from the app;
+  - the loyalty push on a phone, with pushes on;
+  - a dragged card on a touch laptop (HTML5 drag and drop doesn't work with touch; the buttons do).
 - **Production background jobs are all off.** The live server's startup line reads
   `[jobs] staging: on none; off eventIngestion, socialPush, jobCleanup, engagementScheduler, chatSync, pushes,
   careerOutbox, surplusSweep, careerRetention`. So production is treated as staging: `APP_ENV` (or the Railway
@@ -153,6 +191,9 @@ disputes" page; a restored hire counts for First Hire Free again, exactly once.
 - Per-user rate limits: Resume Studio PDFs 30 per 10 minutes, analytics 60 per 10 minutes (Railway variables to change).
 
 ## Decisions needing sign-off
+- Merge `feat/urdu-resume-pdf` (Urdu in every resume PDF; English-only PDFs unchanged, renderer version
+  `ats-classic-2`).
+- Turn the production background jobs on (at least `JOB_PUSHES=on`; see Gaps).
 1. **Turn production background jobs on** (Gaps, first item): remove `APP_ENV=staging` from the production service
    or set it to `production`. This turns on every job at once, including pushes. Alternatively, switch on only the
    jobs you want by name.

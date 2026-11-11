@@ -17,8 +17,10 @@ const median = (xs) => {
 };
 const ratio = (a, b) => (b ? Math.round((a / b) * 1000) / 10 : null); // percent, 1 decimal
 
-async function funnel({ employerId = null, from = null, to = null } = {}) {
+// jobId (optional): one job's funnel (the caller checks the job is theirs)
+async function funnel({ employerId = null, jobId = null, from = null, to = null } = {}) {
   const q = employerId ? { employer: employerId } : {};
+  if (jobId) q.job = jobId;
   const events = await CareerApplicationEvent.find(q).sort({ application: 1, seq: 1 }).lean();
   const byApp = new Map();
   for (const e of events) {
@@ -72,6 +74,7 @@ async function funnel({ employerId = null, from = null, to = null } = {}) {
   }
   return {
     range: { from, to },
+    jobId: jobId ? String(jobId) : null,
     counts: c,
     conversions: {
       submittedToReviewed: ratio(c.reviewed, c.applications),

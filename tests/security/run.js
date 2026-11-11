@@ -128,6 +128,8 @@ app.use("/api/app", reqS("./routes/appFlags.routes"));
 app.use("/api/jobs", reqS("./routes/jobs.routes"));
 app.use("/api/loyalty", reqS("./routes/loyalty.routes"));
 app.use("/api/career/resume", reqS("./routes/careerResume.routes"));
+app.use("/api/career/matching", reqS("./routes/careerMatching.routes"));
+app.use("/api/career/ratings", reqS("./routes/careerRatings.routes"));
 app.use("/api/career", reqS("./routes/careerTrial.routes"));
 app.use("/api/career", reqS("./routes/career.routes"));
 app.use("/api/surplus", reqS("./routes/surplus.routes"));
@@ -181,7 +183,7 @@ const check = (name, ok, detail = "") => { results.push(!!ok); if (true) console
 (async () => {
   const server = app.listen(0); PORT = server.address().port;
   const all = Object.values(ids).map(String).join(",");
-  for (const f of ["LOYALTY_V2", "CAREER_TIMELINE", "RESUME_STUDIO_V2", "SURPLUS_BOXES", "EMPLOYER_FIRST_HIRE_FREE"]) process.env[`FLAG_${f}`] = `ids:${all}`;
+  for (const f of ["LOYALTY_V2", "CAREER_TIMELINE", "RESUME_STUDIO_V2", "SURPLUS_BOXES", "EMPLOYER_FIRST_HIRE_FREE", "CAREER_MATCHING", "CAREER_RATINGS"]) process.env[`FLAG_${f}`] = `ids:${all}`;
   const fx = {};
   const must = (label, r, ok = [200, 201, 202]) => { if (!ok.includes(r.status)) { console.log(`SETUP FAILED: ${label} -> ${r.status} ${r.text.slice(0, 200)}`); process.exit(2); } return r.json?.data ?? r.json; };
   const ver = async (appId, tok) => (await call("GET", `/api/career/applications/${appId}/timeline`, { tok })).json.data.version;
@@ -280,6 +282,17 @@ const check = (name, ok, detail = "") => { results.push(!!ok); if (true) console
     ["GET", `${C}/employers/me/analytics`, null, [...ANY_EMPLOYER, "A"]],
     ["GET", `${C}/admin/analytics`, null, ["A"]],
     ["GET", `${C}/admin/disputes`, null, ["A"], "open hire disputes (admin only, audited)"],
+    // candidate matching (decision support; the employer's side only)
+    ["GET", `/api/career/matching/applications/${fx.A1}`, null, ["E", "A"], "the job's employer; an admin (audited)"],
+    ["GET", `/api/career/matching/jobs/${ids.J1}`, null, ["E"], "the job's employer"],
+    // mutual ratings
+    ["GET", `/api/career/ratings/applications/${fx.A1}`, null, ["S", "E"], "the candidate and the job's employer (not an admin)"],
+    ["POST", "/api/career/ratings", { applicationId: String(fx.A1), kind: "interview", answers: { communication: 4, respect: 4, clarity: 4 } }, ["S", "E"], "the two sides only (409 here: no completed interview yet)"],
+    ["GET", `/api/career/ratings/jobs/${ids.J1}/employer`, null, ["S", "S2", "B", "B2", "E", "E2", "A"], "anyone signed in with the flag: an average from 5 ratings, never comments"],
+    ["GET", "/api/career/ratings/me/received", null, ["S", "S2", "E", "E2"], "own ratings only: students and employers"],
+    ["POST", "/api/career/ratings/6aeb00000000000000000000/report", { reason: "this rating is unfair" }, [], "only the person rated (404 for a rating that isn't about them)"],
+    ["GET", "/api/career/ratings/admin/reports", null, ["A"], "admin (404 unless FLAG_CAREER_RATINGS is set)"],
+    ["POST", "/api/career/ratings/admin/reports/6aeb00000000000000000000/decide", { action: "keep", reason: "the rating looks fair" }, ["A"], "admin, with a reason (recorded)"],
     ["POST", `${C}/admin/outbox/drain`, {}, ["A"]],
     // resume studio
     ["GET", `${RS}/sources/${ids.R1}`, null, ["S"], "own resume"],

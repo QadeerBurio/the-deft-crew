@@ -26,8 +26,19 @@ class Expo {
 }
 const passThrough = () => (req, res, next) => next();
 const multerLike = { single: passThrough, array: passThrough, fields: passThrough, any: passThrough, none: passThrough };
+// the offer-image upload, controlled by headers (multer itself is not under test): x-test-image = a file name
+// ("big" = over 5 MB, "pdf" = not an image), x-test-version = the form's version field; deletions are recorded
+const deletedFiles = [];
+const testUploadOffer = { single: () => (req, res, next) => {
+  const t = req.headers["x-test-image"];
+  if (req.headers["x-test-version"] != null) req.body = { ...(req.body || {}), version: req.headers["x-test-version"] };
+  if (t === "big") return next(Object.assign(new Error("File too large"), { code: "LIMIT_FILE_SIZE" }));
+  if (t === "pdf") return next(new Error("Offer image: Only .jpg, .jpeg, .png, .webp, .heic files are allowed."));
+  if (t) req.file = { path: `https://res.cloudinary.com/testcloud/image/upload/${t}.jpg`, filename: `TDC_Offers/${t}` };
+  next();
+} };
 const cloudConfig = new Proxy(
-  { cloudinary: { config: () => ({ cloud_name: "testcloud" }), uploader: { destroy: async () => ({ result: "ok" }) }, url: () => "" }, hasCloudinary: true, deleteFromCloudinary: async () => ({}), getCloudinaryUrl: () => "", storage: {} },
+  { cloudinary: { config: () => ({ cloud_name: "testcloud" }), uploader: { destroy: async () => ({ result: "ok" }) }, url: () => "" }, hasCloudinary: true, deleteFromCloudinary: async (id) => { deletedFiles.push(id); return {}; }, getCloudinaryUrl: () => "", storage: {}, uploadOffer: testUploadOffer },
   { get: (t, k) => (k in t ? t[k] : multerLike) }
 );
 const origLoad = Module._load;
@@ -97,10 +108,10 @@ const token = (who, role) => jwt.sign({ id: String(ids[who]), role }, "test-only
 
 // ---------- HTTP ----------
 let PORT;
-function call(method, url, { body, tok } = {}) {
+function call(method, url, { body, tok, headers = {} } = {}) {
   return new Promise((resolve) => {
     const data = body != null ? JSON.stringify(body) : null;
-    const h = {};
+    const h = { ...headers };
     if (data != null) { h["content-type"] = "application/json"; h["content-length"] = Buffer.byteLength(data); }
     if (tok) h.authorization = `Bearer ${tok}`;
     const q = http.request({ host: "127.0.0.1", port: PORT, method, path: url, headers: h }, (res) => {
@@ -363,6 +374,7 @@ const inH = (h) => new Date(Date.now() + h * H).toISOString();
   check("a decision needs a note", r.status === 400);
   r = await call("POST", `${B}/admin/cases/${case1}/decide`, { tok: T.admin, body: { decision: "upheld", note: "photos show mould; brand warned" } });
   check("admin decides: upheld (recorded; nothing refunded, no money passed through tdc)", r.status === 200 && r.json.data.status === "decided" && r.json.data.decision === "upheld");
+  check("…and in the admin action log, the note as the reason", rows("AdminActionLog", (x) => x.action === "surplus.case.decide" && x.targetId === String(case1) && x.after.decision === "upheld" && x.reason === "photos show mould; brand warned" && same(x.admin, ids.admin)).length === 1);
   r = await call("POST", `${B}/admin/cases/${case1}/decide`, { tok: T.admin, body: { decision: "not_upheld", note: "changed my mind" } });
   check("a decided case can't be decided again", r.status === 409);
   r = await call("GET", `${B}/orders/${o1.id}`, { tok: T.S1 });
@@ -377,6 +389,7 @@ const inH = (h) => new Date(Date.now() + h * H).toISOString();
   check("blocking needs a reason", r.status === 400);
   r = await call("POST", `${B}/admin/brands/${ids.A}/block`, { tok: T.admin, body: { blocked: true, reason: "repeated food safety cases" } });
   check("admin blocks the brand's listings", r.status === 200 && r.json.data.blocked === true && rows("SurplusListing", (l) => same(l.brand, ids.A) && ["published", "sold_out"].includes(l.status)).length === 0);
+  check("…logged as surplus.brand.block with the reason; refused decisions weren't logged", rows("AdminActionLog", (x) => x.action === "surplus.brand.block" && x.targetId === String(ids.A) && x.after.blocked === true && x.reason === "repeated food safety cases").length === 1 && rows("AdminActionLog", (x) => x.action === "surplus.case.decide").length === 1);
   r = await call("GET", `${B}/listings`, { tok: T.S7 });
   check("blocked: its boxes disappear for students", !r.json.data.listings.some((l) => l.brand.id === String(ids.A)));
   r = await call("POST", `${B}/holds`, { tok: T.S7, body: { listingId: L3, qty: 1, idempotencyKey: key() } });
@@ -413,6 +426,94 @@ const inH = (h) => new Date(Date.now() + h * H).toISOString();
   check("a brand's notification carries no app screen (orders live in the portal)", tapRows.filter((x) => same(x.recipient, ids.A)).every((x) => !x.payload.data.screen && !x.payload.data.offerId));
   check("the in-app rows carry the same tap target", rows("Notification", (n) => n.metadata?.surplusOrderId === o1.id && same(n.recipient, ids.S1)).every((n) => n.metadata.screen === "SurpriseBoxes" && n.metadata.params?.orderId === o1.id));
   check("in-app notifications use an existing type (schema unchanged)", rows("Notification", (n) => n.metadata?.surplusOrderId).every((n) => n.type === "Offer"));
+
+  // ---------- admin: every listing (list, view, edit / pause, cancel a box), all logged ----------
+  const AB = `${B}/admin/listings`;
+  const alog = (f = () => true) => rows("AdminActionLog", f);
+  const lbNow = () => doc("SurplusListing", LB);
+  for (const [m, u, b] of [["GET", AB], ["GET", `${AB}/${LB}`], ["PATCH", `${AB}/${LB}`, { version: 1, status: "paused", reason: "admin only" }], ["POST", `${AB}/${LB}/cancel`, { version: 1, reason: "admin only" }]]) {
+    const rr = await Promise.all([T.B, T.S7].map((tk) => call(m, u, { tok: tk, body: b })));
+    const anon = await call(m, u, { body: b });
+    check(`admin listings: ${m} ${u.replace(/[0-9a-f]{24}/, ":id")} → brand / student 403, no token 401`, rr.every((x) => x.status === 403) && anon.status === 401, `${rr.map((x) => x.status)} ${anon.status}`);
+  }
+  check("…nothing changed by those", lbNow().status === "published" && !alog((x) => x.action.startsWith("surplus.listing.")).length);
+  r = await call("GET", AB, { tok: T.admin });
+  check("admin sees every brand's listings with the brand name and open orders", r.status === 200 && r.json.data.listings.some((l) => l.id === LB && l.brand.name === "Beta Cafe") && r.json.data.listings.some((l) => l.id === L3 && l.openOrders >= 0) && r.json.data.listings.some((l) => l.title === "Gamma (not in pilot)"), r.text.slice(0, 160));
+  r = await call("GET", `${AB}?brandId=${ids.B}`, { tok: T.admin });
+  const r2 = await call("GET", `${AB}?q=gamma`, { tok: T.admin });
+  check("filters: brand, search", r.json.data.listings.every((l) => l.brand.id === String(ids.B)) && r.json.data.listings.length >= 1 && r2.json.data.listings.length === 1, `${r.json.data.listings.length} ${r2.json.data.listings.length}`);
+  r = await call("GET", `${AB}/${L3}`, { tok: T.admin });
+  check("admin view: the listing and its orders (first names only)", r.status === 200 && r.json.data.listing.id === L3 && Array.isArray(r.json.data.orders) && r.json.data.orders.every((o) => !("phone" in o.student) && !("email" in o.student)), r.text.slice(0, 160));
+  r = await call("PATCH", `${AB}/${LB}`, { tok: T.admin, body: { version: lbNow().version, status: "paused" } });
+  check("admin edit without a reason → 400 REASON_REQUIRED, unchanged", r.status === 400 && r.json.error.code === "REASON_REQUIRED" && lbNow().status === "published");
+  const lbV = lbNow().version;
+  r = await call("PATCH", `${AB}/${LB}`, { tok: T.admin, body: { version: lbV, status: "paused", reason: "complaint under review" } });
+  const pz = alog((x) => x.action === "surplus.listing.pause" && x.targetId === LB)[0];
+  check("admin pauses a brand's box: logged as pause, before/after status and version, reason", r.status === 200 && r.json.data.status === "paused" && pz && pz.before.status === "published" && pz.after.status === "paused" && pz.after.version === lbV + 1 && pz.reason === "complaint under review", JSON.stringify(pz && [pz.before, pz.after]));
+  const nLogs = alog().length;
+  r = await call("PATCH", `${AB}/${LB}`, { tok: T.admin, body: { version: lbV, status: "published", reason: "stale version test" } });
+  check("a stale version → 409, nothing logged", r.status === 409 && r.json.error.code === "STALE_VERSION" && alog().length === nLogs);
+  const LE = (await call("POST", `${B}/merchant/listings`, { tok: T.B, body: listingBody({ title: "Beta lunch box", branchId: String(ids.B1), quantityTotal: 4 }) })).json.data.id;
+  r = await call("PATCH", `${AB}/${LE}`, { tok: T.admin, body: { version: doc("SurplusListing", LE).version, title: "Beta box (fixed typo)", quantityTotal: 6, reason: "brand asked by phone" } });
+  const ed = alog((x) => x.action === "surplus.listing.update" && x.targetId === LE)[0];
+  check("admin edits (no orders yet): title and quantity, logged with only those fields", r.status === 200 && r.json.data.title === "Beta box (fixed typo)" && r.json.data.quantityTotal === 6 && ed && ed.after.title === "Beta box (fixed typo)" && ed.before.quantityTotal === 4 && !("price" in ed.after), r.text.slice(0, 200));
+  r = await call("PATCH", `${AB}/${L3}`, { tok: T.admin, body: { version: doc("SurplusListing", L3).version, allergenNotes: "none", reason: "trying to change food details" } });
+  check("the brand's rules apply to admins too: ordered box's food details locked (409), not logged", r.status === 409 && r.json.error.code === "DISCLOSURES_LOCKED" && !alog((x) => x.targetId === L3).length);
+  // cancel a box: two open orders, one already handed over
+  const LC = (await call("POST", `${B}/merchant/listings`, { tok: T.B, body: listingBody({ title: "Beta evening box", branchId: String(ids.B1), quantityTotal: 5 }) })).json.data.id;
+  const orderFor = async (who) => {
+    const hold = (await call("POST", `${B}/holds`, { tok: T[who], body: { listingId: LC, qty: 1, idempotencyKey: key() } })).json.data.hold;
+    return (await call("POST", `${B}/orders`, { tok: T[who], body: { holdId: hold.id, idempotencyKey: key(), acceptedTerms: true } })).json.data;
+  };
+  const oS8 = await orderFor("S4"), oS9 = await orderFor("S5"); // (S8 must stay without orders for the next section)
+  doc("SurplusOrder", oS9.id).state = "PICKUP_VERIFIED"; // handed over already
+  r = await call("POST", `${AB}/${LC}/cancel`, { tok: T.admin, body: { version: doc("SurplusListing", LC).version } });
+  check("cancel a box without a reason → 400, nothing changed", r.status === 400 && doc("SurplusListing", LC).status !== "closed" && doc("SurplusOrder", oS8.id).state === "ORDER_PLACED");
+  r = await call("POST", `${AB}/${LC}/cancel`, { tok: T.admin, body: { version: 0, reason: "the brand's oven broke down" } });
+  check("…with a stale version → 409, nothing changed", r.status === 409 && doc("SurplusListing", LC).status !== "closed");
+  r = await call("POST", `${AB}/${LC}/cancel`, { tok: T.admin, body: { version: doc("SurplusListing", LC).version, reason: "the brand's oven broke down" } });
+  check("admin cancels the box: closed, the open order cancelled, the handed-over one stays", r.status === 200 && r.json.data.closed && JSON.stringify(r.json.data.cancelled) === JSON.stringify([oS8.ref]) && JSON.stringify(r.json.data.stayed) === JSON.stringify([oS9.ref]) && r.json.data.failed.length === 0 && doc("SurplusListing", LC).status === "closed", r.text.slice(0, 200));
+  const cs8 = doc("SurplusOrder", oS8.id);
+  check("…the order: cancelled with the reason, the history names the admin", cs8.state === "MERCHANT_CANCELLED" && cs8.cancelReason === "the brand's oven broke down" && cs8.history.slice(-1)[0].byRole === "admin" && same(cs8.history.slice(-1)[0].by, ids.admin) && doc("SurplusOrder", oS9.id).state === "PICKUP_VERIFIED");
+  check("…logged: the box (closed) and the order, each with the reason", alog((x) => x.action === "surplus.listing.cancel" && x.targetId === LC && x.after.status === "closed").length === 1 && alog((x) => x.action === "surplus.order.cancel" && x.targetId === oS8.id && x.reason === "the brand's oven broke down").length === 1 && !alog((x) => x.targetId === oS9.id).length);
+  check("…the student is told", rows("SurplusNotificationOutbox", (x) => same(x.order, oS8.id) && x.eventType === "MERCHANT_CANCELLED" && same(x.recipient, ids.S4)).length >= 1);
+  r = await call("GET", `${B}/orders/${oS8.id}`, { tok: T.S4 });
+  check("…and sees why in the app", r.json.data.state === "MERCHANT_CANCELLED" && r.json.data.cancelReason === "the brand's oven broke down");
+  const nLogs2 = alog().length;
+  r = await call("POST", `${AB}/${LC}/cancel`, { tok: T.admin, body: { reason: "running it twice" } });
+  check("cancelling again: nothing left to cancel, nothing new logged", r.status === 200 && r.json.data.cancelled.length === 0 && alog().length === nLogs2);
+  r = await call("PATCH", `${AB}/${LB}`, { tok: T.admin, body: { version: lbNow().version, status: "published", reason: "complaint resolved" } });
+  check("admin republishes the paused box: logged as publish", r.status === 200 && r.json.data.status === "published" && alog((x) => x.action === "surplus.listing.publish" && x.targetId === LB).length === 1, r.text.slice(0, 160));
+
+  // ---------- a box's photo (optional) ----------
+  const LP = (await call("POST", `${B}/merchant/listings`, { tok: T.B, body: listingBody({ title: "Beta photo box", branchId: String(ids.B1), quantityTotal: 4 }) })).json.data.id;
+  const lp = () => doc("SurplusListing", LP);
+  const up = (id, tok, name, version) => call("POST", `${B}/merchant/listings/${id}/image`, { tok, headers: { ...(name ? { "x-test-image": name } : {}), "x-test-version": String(version) } });
+  r = await call("GET", `${B}/listings`, { tok: T.S7 });
+  check("no photo: the box shows as before (image null)", r.json.data.listings.find((l) => l.id === LP)?.image === null);
+  r = await up(LP, T.B, null, lp().version);
+  check("no file → 400 NO_IMAGE", r.status === 400 && r.json.error.code === "NO_IMAGE");
+  r = await up(LP, T.B, "big", lp().version);
+  check("over 5 MB → 413 IMAGE_TOO_LARGE", r.status === 413 && r.json.error.code === "IMAGE_TOO_LARGE");
+  r = await up(LP, T.B, "pdf", lp().version);
+  check("not an image → 400 INVALID_IMAGE", r.status === 400 && r.json.error.code === "INVALID_IMAGE");
+  r = await up(LP, T.A, "intruder", lp().version);
+  check("another brand → 404, and its uploaded file is deleted", r.status === 404 && deletedFiles.includes("TDC_Offers/intruder") && !lp().image?.url);
+  r = await up(LP, T.S7, "student", lp().version);
+  check("a student → 403", r.status === 403);
+  r = await up(LP, T.B, "stale", lp().version - 1);
+  check("a stale version → 409, file deleted", r.status === 409 && deletedFiles.includes("TDC_Offers/stale"));
+  const v0 = lp().version;
+  r = await up(LP, T.B, "box1", v0);
+  check("the brand adds a photo: saved, version +1", r.status === 200 && r.json.data.image === "https://res.cloudinary.com/testcloud/image/upload/box1.jpg" && lp().version === v0 + 1 && lp().image.publicId === "TDC_Offers/box1");
+  r = await call("GET", `${B}/listings`, { tok: T.S7 });
+  check("students see the photo in the list", r.json.data.listings.find((l) => l.id === LP)?.image?.endsWith("/box1.jpg"));
+  r = await up(LP, T.B, "box2", lp().version);
+  check("replacing it: the new photo, the old file deleted", r.status === 200 && r.json.data.image.endsWith("/box2.jpg") && deletedFiles.includes("TDC_Offers/box1"));
+  r = await call("DELETE", `${B}/merchant/listings/${LP}/image`, { tok: T.B, body: { version: lp().version } });
+  check("removing it: no photo again, the file deleted", r.status === 200 && r.json.data.image === null && deletedFiles.includes("TDC_Offers/box2"));
+  r = await up(L3, T.A, "late", doc("SurplusListing", L3).version);
+  check("a box students have ordered: photo locked (409), file deleted", r.status === 409 && r.json.error.code === "DISCLOSURES_LOCKED" && deletedFiles.includes("TDC_Offers/late"));
 
   // ---------- SURPLUS_CODE_SECRET ----------
   const errors = [];

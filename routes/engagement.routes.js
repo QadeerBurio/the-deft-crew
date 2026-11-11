@@ -956,6 +956,14 @@ const NOTIF_PREF_DEFAULTS = {
   skillshare: true,
 };
 
+// the "loyalty" switch (pushes about loyalty visits and tiers) lives in UserNotificationSetting and is shown
+// only to students in the loyalty pilot (FLAG_LOYALTY_V2); everyone else sees exactly the switches they had
+const { isEnabled } = require('../config/featureFlags');
+const loyaltySwitch = async (req) => {
+  if (!isEnabled('loyaltyV2', { id: String(req.userId), role: 'student' })) return {};
+  return { loyalty: await require('../services/loyaltyNotify').loyaltyPushOn(req.userId) };
+};
+
 router.get('/notification-prefs', auth, requireAuth, async (req, res) => {
   const profile = await EngagementProfile.findOne({ user: req.userId })
     .select('notifPrefs osPushPermission')
@@ -963,6 +971,7 @@ router.get('/notification-prefs', auth, requireAuth, async (req, res) => {
   res.json({
     ...NOTIF_PREF_DEFAULTS,
     ...(profile?.notifPrefs || {}),
+    ...(await loyaltySwitch(req)),
     osPermission: profile?.osPushPermission || 'undetermined',
   });
 });
@@ -976,12 +985,20 @@ router.put('/notification-prefs', auth, requireAuth, async (req, res) => {
   if (Object.keys(set).length) {
     await EngagementProfile.updateOne({ user: req.userId }, { $set: set }, { upsert: true });
   }
+  if (typeof req.body.loyalty === 'boolean' && isEnabled('loyaltyV2', { id: String(req.userId), role: 'student' })) {
+    await require('../models/UserNotificationSetting').updateOne(
+      { user: req.userId, key: 'loyalty' },
+      { $set: { enabled: req.body.loyalty, updatedAt: new Date() } },
+      { upsert: true }
+    );
+  }
   const profile = await EngagementProfile.findOne({ user: req.userId })
     .select('notifPrefs osPushPermission')
     .lean();
   res.json({
     ...NOTIF_PREF_DEFAULTS,
     ...(profile?.notifPrefs || {}),
+    ...(await loyaltySwitch(req)),
     osPermission: profile?.osPushPermission || 'undetermined',
   });
 });

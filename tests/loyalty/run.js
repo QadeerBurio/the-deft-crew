@@ -109,7 +109,7 @@ P.aggregate = function (pipeline) {
 const express = reqS("express");
 const jwt = reqS("jsonwebtoken");
 const coll = (name) => reqS(`./models/${name}`).collection.collectionName;
-for (const m of ["User", "Offer", "PromoCode", "Branch", "Notification", "University", "PendingScan", "DomainEvent", "RedemptionGuard", "EngagementProfile", "PointsLedger", "LoyaltyProgram", "LoyaltyLedger", "LoyaltySnapshot"]) reqS(`./models/${m}`);
+for (const m of ["User", "Offer", "PromoCode", "Branch", "Notification", "University", "PendingScan", "DomainEvent", "RedemptionGuard", "EngagementProfile", "PointsLedger", "LoyaltyProgram", "LoyaltyLedger", "LoyaltySnapshot", "LoyaltyProgramRestart", "AdminActionLog"]) reqS(`./models/${m}`);
 const loyalty = reqS("./services/loyalty");
 const { recordWooOrder } = reqS("./services/storeOrders");
 
@@ -390,6 +390,137 @@ function seedRedemption(offerId, who, bill = 1000) {
   check("flag off: a Woo order counts as before, no ledger row", w3.counted === 1 && ledger().length === before);
   r = await call("GET", `/api/loyalty/brands/${ids.A}/program`, { tok: T.S1 });
   check("flag off: the program is not shown (404)", r.status === 404, r.status);
+
+  console.log("── 14. end, then restart: a new draft version; old visits never count again");
+  process.env.FLAG_LOYALTY_V2 = FLAG;
+  const restarts = () => rows("LoyaltyProgramRestart");
+  const mine = async () => (await call("GET", "/api/loyalty/programs/mine", { tok: T.A })).json.data;
+  const s7Visits = async () => (await call("GET", `/api/loyalty/brands/${ids.A}/me`, { tok: T.S7 })).json.data;
+  let st = await s7Visits();
+  check("before: S7 has 8 visits (top tier)", st.enabled && st.progress.visits === 8, JSON.stringify(st.progress));
+  let pv = await mine();
+  r = await call("POST", `/api/loyalty/programs/${prog.id}/restart`, { tok: T.A, body: { version: pv.version } });
+  check("restart while active → 409 NOT_ENDED", r.status === 409 && r.json?.error?.code === "NOT_ENDED", r.text);
+  r = await call("PATCH", `/api/loyalty/programs/${prog.id}`, { tok: T.A, body: { status: "ended", version: pv.version } });
+  check("the brand ends its program", r.status === 200 && r.json.data.status === "ended", r.text.slice(0, 120));
+  const endedV1 = r.json.data.version;
+  st = await s7Visits();
+  check("ended: no loyalty for students", st.enabled === false && st.reason === "no-program", JSON.stringify(st));
+  const ledgerBefore = ledger().length;
+  await loyalty.onVerifiedRedemption(seedRedemption(ids.oA, "S7"), { source: "test" });
+  check("ended: a verified redemption credits nothing", ledger().length === ledgerBefore);
+  r = await call("PATCH", `/api/loyalty/programs/${prog.id}`, { tok: T.A, body: { status: "active", version: endedV1 } });
+  check("an ended program can't be switched back on (409 ENDED, says restart)", r.status === 409 && r.json?.error?.code === "ENDED" && /restart/.test(r.json.error.message), r.text);
+  r = await call("POST", "/api/loyalty/programs", { tok: T.A, body: {} });
+  check("…nor replaced by a second program (409, says restart)", r.status === 409 && /restart/.test(r.json?.error?.message || ""), r.text);
+  r = await call("POST", `/api/loyalty/programs/${prog.id}/restart`, { tok: T.B, body: { version: endedV1 } });
+  check("brand B can't restart brand A's program (403)", r.status === 403 && r.json?.error?.code === "NOT_YOUR_PROGRAM", r.text);
+  r = await call("POST", `/api/loyalty/programs/${prog.id}/restart`, { tok: T.S7, body: { version: endedV1 } });
+  check("a student can't restart (403)", r.status === 403, r.status);
+  r = await call("POST", `/api/loyalty/programs/${prog.id}/restart`, { tok: T.A, body: { version: endedV1 - 1 } });
+  check("restart from an old version → 409 VERSION_CONFLICT", r.status === 409 && r.json?.error?.code === "VERSION_CONFLICT", r.text);
+  const histBefore = rows("LoyaltyProgram")[0].history.length;
+  r = await call("POST", `/api/loyalty/programs/${prog.id}/restart`, { tok: T.A, body: { version: endedV1 } });
+  check("the brand restarts: a draft at a new version, same rules, dates cleared", r.status === 200 && r.json.data.status === "draft" && r.json.data.version === endedV1 + 1 && r.json.data.startsAt === null && r.json.data.endsAt === null && r.json.data.tiers.length === 2, r.text.slice(0, 200));
+  const prow = rows("LoyaltyProgram")[0];
+  check("…history keeps the ended version (marked restarted)", prow.history.length === Math.min(histBefore + 1, 20) && prow.history.slice(-1)[0].status === "ended" && prow.history.slice(-1)[0].version === endedV1 && prow.history.slice(-1)[0].restarted === true);
+  check("…one LoyaltyProgramRestart row: ended version, new version, rules, who", restarts().length === 1 && restarts()[0].endedVersion === endedV1 && restarts()[0].newVersion === endedV1 + 1 && restarts()[0].endedRules.status === "ended" && same(restarts()[0].restartedBy, ids.A) && restarts()[0].byAdmin === false);
+  check("…a domain event loyalty.program.restarted", rows("DomainEvent", (e) => e.type === "loyalty.program.restarted").length === 1);
+  check("…nothing deleted from the ledger", ledger().length === ledgerBefore);
+  st = await s7Visits();
+  check("a restarted draft isn't live yet", st.enabled === false);
+  r = await call("PATCH", `/api/loyalty/programs/${prog.id}`, { tok: T.A, body: { status: "active", version: endedV1 + 1 } });
+  check("the brand publishes the new version", r.status === 200 && r.json.data.status === "active", r.text.slice(0, 120));
+  st = await s7Visits();
+  check("old redemptions don't count: S7 starts again at 0 visits, first tier", st.enabled && st.progress.visits === 0 && st.progress.currentTier.name === "Member", JSON.stringify(st.progress));
+  r = await call("POST", "/api/loyalty/quotes", { tok: T.A, body: { studentId: String(ids.S7), offerId: String(ids.oA) } });
+  check("…and the brand's quote agrees: visit 1, first tier", r.json.data.nextVisitNumber === 1 && r.json.data.tierName === "Member", JSON.stringify(r.json.data).slice(0, 120));
+  const rNew = seedRedemption(ids.oA, "S7");
+  let cr = await loyalty.onVerifiedRedemption(rNew, { source: "test" });
+  check("a new visit after the restart is visit 1 of the new period", cr.credited && cr.visitNumber === 1, JSON.stringify({ c: cr.credited, n: cr.visitNumber }));
+  const oldCredit = ledger((e) => same(e.student, ids.S7) && e.type === "CREDIT" && e.visitsDelta > 0 && e.programVersion <= endedV1)[0];
+  r = await call("POST", "/api/loyalty/admin/reverse", { tok: T.admin, body: { redemptionId: String(oldCredit.redemptionId), reason: "refund from before the restart" } });
+  check("an admin can still reverse an old-period visit; the new period's count is unchanged (1)", r.status === 201 && r.json.data.progress.visits === 1, r.text.slice(0, 160));
+  st = await s7Visits();
+  check("…S7 still has 1 visit", st.progress.visits === 1, JSON.stringify(st.progress));
+  r = await call("GET", "/api/loyalty/brands/me/analytics", { tok: T.A });
+  check("analytics: members and tiers count the current period only (S7 in Member)", r.status === 200 && r.json.data.members === 1 && r.json.data.tierCounts.Member === 1, JSON.stringify({ m: r.json.data.members, t: r.json.data.tierCounts }));
+
+  // a second end, then 5 simultaneous restarts (brand + admin): exactly one
+  pv = await mine();
+  r = await call("PATCH", `/api/loyalty/programs/${prog.id}`, { tok: T.A, body: { status: "ended", version: pv.version } });
+  const endedV2 = r.json.data.version;
+  const rs5 = await Promise.all([T.A, T.admin, T.A, T.admin, T.A].map((tk) => call("POST", `/api/loyalty/programs/${prog.id}/restart`, { tok: tk, body: { version: endedV2 } })));
+  check("5 restarts at once (brand and admin) → one 200, the rest 409; one restart row for that version", rs5.filter((x) => x.status === 200).length === 1 && rs5.filter((x) => x.status === 409).length === 4 && restarts().filter((x) => x.endedVersion === endedV2).length === 1, statuses(rs5));
+  pv = await mine();
+  await call("PATCH", `/api/loyalty/programs/${prog.id}`, { tok: T.A, body: { status: "active", version: pv.version } });
+  st = await s7Visits();
+  check("after the second restart: the visit from the second period doesn't count either (0)", st.progress.visits === 0, JSON.stringify(st.progress));
+  check("both periods' rules are kept (2 restart rows)", restarts().length === 2);
+
+  console.log("── 15. admin: every program, create on a brand's behalf (draft), edit / publish / pause / end / restart, all logged");
+  const AL = "/api/loyalty/admin/programs";
+  const logs = (f = () => true) => rows("AdminActionLog", f);
+  // admin only
+  for (const [m, u, b] of [["GET", AL], ["GET", `${AL}/${prog.id}`], ["POST", AL, { brandId: String(ids.B), reason: "pilot setup" }], ["PATCH", `${AL}/${prog.id}`, { status: "paused", version: 1, reason: "pilot setup" }], ["POST", `${AL}/${prog.id}/restart`, { version: 1, reason: "pilot setup" }]]) {
+    const rr = await Promise.all([T.A, T.S1].map((tk) => call(m, u, { tok: tk, body: b })));
+    const anon = await call(m, u, { body: b });
+    check(`${m} ${u.replace(/[0-9a-f]{24}/, ":id")}: brand and student 403, no token 401`, rr.every((x) => x.status === 403) && anon.status === 401, `${statuses(rr)} ${anon.status}`);
+  }
+  check("…and none of that wrote anything", logs((x) => x.action.startsWith("loyalty.program.") && x.action !== "loyalty.program.update").length === 0 && rows("LoyaltyProgram").length === 1);
+  r = await call("GET", AL, { tok: T.admin });
+  check("admin lists every program with the brand's name and pilot state", r.status === 200 && r.json.data.programs.length === 1 && r.json.data.programs[0].brandName === "Alpha Cafe" && r.json.data.programs[0].inPilot === true, r.text.slice(0, 200));
+  // create for brand B
+  r = await call("POST", AL, { tok: T.admin, body: { brandId: String(ids.B) } });
+  check("create on a brand's behalf without a reason → 400 REASON_REQUIRED, nothing created", r.status === 400 && r.json?.error?.code === "REASON_REQUIRED" && rows("LoyaltyProgram").length === 1, r.text);
+  r = await call("POST", AL, { tok: T.admin, body: { brandId: String(ids.S1), reason: "pilot setup for Beta" } });
+  check("…for an account that isn't a brand → 404", r.status === 404 && r.json?.error?.code === "BRAND_NOT_FOUND", r.text);
+  r = await call("POST", AL, { tok: T.admin, body: { brandId: String(ids.B), reason: "pilot setup for Beta", status: "active", adminMaxDiscountPct: 20, maxDiscountPct: 20, tiers: [{ name: "Member", minVisit: 1, maxVisit: 4, discountPct: 10 }, { name: "Regular", minVisit: 5, maxVisit: null, discountPct: 20 }] } });
+  const pB = r.json?.data;
+  check("admin creates brand B's program: always a draft, with the admin cap", r.status === 201 && pB.status === "draft" && pB.brandName === "Beta Burgers" && pB.adminMaxDiscountPct === 20 && pB.tiers[1].discountPct === 20, r.text.slice(0, 200));
+  const c1 = logs((x) => x.action === "loyalty.program.create")[0];
+  check("…logged: create, the brand's program, the reason, after = draft rules", c1 && c1.targetId === pB.id && c1.reason === "pilot setup for Beta" && c1.after.status === "draft" && c1.after.adminMaxDiscountPct === 20 && same(c1.admin, ids.admin), JSON.stringify(c1 && c1.after).slice(0, 160));
+  r = await call("POST", AL, { tok: T.admin, body: { brandId: String(ids.B), reason: "pilot setup again" } });
+  check("a second program for the same brand → 409, not logged", r.status === 409 && logs((x) => x.action === "loyalty.program.create").length === 1, r.text);
+  r = await call("GET", "/api/loyalty/programs/mine", { tok: T.B });
+  check("brand B sees the draft in its own portal", r.status === 200 && r.json.data.status === "draft" && r.json.data.id === pB.id);
+  r = await call("GET", `${AL}/${pB.id}`, { tok: T.admin });
+  check("admin view: program, history, restarts, numbers", r.status === 200 && r.json.data.program.id === pB.id && Array.isArray(r.json.data.history) && Array.isArray(r.json.data.restarts) && r.json.data.numbers.verifiedVisits === 0, r.text.slice(0, 160));
+  r = await call("GET", `${AL}?q=beta`, { tok: T.admin });
+  const r2b = await call("GET", `${AL}?status=draft`, { tok: T.admin });
+  check("list filters: brand name, status", r.json.data.programs.length === 1 && r.json.data.programs[0].brandName === "Beta Burgers" && r2b.json.data.programs.every((p) => p.status === "draft"), `${r.json.data.programs.length} ${r2b.json.data.programs.length}`);
+  // edits: version and reason required; a stale version writes nothing (and logs nothing)
+  r = await call("PATCH", `${AL}/${pB.id}`, { tok: T.admin, body: { status: "active", reason: "brand approved the terms" } });
+  check("publish without a version → 400 VERSION_REQUIRED", r.status === 400 && r.json?.error?.code === "VERSION_REQUIRED", r.text);
+  r = await call("PATCH", `${AL}/${pB.id}`, { tok: T.admin, body: { status: "active", version: 1, reason: "ok" } });
+  check("…a reason under 5 characters → 400", r.status === 400 && r.json?.error?.code === "REASON_REQUIRED", r.text);
+  const logsBefore = logs().length;
+  r = await call("PATCH", `${AL}/${pB.id}`, { tok: T.admin, body: { status: "active", version: 7, reason: "brand approved the terms" } });
+  check("…a stale version → 409, program unchanged, nothing logged", r.status === 409 && rows("LoyaltyProgram", (p) => same(p._id, pB.id))[0].status === "draft" && logs().length === logsBefore, r.text);
+  r = await call("PATCH", `${AL}/${pB.id}`, { tok: T.admin, body: { status: "active", version: 1, reason: "brand approved the terms" } });
+  const pub = logs((x) => x.action === "loyalty.program.publish")[0];
+  check("admin publishes: active, logged as publish with before/after status and versions", r.status === 200 && r.json.data.status === "active" && pub && pub.before.status === "draft" && pub.after.status === "active" && pub.before.version === 1 && pub.after.version === 2 && pub.reason === "brand approved the terms", JSON.stringify(pub && [pub.before, pub.after]));
+  r = await call("PATCH", `${AL}/${pB.id}`, { tok: T.admin, body: { terms: "dine-in only", maxVisitsPerDay: 2, version: 2, reason: "brand asked by email" } });
+  const upd = logs((x) => x.action === "loyalty.program.update" && x.targetId === pB.id).slice(-1)[0];
+  check("admin edits rules: logged as update with only the changed fields", r.status === 200 && upd && JSON.stringify(Object.keys(upd.after).sort()) === JSON.stringify(["maxVisitsPerDay", "terms", "version"]) && upd.after.terms === "dine-in only" && upd.before.maxVisitsPerDay === 1, JSON.stringify(upd && upd.after));
+  r = await call("PATCH", `${AL}/${pB.id}`, { tok: T.admin, body: { status: "paused", version: 3, reason: "complaint under review" } });
+  check("admin pauses: logged as pause", r.status === 200 && r.json.data.status === "paused" && logs((x) => x.action === "loyalty.program.pause" && x.targetId === pB.id).length === 1);
+  r = await call("PATCH", `${AL}/${pB.id}`, { tok: T.admin, body: { status: "ended", version: 4, reason: "brand left the pilot" } });
+  check("admin ends: logged as end", r.status === 200 && r.json.data.status === "ended" && logs((x) => x.action === "loyalty.program.end" && x.targetId === pB.id).length === 1);
+  r = await call("POST", `${AL}/${pB.id}/restart`, { tok: T.admin, body: { version: 5 } });
+  check("restart without a reason → 400", r.status === 400 && r.json?.error?.code === "REASON_REQUIRED", r.text);
+  r = await call("POST", `${AL}/${pB.id}/restart`, { tok: T.admin, body: { version: 5, reason: "brand rejoined the pilot" } });
+  const rs1 = logs((x) => x.action === "loyalty.program.restart" && x.targetId === pB.id)[0];
+  check("admin restarts: a draft at version 6, a restart row, logged", r.status === 200 && r.json.data.status === "draft" && r.json.data.version === 6 && rows("LoyaltyProgramRestart", (x) => same(x.program, pB.id)).length === 1 && rs1 && rs1.before.status === "ended" && rs1.after.status === "draft", r.text.slice(0, 160));
+  r = await call("GET", `${AL}/${pB.id}`, { tok: T.admin });
+  check("admin view shows the history and the restart", r.json.data.history.length >= 5 && r.json.data.restarts.length === 1 && r.json.data.restarts[0].byAdmin === true);
+  // a write that can't be logged doesn't report success
+  const ALog = reqS("./models/AdminActionLog");
+  const realCreate = ALog.create;
+  ALog.create = async () => { throw new Error("log store down"); };
+  r = await call("PATCH", `${AL}/${pB.id}`, { tok: T.admin, body: { terms: "x", version: 6, reason: "testing the log failure" } });
+  ALog.create = realCreate;
+  check("log store down: the admin write reports an error (never a silent unlogged success)", r.status === 500, r.status);
 
   // ---------- leak scan ----------
   const leaky = responses.filter((x) => x.leaks.length);

@@ -67,9 +67,16 @@ app.use("/assets/dots",
 // ---------------- DATABASE ----------------
 // Background jobs: each one can be switched off with JOB_<NAME>=off, all with BACKGROUND_JOBS=off, and
 // in staging all are off unless switched on by name (config/featureFlags.js)
-const { jobEnabled, describeJobs } = require("./config/featureFlags");
+const { jobEnabled, describeJobs, describeFlags } = require("./config/featureFlags");
+// one line per feature flag: rule types and counts only, never the ids (config/featureFlags.js)
+for (const line of describeFlags()) console.log(line);
+// admin access to features per account (services/featureAccess.js): API requests wait for the first load (at most
+// 5 s), then it's re-read every 30 s; prints "[flags] admin access: <flag> <count>, …" (counts only)
+const featureAccess = require("./services/featureAccess");
+featureAccess.expectLoad();
 
 connectDB().then(() => {
+  featureAccess.start();
   console.log(describeJobs());
 
   // Automated event ingestion (hourly, plus a pass 10s after start)
@@ -242,6 +249,7 @@ app.post("/webhooks/app/scopes_update", async (req, res) => {
 });
 // ---------------- ROUTES ----------------
 // IMPORTANT: Register webhook routes FIRST
+app.use("/api", featureAccess.waitReady); // until admin feature access has loaded once (at most 5 s after start)
 app.use("/api/webhooks/woocommerce", require("./routes/storeWebhook.routes")); // connected WooCommerce stores
 app.use("/api/webhooks", require("./routes/webhook.routes"));
 
@@ -253,6 +261,8 @@ app.use("/api/brands", require("./routes/brands.routes"));
 app.use("/api/brand/store", require("./routes/brandStore.routes")); // a brand's own online store (WooCommerce)
 app.use("/api/notification", require("./routes/notification.routes"));
 app.use("/api/profile", require("./routes/profile.routes"));
+app.use("/api/admin/actions", require("./routes/adminActions.routes")); // the unified admin action log (read-only)
+app.use("/api/admin/features", require("./routes/adminFeatures.routes")); // features per account (admin only, logged)
 app.use("/api/admin", require("./routes/admin.routes"));
 app.use("/api/membership", require("./routes/membership.route"));
 app.use("/api/bookings", require("./routes/booking.routes"));
@@ -263,6 +273,7 @@ app.use("/api/jobs", require("./routes/jobs.routes"));
 app.use("/api/traveler", require("./routes/traveler.routes"));
 app.use("/api/resume", require("./routes/resume.routes"));
 app.use('/api/career/resume', require('./routes/careerResume.routes')); // AI Resume Studio, before /api/career (FLAG_RESUME_STUDIO_V2)
+app.use('/api/career/matching', require('./routes/careerMatching.routes')); // candidate matching, before /api/career (FLAG_CAREER_MATCHING)
 app.use("/api/brand-approval", require("./routes/brandApproval.routes"));
 app.use("/api/promo-codes", require("./routes/promoCode.routes"));
 app.use("/api/shopify-app", require("./routes/shopifyApp.routes"));
@@ -281,6 +292,7 @@ app.use('/api/engagement', require('./routes/engagement.routes'));
 app.use('/api/admin/engagement', require('./routes/adminEngagement.routes'));
 app.use('/api/rewards', require('./routes/rewards.routes'));
 app.use('/api/loyalty', require('./routes/loyalty.routes')); // brand loyalty (FLAG_LOYALTY_V2)
+app.use('/api/career/ratings', require('./routes/careerRatings.routes')); // mutual ratings, before /api/career (FLAG_CAREER_RATINGS)
 app.use('/api/career', require('./routes/careerTrial.routes')); // First Hire Free (FLAG_EMPLOYER_FIRST_HIRE_FREE); unmatched requests continue below
 app.use('/api/career', require('./routes/career.routes')); // hiring timeline (FLAG_CAREER_TIMELINE)
 app.use('/api/surplus', require('./routes/surplus.routes')); // Surprise Box (FLAG_SURPLUS_BOXES)

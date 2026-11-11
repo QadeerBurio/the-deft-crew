@@ -93,6 +93,7 @@ router.get("/admin/verifications", ...admin, handle(async (req, res) => {
 router.post("/admin/verifications/:id/review", ...admin, handle(async (req, res) => {
   const { action, reason, separateGroup } = req.body || {};
   const v = await trial.reviewVerification(req.userId, req.params.id, { action, reason, separateGroup: separateGroup === true });
+  await require("../services/adminActionLog").recordSafe({ adminId: req.userId, action: "fhf.verification.review", targetType: "EmployerCompanyVerification", targetId: String(req.params.id), before: null, after: { action: String(action || ""), status: v.status, separateGroup: separateGroup === true }, reason, requestId: req.id });
   ok(req, res, verificationView(v, await usersById([v.employerUserId, ...(v.duplicateOf || []).map((d) => d.employerUserId)])));
 }));
 
@@ -126,6 +127,7 @@ router.get("/admin/trials", ...admin, handle(async (req, res) => {
 router.post("/admin/trials/:id/review", ...admin, handle(async (req, res) => {
   const { action, reason } = req.body || {};
   const t = await trial.reviewTrial(req.userId, req.params.id, { action, reason });
+  await require("../services/adminActionLog").recordSafe({ adminId: req.userId, action: "fhf.trial.review", targetType: "EmployerHiringTrial", targetId: String(req.params.id), before: null, after: { action: String(action || ""), status: t.eligibilityStatus, consumedCount: t.consumedCount, entitlementCount: t.entitlementCount, fraudReviewStatus: t.fraudReviewStatus }, reason, requestId: req.id });
   ok(req, res, { id: String(t._id), status: t.eligibilityStatus, consumedCount: t.consumedCount, entitlementCount: t.entitlementCount, fraudReviewStatus: t.fraudReviewStatus, version: t.version });
 }));
 

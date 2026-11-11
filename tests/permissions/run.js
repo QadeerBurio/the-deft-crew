@@ -129,10 +129,14 @@ app.use("/api/app", reqS("./routes/appFlags.routes"));
 app.use("/api/jobs", reqS("./routes/jobs.routes"));
 app.use("/api/loyalty", reqS("./routes/loyalty.routes"));
 app.use("/api/career/resume", reqS("./routes/careerResume.routes"));
+app.use("/api/career/matching", reqS("./routes/careerMatching.routes"));
+app.use("/api/career/ratings", reqS("./routes/careerRatings.routes"));
 app.use("/api/career", reqS("./routes/careerTrial.routes"));
 app.use("/api/career", reqS("./routes/career.routes"));
 app.use("/api/surplus", reqS("./routes/surplus.routes"));
 app.use("/api/analytics", reqS("./routes/analytics.routes"));
+app.use("/api/admin/actions", reqS("./routes/adminActions.routes"));
+app.use("/api/admin/features", reqS("./routes/adminFeatures.routes"));
 
 const oid = () => new mongoose.Types.ObjectId();
 const ids = {};
@@ -182,7 +186,7 @@ const check = (name, ok, detail = "") => { results.push(!!ok); if (!ok || proces
 (async () => {
   const server = app.listen(0); PORT = server.address().port;
   const all = Object.values(ids).map(String).join(",");
-  for (const f of ["LOYALTY_V2", "CAREER_TIMELINE", "RESUME_STUDIO_V2", "SURPLUS_BOXES", "EMPLOYER_FIRST_HIRE_FREE"]) process.env[`FLAG_${f}`] = `ids:${all}`;
+  for (const f of ["LOYALTY_V2", "CAREER_TIMELINE", "RESUME_STUDIO_V2", "SURPLUS_BOXES", "EMPLOYER_FIRST_HIRE_FREE", "CAREER_MATCHING", "CAREER_RATINGS"]) process.env[`FLAG_${f}`] = `ids:${all}`;
   const fx = {};
   const must = (label, r, ok = [200, 201, 202]) => { if (!ok.includes(r.status)) { console.log(`SETUP FAILED: ${label} -> ${r.status} ${r.text.slice(0, 200)}`); process.exit(2); } return r.json?.data ?? r.json; };
   const ver = async (appId, tok) => (await call("GET", `/api/career/applications/${appId}/timeline`, { tok })).json.data.version;
@@ -256,8 +260,25 @@ const check = (name, ok, detail = "") => { results.push(!!ok); if (!ok || proces
     ["GET", `${L}/programs/mine`, null, ANY_BRAND, "own program"],
     ["POST", `${L}/programs`, {}, ANY_BRAND, "own program only"],
     ["PATCH", `${L}/programs/${fx.P}`, { maxVisitsPerDay: 1 }, ["B", "A"], "owner or admin"],
+    ["POST", `${L}/programs/${fx.P}/restart`, { version: 1 }, ["B", "A"], "owner or admin (409 here: the program is not ended)"],
     ["POST", `${L}/quotes`, { studentId: String(ids.S), offerId: String(oid()) }, ANY_BRAND, "own offers only (unknown offer -> 404)", { allow404: true }],
+    ["POST", `${L}/rewards/${oid()}/use`, { billAmount: 1000 }, ANY_BRAND, "brands: their own students' waiting rewards (unknown reward -> 404)", { allow404: true }],
     ["GET", `${L}/admin/ledger`, null, ["A"]],
+    // admin: every brand's program (each write needs a reason and is logged)
+    ["GET", `${L}/admin/programs`, null, ["A"], "admin only"],
+    ["GET", `${L}/admin/programs/${fx.P}`, null, ["A"], "admin only"],
+    ["POST", `${L}/admin/programs`, { brandId: String(oid()), reason: "permission matrix" }, ["A"], "admin only (404 here: unknown brand)", { allow404: true }],
+    ["PATCH", `${L}/admin/programs/${fx.P}`, { terms: "matrix", version: 1, reason: "permission matrix" }, ["A"], "admin only (409 here: stale version)"],
+    ["POST", `${L}/admin/programs/${fx.P}/restart`, { version: 1, reason: "permission matrix" }, ["A"], "admin only (409 here: not ended)"],
+    // the unified admin action log (read-only)
+    ["GET", "/api/admin/actions", null, ["A"], "admin only"],
+    ["GET", "/api/admin/actions/facets", null, ["A"], "admin only"],
+    // admin feature access per account (switching off what is already off: no change to the other rows' flags)
+    ["GET", "/api/admin/features/flags", null, ["A"], "admin only"],
+    ["GET", `/api/admin/features/account/${ids.B}`, null, ["A"], "admin only"],
+    ["GET", "/api/admin/features/flag/loyaltyV2", null, ["A"], "admin only"],
+    ["PUT", `/api/admin/features/account/${ids.B}/loyaltyV2`, { enabled: false, reason: "permission matrix" }, ["A"], "admin only: a brand can't switch its own features"],
+    ["POST", "/api/admin/features/bulk", { flag: "loyaltyV2", enabled: false, accountIds: [String(ids.B), String(ids.S)], reason: "permission matrix" }, ["A"], "admin only"],
     ["POST", `${L}/admin/reverse`, { redemptionId: fx.redemption, reason: "test" }, ["A"], "", { allow404: true }],
     // career timeline
     ["GET", `${C}/applications/me`, null, ANY_STUDENT, "own applications"],
@@ -281,6 +302,22 @@ const check = (name, ok, detail = "") => { results.push(!!ok); if (!ok || proces
     ["GET", `${C}/employers/me/analytics`, null, [...ANY_EMPLOYER, "A"]],
     ["GET", `${C}/admin/analytics`, null, ["A"]],
     ["GET", `${C}/admin/disputes`, null, ["A"], "open hire disputes (admin only, audited)"],
+    ["GET", `${C}/employers/me/interviews`, null, ["E", "E2"], "employers: their own interviews only"],
+    // admin views across employers (read-only, audited)
+    ["GET", `${C}/admin/applications`, null, ["A"], "candidates by stage (admin only, audited)"],
+    ["GET", `${C}/admin/interviews`, null, ["A"], "interviews (admin only, audited)"],
+    ["GET", `${C}/admin/hires`, null, ["A"], "hires (admin only, audited)"],
+    // candidate matching (decision support; the employer's side only)
+    ["GET", `/api/career/matching/applications/${fx.A1}`, null, ["E", "A"], "the job's employer; an admin (audited)"],
+    ["GET", `/api/career/matching/jobs/${ids.J1}`, null, ["E"], "the job's employer"],
+    // mutual ratings
+    ["GET", `/api/career/ratings/applications/${fx.A1}`, null, ["S", "E"], "the candidate and the job's employer (not an admin)"],
+    ["POST", "/api/career/ratings", { applicationId: String(fx.A1), kind: "interview", answers: { communication: 4, respect: 4, clarity: 4 } }, ["S", "E"], "the two sides only (409 here: no completed interview yet)"],
+    ["GET", `/api/career/ratings/jobs/${ids.J1}/employer`, null, ["S", "S2", "B", "B2", "E", "E2", "A"], "anyone signed in with the flag: an average from 5 ratings, never comments"],
+    ["GET", "/api/career/ratings/me/received", null, ["S", "S2", "E", "E2"], "own ratings only: students and employers"],
+    ["POST", "/api/career/ratings/6aeb00000000000000000000/report", { reason: "this rating is unfair" }, [], "only the person rated (404 for a rating that isn't about them)"],
+    ["GET", "/api/career/ratings/admin/reports", null, ["A"], "admin (404 unless FLAG_CAREER_RATINGS is set)"],
+    ["POST", "/api/career/ratings/admin/reports/6aeb00000000000000000000/decide", { action: "keep", reason: "the rating looks fair" }, ["A"], "admin, with a reason (recorded)"],
     ["POST", `${C}/admin/outbox/drain`, {}, ["A"]],
     // resume studio
     ["GET", `${RS}/sources/${ids.R1}`, null, ["S"], "own resume"],
@@ -316,7 +353,14 @@ const check = (name, ok, detail = "") => { results.push(!!ok); if (!ok || proces
     ["POST", `${SP}/merchant/orders/${fx.SO1}/verify-pickup`, { code: "AAAAAA", branchId: String(ids.BR) }, ["B"], "own order, own branch", { allow404: true }],
     ["POST", `${SP}/merchant/verify-pickup`, { code: fx.CODE, branchId: String(ids.BR), markPaid: false }, ["B"], "only the listing's brand at its branch"],
     ["GET", `${SP}/merchant/summary`, null, ANY_BRAND],
+    ["POST", `${SP}/merchant/listings/${oid()}/image`, { version: 1 }, ANY_BRAND, "brands: their own box's photo (400 here: no file)", { allow404: true }],
+    ["DELETE", `${SP}/merchant/listings/${oid()}/image`, { version: 1 }, ANY_BRAND, "brands: their own box's photo (404 here: unknown box)", { allow404: true }],
     ["GET", `${SP}/admin/orders`, null, ["A"]],
+    // admin: every brand's listings (writes need a reason and are logged)
+    ["GET", `${SP}/admin/listings`, null, ["A"], "admin only"],
+    ["GET", `${SP}/admin/listings/${oid()}`, null, ["A"], "admin only (404 here: unknown listing)", { allow404: true }],
+    ["PATCH", `${SP}/admin/listings/${oid()}`, { version: 1, status: "paused", reason: "permission matrix" }, ["A"], "admin only (404 here: unknown listing)", { allow404: true }],
+    ["POST", `${SP}/admin/listings/${oid()}/cancel`, { version: 1, reason: "permission matrix" }, ["A"], "admin only (404 here: unknown listing)", { allow404: true }],
     ["GET", `${SP}/admin/no-shows`, null, ["A"]],
     ["GET", `${SP}/admin/cases`, null, ["A"]],
     ["POST", `${SP}/admin/cases/${fx.C1}/decide`, { decision: "no_action", note: "matrix" }, ["A"]],

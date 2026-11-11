@@ -25,7 +25,14 @@
 //   POST /admin/outbox/drain               admin: deliver notifications that are due (also runs after each event)
 //   GET  /admin/disputes                   admin: open hire disputes (audited); resolved with POST /applications/:id/events
 //                                          HIRE_RESTORED / HIRE_REVOKED and a reason. 404 unless FLAG_CAREER_TIMELINE is set
+//   GET  /admin/applications               admin: candidates by stage across employers (?stage&employerId&jobId; audited)
+//   GET  /admin/interviews                 admin: interviews across employers (?status&employerId&jobId&from&to; audited)
+//   GET  /admin/hires                      admin: hires across employers (?employerId&jobId&from&to; audited)
+//                                          these three: 404 unless FLAG_CAREER_TIMELINE is set
+//   GET  /employers/me/interviews          employer: my interviews (?jobId of my own, ?status, ?from, ?to), start order
 //   GET  /employers/me/analytics           employer: my funnel; GET /admin/analytics admin: all (audited)
+//                                          ?jobId: one job's funnel (the employer's own job; any job for an admin),
+//                                          with the job's views and total applicants (classic applications too)
 //                                          ?from&to (applications whose timeline started then), from events only
 const express = require("express");
 const auth = require("../middleware/auth.middleware");
@@ -38,6 +45,7 @@ const interviews = require("../services/career/careerInterviewService");
 const offers = require("../services/career/careerOfferService");
 const notifications = require("../services/career/careerNotificationService");
 const analytics = require("../services/career/careerAnalyticsService");
+const views = require("../services/career/careerViews");
 const { recordSafe } = require("../services/domainEvents");
 
 const router = express.Router();
@@ -155,7 +163,8 @@ router.get("/employers/me/applications", auth, role("employee", "admin"), handle
     applications: apps.map((a) => {
       const job = byJob.get(String(a.jobId));
       const careerEnabled = timeline.flagOn(a.userId, "student");
-      const ctx = { role: "employer", external: !!job?.isExternal, archived: !!job?.archivedAt };
+      // the job's employer is the caller: owner-only actions (confirm hire) are offered (an admin listing sees them too)
+      const ctx = { role: "employer", external: !!job?.isExternal, archived: !!job?.archivedAt, employerId: job?.postedBy ? String(job.postedBy) : null, userId: String(req.userId) };
       const s = stateOf(a);
       return {
         applicationId: String(a._id),
@@ -220,15 +229,44 @@ function range(req) {
   if ((from && Number.isNaN(from.getTime())) || (to && Number.isNaN(to.getTime()))) throw new CareerError(400, "INVALID_DATE", "from / to must be dates");
   return { from, to };
 }
+// the employer's own interviews only (scheduled by them for their jobs); a job filter must be one of their jobs
+router.get("/employers/me/interviews", auth, role("employee"), handle(async (req, res) => {
+  if (!timeline.flagOn(req.userId, "employee")) return fail(req, res, 404, "CAREER_OFF", "The hiring timeline is not available for your account yet");
+  let jobId = null;
+  if (req.query.jobId) {
+    if (!isId(req.query.jobId)) return fail(req, res, 400, "INVALID_ID", "Invalid job id");
+    if (!(await Job.exists({ _id: req.query.jobId, postedBy: req.userId }))) return fail(req, res, 404, "NOT_FOUND", "Job not found");
+    jobId = req.query.jobId;
+  }
+  const list = await views.listInterviews({ employerId: req.userId, jobId, status: req.query.status, from: req.query.from, to: req.query.to, withJoin: true });
+  ok(req, res, { interviews: list });
+}));
+
+// one job's numbers that aren't events: views and every applicant (timeline or classic)
+async function jobFacts(jobId) {
+  const [job, applicants] = await Promise.all([Job.findById(jobId).select("title views archivedAt").lean(), JobApplication.countDocuments({ jobId })]);
+  return { id: String(jobId), title: job?.title || "", views: Number(job?.views) || 0, applicants, archived: !!job?.archivedAt };
+}
 router.get("/employers/me/analytics", auth, role("employee", "admin"), handle(async (req, res) => {
   if (!timeline.flagOn(req.userId, "employee")) return fail(req, res, 404, "CAREER_OFF", "The hiring timeline is not available for your account yet");
-  ok(req, res, await analytics.funnel({ employerId: req.userId, ...range(req) }));
+  let jobId = null;
+  if (req.query.jobId) {
+    if (!isId(req.query.jobId)) return fail(req, res, 400, "INVALID_ID", "Invalid job id");
+    // only the employer's own job: anything else is "not found" and says nothing about it
+    if (!(await Job.exists({ _id: req.query.jobId, postedBy: req.userId }))) return fail(req, res, 404, "NOT_FOUND", "Job not found");
+    jobId = req.query.jobId;
+  }
+  const out = await analytics.funnel({ employerId: req.userId, jobId, ...range(req) });
+  ok(req, res, jobId ? { ...out, job: await jobFacts(jobId) } : out);
 }));
 router.get("/admin/analytics", auth, role("admin"), handle(async (req, res) => {
   const r = range(req);
   if (req.query.employerId && !isId(req.query.employerId)) return fail(req, res, 400, "INVALID_ID", "Invalid employer id");
+  if (req.query.jobId && !isId(req.query.jobId)) return fail(req, res, 400, "INVALID_ID", "Invalid job id");
+  if (req.query.jobId && !(await Job.exists({ _id: req.query.jobId }))) return fail(req, res, 404, "NOT_FOUND", "Job not found");
   await recordSafe("career.admin.access", `${req.userId}:analytics:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`, { actor: req.userId, subject: { kind: "CareerAnalytics", id: null }, data: { action: "read:analytics", employerId: req.query.employerId || null } });
-  ok(req, res, await analytics.funnel({ employerId: req.query.employerId || null, ...r }));
+  const out = await analytics.funnel({ employerId: req.query.employerId || null, jobId: req.query.jobId || null, ...r });
+  ok(req, res, req.query.jobId ? { ...out, job: await jobFacts(req.query.jobId) } : out);
 }));
 
 // open hire disputes: the candidate disputed a verified hire and no admin has decided yet. Names and the job only
@@ -277,6 +315,72 @@ router.get("/admin/disputes", auth, role("admin"), handle(async (req, res) => {
     .sort((a, b) => new Date(a.disputedAt) - new Date(b.disputedAt));
   await recordSafe("career.admin.access", `${req.userId}:disputes:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`, { actor: req.userId, subject: { kind: "CareerDisputes", id: null }, data: { action: "read:disputes", count: out.length } });
   ok(req, res, { disputes: out });
+}));
+
+// ---------- admin: candidates by stage, interviews, hires (read-only, across employers, audited) ----------
+const STAGES = ["applied", "reviewed", "shortlisted", "interview", "offer", "hired", "rejected", "withdrawn"];
+const adminFilters = (req, res) => {
+  for (const k of ["employerId", "jobId"]) if (req.query[k] && !isId(req.query[k])) { fail(req, res, 400, "INVALID_ID", `Invalid ${k}`); return null; }
+  return { employerId: req.query.employerId || null, jobId: req.query.jobId || null };
+};
+const auditRead = (req, what, data) => recordSafe("career.admin.access", `${req.userId}:${what}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`, { actor: req.userId, subject: { kind: "CareerAdminView", id: null }, data: { action: `read:${what}`, ...data } });
+
+router.get("/admin/applications", auth, role("admin"), handle(async (req, res) => {
+  if (!pilotConfigured()) return fail(req, res, 404, "CAREER_OFF", "The hiring timeline isn't set up");
+  const f = adminFilters(req, res);
+  if (!f) return;
+  const stage = STAGES.includes(String(req.query.stage || "")) ? String(req.query.stage) : null;
+  const jobQuery = {};
+  if (f.employerId) jobQuery.postedBy = f.employerId;
+  if (f.jobId) jobQuery._id = f.jobId;
+  const jobs = await Job.find(jobQuery).select("title companyName postedBy isExternal archivedAt").limit(2000).lean();
+  const byJob = new Map(jobs.map((j) => [String(j._id), j]));
+  const apps = await JobApplication.find({ jobId: { $in: jobs.map((j) => j._id) } }).select("jobId userId status appliedAt fullName").sort({ appliedAt: -1 }).limit(2000).lean();
+  const stateOf = await statesFor(apps);
+  const counts = Object.fromEntries(STAGES.map((s) => [s, 0]));
+  const rows = [];
+  const employerIds = new Set();
+  for (const a of apps) {
+    const job = byJob.get(String(a.jobId));
+    const s = stateOf(a);
+    counts[s.stage] = (counts[s.stage] || 0) + 1;
+    if (stage && s.stage !== stage) continue;
+    if (rows.length >= 300) continue;
+    if (job?.postedBy) employerIds.add(String(job.postedBy));
+    rows.push({ a, job, s });
+  }
+  const employers = new Map((await User.find({ _id: { $in: [...employerIds] } }).select("name companyName").lean()).map((u) => [String(u._id), u.companyName || u.name || ""]));
+  await auditRead(req, "applications", { stage, employerId: f.employerId, jobId: f.jobId, count: rows.length });
+  ok(req, res, {
+    counts,
+    total: apps.length,
+    applications: rows.map(({ a, job, s }) => ({
+      applicationId: String(a._id), appliedAt: a.appliedAt, stage: s.stage,
+      job: { id: String(a.jobId), title: job?.title || "", archived: !!job?.archivedAt },
+      employer: { id: job?.postedBy ? String(job.postedBy) : null, name: (job?.postedBy && employers.get(String(job.postedBy))) || job?.companyName || "" },
+      candidate: { id: String(a.userId), firstName: String(a.fullName || "candidate").trim().split(/\s+/)[0] },
+      interview: s.interview?.status && s.interview.status !== "none" ? { status: s.interview.status, startsAt: s.interview.startsAt || null } : null,
+      onTimeline: timeline.flagOn(a.userId, "student"),
+    })),
+  });
+}));
+
+router.get("/admin/interviews", auth, role("admin"), handle(async (req, res) => {
+  if (!pilotConfigured()) return fail(req, res, 404, "CAREER_OFF", "The hiring timeline isn't set up");
+  const f = adminFilters(req, res);
+  if (!f) return;
+  const list = await views.listInterviews({ ...f, status: req.query.status, from: req.query.from, to: req.query.to });
+  await auditRead(req, "interviews", { ...f, count: list.length });
+  ok(req, res, { interviews: list });
+}));
+
+router.get("/admin/hires", auth, role("admin"), handle(async (req, res) => {
+  if (!pilotConfigured()) return fail(req, res, 404, "CAREER_OFF", "The hiring timeline isn't set up");
+  const f = adminFilters(req, res);
+  if (!f) return;
+  const list = await views.listHires({ ...f, from: req.query.from, to: req.query.to });
+  await auditRead(req, "hires", { ...f, count: list.length });
+  ok(req, res, { hires: list });
 }));
 
 router.post("/admin/outbox/drain", auth, role("admin"), handle(async (req, res) => {
