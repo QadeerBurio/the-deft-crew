@@ -9,6 +9,12 @@
 //                             newest first). Applications outside the pilot are listed too, with match: null.
 //                             Each match has a quality band (strong >= 70, medium 40-69, weak < 40, insufficient), and
 //                             summary counts them: an estimate from the resumes, not a judgment of the candidates.
+//   GET /jobs/:jobId/ranked       best matches for the employer's job (FLAG_CAREER_MATCHING and FLAG_CAREER_TIMELINE for
+//                                 the employer): every application, highest estimate first ("not enough info" after
+//                                 the estimates, applicants outside the pilot last, ties newest first), each with the
+//                                 band, a one-line summary, top strengths (skill + resume line), gaps and each listed
+//                                 skill's status (to compare 2-3 side by side). The job's skills in order. Nobody is
+//                                 hidden or rejected; an estimate from the resume, to check before deciding.
 //   GET /recommended              ?limit= (max 30): open jobs that match the signed-in student's resume (score >= 60, no
 //                                 mandatory criterion "not met"), with the matched skills and where the resume shows
 //                                 them. Students with FLAG_CAREER_MATCHING only (404 MATCHING_OFF otherwise).
@@ -100,6 +106,7 @@ const view = (s) => ({
   mandatorySummary: s.mandatorySummary,
   skills: s.skills,
   evidenceSummary: s.evidenceSummary,
+  best: matching.bestMatchView(s), // the band, one-line summary, strengths and gaps (the drawer and profile show them)
   note: "Decision support only: an estimate from the resume, not a hiring prediction. Nothing is rejected or hidden automatically.",
 });
 
@@ -152,6 +159,33 @@ router.get("/applications/:id", auth, signedIn, handle(async (req, res) => {
   const s = await matchFor(app, job);
   if (admin) await recordSafe("career.admin.access", `${req.userId}:${app._id}:read:match:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`, { actor: req.userId, subject: { kind: "JobApplication", id: app._id }, data: { action: "read:match" } });
   ok(req, res, view(s));
+}));
+
+const timelineOn = (id) => !!id && isEnabled("careerTimeline", { id: String(id), role: "employee" });
+router.get("/jobs/:jobId/ranked", auth, signedIn, handle(async (req, res) => {
+  if (!isId(req.params.jobId)) return fail(req, res, 404, "NOT_FOUND", "Job not found");
+  const job = await Job.findById(req.params.jobId).select("title skills requirements minExperience education postedBy isExternal").lean();
+  if (!job || req.matchRole !== "employee" || !same(job.postedBy, req.userId)) return fail(req, res, 404, "NOT_FOUND", "Job not found");
+  if (!flagOn(req.userId, "employee") || !timelineOn(req.userId)) return fail(req, res, 404, "MATCHING_OFF", "Best matches aren't available for your account yet");
+  const apps = await JobApplication.find({ jobId: job._id }).select("userId yearsOfExperience appliedAt").sort({ appliedAt: -1 }).limit(500).lean();
+  const rows = [];
+  for (const app of apps) {
+    const s = pilot(job, app) ? await matchFor(app, job) : null;
+    rows.push({ applicationId: String(app._id), appliedAt: app.appliedAt, match: s ? { ...matching.bestMatchView(s), computedAt: s.computedAt, source: s.source?.kind || "none" } : null });
+  }
+  // estimates high to low, then "not enough info", then outside the pilot; ties: newest first (the order they came in)
+  const key = (r) => (!r.match ? -2 : r.match.score == null ? -1 : r.match.score);
+  rows.sort((a, b) => key(b) - key(a));
+  let rank = 0;
+  for (const r of rows) r.rank = r.match && r.match.score != null ? ++rank : null;
+  const jobSkills = [...new Map((job.skills || []).map((x) => String(x || "").replace(/\s+/g, " ").trim()).filter(Boolean).map((x) => [matching.canon(x), x])).values()];
+  ok(req, res, {
+    job: { id: String(job._id), title: job.title || "", skills: jobSkills },
+    modelVersion: matching.MODEL_VERSION, formula: matching.FORMULA, thresholds: { ...matching.QUALITY },
+    summary: matching.qualitySummary(rows),
+    note: "An estimate from each resume's skills: check before deciding. Nobody is rejected or hidden automatically; name, photo, gender, age, university and city are never read.",
+    applications: rows,
+  });
 }));
 
 router.get("/jobs/:jobId", auth, signedIn, handle(async (req, res) => {
