@@ -1,11 +1,14 @@
 // services/featureAccess.js
-// Admin access to feature flags per account (models/FeatureAccess.js), set from the admin portal
-// (routes/adminFeatures.routes.js). How a flag is decided is in config/featureFlags.js; this file keeps its
-// in-memory access set up to date and makes the changes.
+// Feature flags per account (models/FeatureAccess.js: forced on / forced off) and per role (models/FeatureDefault.js:
+// the student default), set from the admin portal (routes/adminFeatures.routes.js). How a flag is decided is in
+// config/featureFlags.js; this file keeps its in-memory copy up to date and makes the changes.
 //
 //   expectLoad()          called once at startup, before the database connects: requests wait for the first load
-//   load()                read every row with enabled: true into the in-memory set (after the database connects)
-//   start({ intervalMs }) load, then re-read every 30 s (rows written by another server process show within that)
+//   load()                read every account row (on and off), the student defaults and the ids of every non-student
+//                         account into memory (after the database connects)
+//   start({ intervalMs }) load, then re-read every 30 s (changes made on another server process show within that)
+//   setAccess(...)        one account and flag: state "on" / "off" (a row) or "default" (the row removed)
+//   setDefault(...)       the default of a flag for every student (on / off), with a reason
 //   waitReady             middleware: until the first load has finished (or failed, or 5 s after start, whichever
 //                         comes first), requests wait,
 //                         so a pilot account never sees its features off for the first seconds after a deploy
@@ -17,6 +20,7 @@
 // Never logs an account id: the startup / refresh lines carry counts only.
 const mongoose = require("mongoose");
 const FeatureAccess = require("../models/FeatureAccess");
+const FeatureDefault = require("../models/FeatureDefault");
 const User = require("../models/User");
 const adminLog = require("./adminActionLog");
 const { withTransaction } = require("../utils/transaction");
@@ -50,10 +54,17 @@ function expectLoad() {
 
 async function load() {
   try {
-    const rows = await FeatureAccess.find({ enabled: true, flag: { $in: GRANTABLE } }).select("account flag").lean();
+    const [rows, defaults, others] = await Promise.all([
+      FeatureAccess.find({ flag: { $in: GRANTABLE } }).select("account flag enabled").lean(),
+      FeatureDefault.find({}).select("flag role enabled").lean(),
+      // accounts that aren't students: a student default never applies to them (ids only, never logged)
+      User.find({ role: { $nin: ["student"] } }).select("_id").lean(),
+    ]);
     const byFlag = new Map(GRANTABLE.map((f) => [f, []]));
-    for (const r of rows) byFlag.get(r.flag)?.push(String(r.account));
+    for (const r of rows) byFlag.get(r.flag)?.push([String(r.account), r.enabled === true]);
     flags.setAdminAccess(byFlag);
+    flags.setDefaults(defaults);
+    flags.setNonStudentIds(others.map((u) => String(u._id)));
     const first = !loaded;
     loaded = true;
     return { ok: true, first };
@@ -69,7 +80,11 @@ async function load() {
 async function start({ intervalMs = REFRESH_MS } = {}) {
   expectLoad();
   const r = await load();
-  if (r.ok) console.log(flags.describeAdminAccess());
+  if (r.ok) {
+    console.log(flags.describeAdminAccess());
+    console.log(flags.describeForcedOff());
+    console.log(flags.describeDefaults());
+  }
   if (!timer) {
     timer = setInterval(() => { load(); }, intervalMs);
     timer.unref?.();
@@ -87,49 +102,87 @@ const isLoaded = () => loaded;
 // ---------- changes ----------
 const flagInfo = (flag) => ({ flag, label: FLAGS[flag].grant.label, roles: [...FLAGS[flag].grant.roles] });
 
-function checkInput({ flag, enabled, reason }) {
-  if (!GRANTABLE.includes(flag)) throw new FeatureAccessError(400, "BAD_FLAG", "This feature can't be turned on per account");
-  if (typeof enabled !== "boolean") throw new FeatureAccessError(400, "BAD_ENABLED", "enabled must be true or false");
+const reasonOf = (reason) => {
   const why = String(reason ?? "").trim();
   if (why.length < 3 || why.length > 500) throw new FeatureAccessError(400, "REASON", "A reason (3 to 500 characters) is required");
   return why;
+};
+// state: "on" (forced on), "off" (forced off), "default" (no row: the student default / Railway decide).
+// The older form { enabled: true / false } is "on" / "off".
+function stateOf({ state, enabled }) {
+  if (state === "on" || state === "off" || state === "default") return state;
+  if (state === undefined && typeof enabled === "boolean") return enabled ? "on" : "off";
+  throw new FeatureAccessError(400, "BAD_STATE", "state must be on, off or default");
+}
+function checkInput({ flag, enabled, state, reason }) {
+  if (!GRANTABLE.includes(flag)) throw new FeatureAccessError(400, "BAD_FLAG", "This feature can't be turned on per account");
+  const st = stateOf({ state, enabled });
+  return { why: reasonOf(reason), state: st };
 }
 
 // one account, already loaded (lean: _id, role); throws FeatureAccessError for a wrong role
-async function applyOne({ adminId, user, flag, enabled, reason, requestId }) {
+// before / after in the log: true (forced on), false (forced off), null (no row: default)
+async function applyOne({ adminId, user, flag, state, reason, requestId }) {
   const roles = FLAGS[flag].grant.roles;
   if (!roles.includes(user.role)) throw new FeatureAccessError(400, "WRONG_ROLE", `${FLAGS[flag].grant.label} is for ${roles.join(" / ")} accounts`);
   const accountId = String(user._id);
+  const target = state === "default" ? null : state === "on";
   const { result } = await withTransaction(async (session) => {
     const row = await FeatureAccess.findOne({ account: user._id, flag }).session(session).lean();
-    const before = row?.enabled === true;
-    if (before === enabled) return { changed: false, before, after: before };
+    const before = row ? row.enabled === true : null;
+    if (before === target) return { changed: false, before, after: before };
     const now = new Date();
-    await FeatureAccess.updateOne(
-      { account: user._id, flag },
-      { $set: { enabled, setBy: adminId, reason, setAt: now } },
-      { upsert: true, session, runValidators: true }
-    );
+    if (target === null) await FeatureAccess.deleteOne({ account: user._id, flag }, { session });
+    else {
+      await FeatureAccess.updateOne(
+        { account: user._id, flag },
+        { $set: { enabled: target, setBy: adminId, reason, setAt: now } },
+        { upsert: true, session, runValidators: true }
+      );
+    }
     await adminLog.record({
-      adminId, action: enabled ? "feature.grant" : "feature.revoke", targetType: "User", targetId: accountId,
-      before: { flag, enabled: before }, after: { flag, enabled }, reason, requestId, at: now,
+      adminId, action: target === null ? "feature.reset" : target ? "feature.grant" : "feature.revoke", targetType: "User", targetId: accountId,
+      before: { flag, enabled: before }, after: { flag, enabled: target }, reason, requestId, at: now,
     }, { session });
-    return { changed: true, before, after: enabled };
+    return { changed: true, before, after: target };
   });
-  if (result.changed) flags.applyAdminAccess(flag, accountId, enabled);
+  if (result.changed) flags.applyAdminAccess(flag, accountId, target);
   return { accountId, ...result, state: flags.flagState(flag, { id: accountId, role: user.role }) };
 }
 
-async function setAccess({ adminId, accountId, flag, enabled, reason, requestId }) {
-  const why = checkInput({ flag, enabled, reason });
+async function setAccess({ adminId, accountId, flag, enabled, state, reason, requestId }) {
+  const { why, state: st } = checkInput({ flag, enabled, state, reason });
   if (!isId(accountId)) throw new FeatureAccessError(400, "BAD_ACCOUNT", "Unknown account");
   const user = await User.findById(accountId).select("role").lean();
   if (!user) throw new FeatureAccessError(404, "NOT_FOUND", "Account not found");
-  return applyOne({ adminId, user, flag, enabled, reason: why, requestId });
+  return applyOne({ adminId, user, flag, state: st, reason: why, requestId });
 }
 
-async function bulk({ adminId, accountIds, flag, enabled, reason, requestId }) {
-  const why = checkInput({ flag, enabled, reason });
+// the default of a flag for every student: on / off, with a reason; the row, the admin log entry (same transaction),
+// the in-memory copy. Only flags listed for the student default (config/featureFlags.js STUDENT_DEFAULTABLE).
+async function setDefault({ adminId, flag, role = "student", enabled, reason, requestId }) {
+  if (role !== "student") throw new FeatureAccessError(400, "BAD_ROLE", "Defaults can only be set for students");
+  if (!flags.STUDENT_DEFAULTABLE.includes(flag)) throw new FeatureAccessError(400, "BAD_FLAG", "This feature has no student default");
+  if (typeof enabled !== "boolean") throw new FeatureAccessError(400, "BAD_ENABLED", "enabled must be true or false");
+  const why = reasonOf(reason);
+  const { result } = await withTransaction(async (session) => {
+    const row = await FeatureDefault.findOne({ flag, role }).session(session).lean();
+    const before = row ? row.enabled : null;
+    if (before === enabled) return { changed: false, before, after: before };
+    const now = new Date();
+    await FeatureDefault.updateOne({ flag, role }, { $set: { enabled, setBy: adminId, reason: why, setAt: now } }, { upsert: true, session, runValidators: true });
+    await adminLog.record({
+      adminId, action: "feature.default", targetType: "FeatureDefault", targetId: `${flag}:${role}`,
+      before: { flag, role, enabled: before }, after: { flag, role, enabled }, reason: why, requestId, at: now,
+    }, { session });
+    return { changed: true, before, after: enabled };
+  });
+  if (result.changed) flags.applyDefault(flag, role, enabled);
+  return { flag, role, ...result };
+}
+
+async function bulk({ adminId, accountIds, flag, enabled, state, reason, requestId }) {
+  const { why, state: st } = checkInput({ flag, enabled, state, reason });
   if (!Array.isArray(accountIds) || !accountIds.length) throw new FeatureAccessError(400, "NO_ACCOUNTS", "Select at least one account");
   const unique = [...new Set(accountIds.map(String))];
   if (unique.length > MAX_BULK) throw new FeatureAccessError(400, "TOO_MANY", `At most ${MAX_BULK} accounts per request`);
@@ -141,7 +194,7 @@ async function bulk({ adminId, accountIds, flag, enabled, reason, requestId }) {
     const user = byId.get(id);
     if (!user) { out.skipped.push({ id, why: "not found" }); continue; }
     try {
-      const r = await applyOne({ adminId, user, flag, enabled, reason: why, requestId });
+      const r = await applyOne({ adminId, user, flag, state: st, reason: why, requestId });
       (r.changed ? out.changed : out.unchanged).push(id);
     } catch (err) {
       if (!(err instanceof FeatureAccessError)) throw err;
@@ -169,6 +222,8 @@ async function pilotStudents(flag, brandId) {
     killed,
     // the Railway value turns it on for every student ("on" or "roles:student")
     allStudentsFromRailway: !killed && flags.railwayCoversRole(flag, "student"),
+    // the student default is on (students forced off excepted)
+    allStudentsFromDefault: !killed && flags.studentDefaultOf(flag) === true,
     withAdminAccess: withAccess,
     fromRailwayList: fromRailway,
     usedThisBrand: used.length,
@@ -190,6 +245,8 @@ async function accountView(accountId) {
     const item = {
       ...flagInfo(flag),
       ...flags.flagState(flag, { id: String(user._id), role: user.role }),
+      // the student default for this flag (students only): true / false / null (not set)
+      defaultForRole: user.role === "student" && flags.STUDENT_DEFAULTABLE.includes(flag) ? flags.studentDefaultOf(flag) : null,
       // the row as stored (the in-memory set may lag on another server process by up to 30 s)
       lastChange: row ? { enabled: row.enabled, reason: row.reason, setAt: row.setAt, setBy: { id: String(row.setBy), name: admins.get(String(row.setBy)) || "admin" } } : null,
     };
@@ -199,23 +256,36 @@ async function accountView(accountId) {
   return { account: { id: String(user._id), role: user.role, name: user.brandName || user.name || "" }, flags: list };
 }
 
-function flagsOverview() {
+async function flagsOverview() {
   const lines = new Map(flags.describeFlags().map((l) => [l.slice("[flags] ".length).split(":")[0], l.slice(l.indexOf(": ") + 2)]));
   const counts = flags.adminAccessCounts();
-  return GRANTABLE.map((flag) => ({
-    ...flagInfo(flag),
-    killed: flags.isKilled(flag),
-    railway: lines.get(flags.envName("FLAG", flag)) || "",
-    railwayIdCount: flags.railwayIds(flag).length,
-    adminAccessCount: counts[flag] || 0,
-  }));
+  const offCounts = flags.forcedOffCounts();
+  // the stored defaults (who set them and why); the decision itself uses the in-memory copy
+  const rows = await FeatureDefault.find({ role: "student" }).lean();
+  const byFlag = new Map(rows.map((r) => [r.flag, r]));
+  const admins = new Map((await User.find({ _id: { $in: [...new Set(rows.map((r) => String(r.setBy)))] } }).select("name").lean()).map((u) => [String(u._id), u.name || "admin"]));
+  return GRANTABLE.map((flag) => {
+    const row = byFlag.get(flag);
+    return {
+      ...flagInfo(flag),
+      killed: flags.isKilled(flag),
+      railway: lines.get(flags.envName("FLAG", flag)) || "",
+      railwayIdCount: flags.railwayIds(flag).length,
+      adminAccessCount: counts[flag] || 0,
+      forcedOffCount: offCounts[flag] || 0,
+      studentDefaultable: flags.STUDENT_DEFAULTABLE.includes(flag),
+      studentDefault: flags.STUDENT_DEFAULTABLE.includes(flag)
+        ? { enabled: flags.studentDefaultOf(flag), reason: row?.reason || null, setAt: row?.setAt || null, setBy: row ? { id: String(row.setBy), name: admins.get(String(row.setBy)) || "admin" } : null }
+        : null,
+    };
+  });
 }
 
 async function listFlag(flag, { offset = 0, limit = 50 } = {}) {
   if (!GRANTABLE.includes(flag)) throw new FeatureAccessError(400, "BAD_FLAG", "This feature can't be turned on per account");
   const lim = Math.min(Math.max(Number(limit) || 50, 1), 200);
   const off = Math.max(Number(offset) || 0, 0);
-  const filter = { flag, enabled: true };
+  const filter = { flag }; // forced on and forced off
   const [total, rows] = await Promise.all([
     FeatureAccess.countDocuments(filter),
     FeatureAccess.find(filter).sort({ setAt: -1, _id: -1 }).skip(off).limit(lim).lean(),
@@ -228,6 +298,7 @@ async function listFlag(flag, { offset = 0, limit = 50 } = {}) {
     ...flagInfo(flag),
     killed: flags.isKilled(flag),
     railwayIdCount: flags.railwayIds(flag).length,
+    studentDefault: flags.STUDENT_DEFAULTABLE.includes(flag) ? flags.studentDefaultOf(flag) : null,
     total, offset: off, limit: lim,
     accounts: rows.map((r) => {
       const u = users.get(String(r.account));
@@ -238,6 +309,7 @@ async function listFlag(flag, { offset = 0, limit = 50 } = {}) {
         role: u?.role || null,
         university: u?.university ? unis.get(String(u.university)) || null : null,
         fromRailway: flags.flagState(flag, { id, role: u?.role }).fromRailway,
+        forced: r.enabled === true ? "on" : "off",
         setBy: { id: String(r.setBy), name: users.get(String(r.setBy))?.name || "admin" },
         reason: r.reason, setAt: r.setAt,
       };
@@ -247,6 +319,6 @@ async function listFlag(flag, { offset = 0, limit = 50 } = {}) {
 
 module.exports = {
   expectLoad, load, start, stop, waitReady, isLoaded,
-  setAccess, bulk, accountView, flagsOverview, listFlag,
+  setAccess, setDefault, bulk, accountView, flagsOverview, listFlag,
   FeatureAccessError, MAX_BULK, REFRESH_MS, GRANTABLE,
 };

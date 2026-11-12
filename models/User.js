@@ -376,4 +376,10 @@ userSchema.pre("save", async function () {
   }
 });
 
+// feature flags (config/featureFlags.js): a student default never applies to an employer, brand or admin. The list of
+// non-student accounts is refreshed every 30 s; a new or changed account saved on this server is marked at once.
+userSchema.post("save", function (doc) {
+  try { require("../config/featureFlags").markAccountRole(String(doc._id), doc.role); } catch { /* never blocks a save */ }
+});
+
 module.exports = mongoose.model("User", userSchema);
