@@ -330,6 +330,7 @@ router.get("/public/all", async (req, res) => {
         
         const [jobs, total] = await Promise.all([
             Job.find(query)
+                .select("-email") // contact email: employer and admin only
                 .sort({ featured: -1, urgent: -1, createdAt: -1, _id: 1 })
                 .skip(skip)
                 .limit(parseInt(limit)),
@@ -355,9 +356,11 @@ router.get("/public/all", async (req, res) => {
 });
 
 // Get single job details
+// The job's contact email (Job.email) is never in a public / student reply: only the employer who posted it
+// (/my-jobs) and admins (/all) read it. Same for the lists and fallbacks below (.select("-email")).
 router.get("/public/job/:id", async (req, res) => {
     try {
-        const job = await Job.findById(req.params.id);
+        const job = await Job.findById(req.params.id).select("-email");
         if (!job || job.archivedAt) return res.status(404).json({ message: "Job not found" });
 
         const now = new Date();
@@ -423,6 +426,7 @@ router.get("/public/tdc", async (req, res) => {
 
         const [jobs, total] = await Promise.all([
             Job.find(query)
+                .select("-email") // contact email: employer and admin only
                 .sort({ featured: -1, urgent: -1, createdAt: -1, _id: 1 })
                 .skip(skip)
                 .limit(parseInt(limit)),
@@ -1209,7 +1213,7 @@ router.get("/recommendations", authMiddleware, async (req, res) => {
     if (!resume) {
       console.log(`[${new Date().toISOString()}] ℹ️ No resume found for user: ${req.userId}. Falling back to featured jobs.`);
       // Fallback: featured external internships only, strictly Pakistan
-      const featuredJobs = await Job.find({ active: true, type: 'Internship', featured: true, isExternal: true, location: { $regex: 'pakistan|karachi|lahore|islamabad|rawalpindi|faisalabad|multan|peshawar|quetta|sialkot|gujranwala|hyderabad|abbottabad|sargodha|bahawalpur|sukkur|larkana|gujrat|sheikhupura|jhelum|sahiwal|pk|remote', $options: 'i' } })
+      const featuredJobs = await Job.find({ active: true, type: 'Internship', featured: true, isExternal: true, location: { $regex: 'pakistan|karachi|lahore|islamabad|rawalpindi|faisalabad|multan|peshawar|quetta|sialkot|gujranwala|hyderabad|abbottabad|sargodha|bahawalpur|sukkur|larkana|gujrat|sheikhupura|jhelum|sahiwal|pk|remote', $options: 'i' } }).select("-email")
         .sort({ createdAt: -1 }).limit(parseInt(limit));
       
       console.log(`[${new Date().toISOString()}] 🚀 Sent ${featuredJobs.length} fallback featured jobs in ${Date.now() - startTime}ms`);
@@ -1268,7 +1272,7 @@ router.get("/recommendations/top", authMiddleware, async (req, res) => {
     if (!resume) resume = await Resume.findOne({ user: req.userId }).sort({ updatedAt: -1 });
 
     if (!resume) {
-      const featuredJobs = await Job.find({ active: true, type: 'Internship', featured: true, location: { $regex: 'pakistan|karachi|lahore|islamabad|rawalpindi|faisalabad|multan|peshawar|quetta|sialkot|gujranwala|hyderabad|abbottabad|sargodha|bahawalpur|sukkur|larkana|gujrat|sheikhupura|jhelum|sahiwal|pk|remote', $options: 'i' } })
+      const featuredJobs = await Job.find({ active: true, type: 'Internship', featured: true, location: { $regex: 'pakistan|karachi|lahore|islamabad|rawalpindi|faisalabad|multan|peshawar|quetta|sialkot|gujranwala|hyderabad|abbottabad|sargodha|bahawalpur|sukkur|larkana|gujrat|sheikhupura|jhelum|sahiwal|pk|remote', $options: 'i' } }).select("-email")
         .limit(parseInt(limit)).sort({ createdAt: -1 });
       return res.json({
         recommendations: featuredJobs.map(j => ({ ...j.toObject(), matchPercentage: 50, isRecommended: false })),
@@ -1351,6 +1355,7 @@ router.get('/feed', authMiddleware, async (req, res) => {
       if (experienceLevel) baseQuery.experienceLevel = experienceLevel;
 
       const jobs = await Job.find(baseQuery)
+        .select("-email") // contact email: employer and admin only
         .sort({ featured: -1, urgent: -1, createdAt: -1 })
         .skip((parseInt(page) - 1) * parseInt(limit))
         .limit(parseInt(limit))
