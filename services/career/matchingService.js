@@ -246,8 +246,40 @@ function summaryLine(m) {
   return parts.join(", ");
 }
 
+// ---------- "best match" view of one stored match (the employer's ranked list, the candidate drawer, the profile) ----------
+// The estimate and its band, the one-line summary, the top strengths (a matched skill with the resume line that
+// shows it), the gaps (skills not found / can't tell, mandatory criteria not met / to check) and every listed
+// skill's status (for comparing 2-3 applicants). Only what match() worked out from skill evidence: nothing about the
+// person, no model text.
+const QUALITY_LABEL = { strong: "strong", medium: "medium", weak: "weak", insufficient: "not enough info" };
+function bestMatchView(m) {
+  if (!m?.relevance) return null;
+  const score = m.relevance.score ?? null;
+  const quality = qualityOf(score);
+  const firstLine = (s) => (s.evidence || []).map((e) => e.text).find(Boolean) || "";
+  return {
+    score,
+    quality,
+    qualityLabel: QUALITY_LABEL[quality],
+    insufficient: m.relevance.insufficient || null,
+    summary: summaryLine(m),
+    strengths: (m.skills?.matched || []).slice(0, 3).map((s) => ({ skill: s.skill, evidence: firstLine(s) })),
+    gaps: {
+      missingSkills: (m.skills?.missing || []).map((s) => s.skill),
+      unknownSkills: (m.skills?.unknown || []).map((s) => s.skill),
+      requirements: (m.mandatory || []).filter((c) => c.status !== "met").map((c) => ({ criterion: c.criterion, status: c.status })),
+    },
+    skillStatus: Object.fromEntries([
+      ...(m.skills?.matched || []).map((s) => [s.skill, "matched"]),
+      ...(m.skills?.missing || []).map((s) => [s.skill, "missing"]),
+      ...(m.skills?.unknown || []).map((s) => [s.skill, "unknown"]),
+    ]),
+    mandatorySummary: m.mandatorySummary || { met: 0, notMet: 0, unknown: 0 },
+  };
+}
+
 const sha = (v) => crypto.createHash("sha256").update(canonical(v)).digest("hex");
 const jobFingerprint = (job) => sha({ v: MODEL_VERSION, title: clean(job.title), skills: (job.skills || []).map(clean), requirements: (job.requirements || []).map(clean), minExperience: Number(job.minExperience) || 0, education: job.education || "" });
 const profileFingerprint = (profile, statedYears = null) => sha({ v: MODEL_VERSION, profile, statedYears });
 
-module.exports = { MODEL_VERSION, FORMULA, profileOf, match, mandatoryCriteria, experienceMonths, degreeLevel, canon, termRe, jobFingerprint, profileFingerprint, QUALITY, qualityOf, qualitySummary, summaryLine };
+module.exports = { MODEL_VERSION, FORMULA, profileOf, match, mandatoryCriteria, experienceMonths, degreeLevel, canon, termRe, jobFingerprint, profileFingerprint, QUALITY, qualityOf, qualitySummary, summaryLine, bestMatchView, QUALITY_LABEL };
