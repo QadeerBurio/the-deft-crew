@@ -188,8 +188,8 @@ const on = (flag, who, role) => flags.isEnabled(flag, { id: String(ids[who] || w
   const row = accessRows((x) => String(x.account) === B && x.flag === "loyaltyV2")[0];
   check("…the row: enabled, set by, reason, time", row && row.enabled === true && String(row.setBy) === String(ids.A) && row.reason === "Alpha Cafe loyalty pilot" && row.setAt instanceof Date);
   let lr = logRows();
-  check("…one admin log row: feature.grant, before off, after on, the reason", lr.length === 1 && lr[0].action === "feature.grant" && lr[0].targetType === "User" && lr[0].targetId === B
-    && lr[0].before.flag === "loyaltyV2" && lr[0].before.enabled === false && lr[0].after.enabled === true && lr[0].reason === "Alpha Cafe loyalty pilot" && String(lr[0].admin) === String(ids.A));
+  check("…one admin log row: feature.grant, before: no row (null), after on, the reason", lr.length === 1 && lr[0].action === "feature.grant" && lr[0].targetType === "User" && lr[0].targetId === B
+    && lr[0].before.flag === "loyaltyV2" && lr[0].before.enabled === null && lr[0].after.enabled === true && lr[0].reason === "Alpha Cafe loyalty pilot" && String(lr[0].admin) === String(ids.A));
   r = await call("PUT", `/api/admin/features/account/${B}/loyaltyV2`, { body: { enabled: true, reason: "again" }, t: T.A2 });
   check("the same switch again → unchanged, no new log row", r.status === 200 && r.json.data.changed === false && logRows().length === 1);
   r = await call("GET", "/api/app/flags/me", { t: T.B });
@@ -205,14 +205,14 @@ const on = (flag, who, role) => flags.isEnabled(flag, { id: String(ids[who] || w
   check("empty value: admin access still applies", withEnv({ FLAG_LOYALTY_V2: "" }, () => on("loyaltyV2", "B", "brand")));
   check("Railway ids + admin access: OR (both on)", withEnv({ FLAG_LOYALTY_V2: `ids:${S}` }, () => on("loyaltyV2", "B", "brand") && on("loyaltyV2", "S", "student") && !on("loyaltyV2", "S2", "student")));
 
-  console.log("── 6. switching off; a Railway-listed account stays on (decision 2)");
+  console.log("── 6. switching off: an admin \"off\" now beats the Railway list (feat/feature-defaults)");
   r = await call("PUT", `/api/admin/features/account/${B}/loyaltyV2`, { body: { enabled: false, reason: "pilot paused" }, t: T.A });
   check("off → 200, changed, now off", r.status === 200 && r.json.data.changed === true && !on("loyaltyV2", "B", "brand"));
   lr = logRows();
   check("…logged as feature.revoke with the reason", lr.length === 2 && lr[1].action === "feature.revoke" && lr[1].before.enabled === true && lr[1].after.enabled === false && lr[1].reason === "pilot paused");
   const listed = await withEnvAsync({ FLAG_LOYALTY_V2: `ids:${B}` }, () => call("GET", `/api/admin/features/account/${B}`, { t: T.A }));
   const lf = listed.json?.data?.flags?.find((f) => f.flag === "loyaltyV2");
-  check("account view: Railway-listed → fromRailway true, granted false, effective true", lf && lf.fromRailway === true && lf.granted === false && lf.effective === true && lf.killed === false, JSON.stringify(lf));
+  check("account view: Railway-listed but forced off → fromRailway true, forced off, effective FALSE (the admin off decides)", lf && lf.fromRailway === true && lf.granted === false && lf.forced === "off" && lf.source === "account" && lf.effective === false && lf.killed === false, JSON.stringify(lf));
   check("…lastChange shows the stored row and the admin's name", lf?.lastChange?.enabled === false && lf.lastChange.reason === "pilot paused" && lf.lastChange.setBy.name === "Ayesha Admin");
   check("…brand view lists only the brand's features (Loyalty, Surprise Box)", listed.json.data.flags.map((f) => f.flag).sort().join() === "loyaltyV2,surplusBoxes");
 
@@ -250,11 +250,14 @@ const on = (flag, who, role) => flags.isEnabled(flag, { id: String(ids[who] || w
   console.log("── 9. the features page list and the overview");
   r = await call("GET", "/api/admin/features/flag/loyaltyV2", { t: T.A });
   const L = r.json?.data;
-  check("list: the brand and sana, newest first, with names, university, who and why", r.status === 200 && L.total === 2 && L.accounts[0].id === S && L.accounts[0].name === "sana" && L.accounts[0].university === "NED University"
-    && L.accounts[0].setBy.name === "Ayesha Admin" && L.accounts[0].reason === "test student" && L.accounts[1].name === "Alpha Cafe", JSON.stringify(L?.accounts));
+  const onRows = (L?.accounts || []).filter((a) => a.forced === "on");
+  const offRows = (L?.accounts || []).filter((a) => a.forced === "off");
+  check("list: forced on (sana, the brand) and forced off (the two undone by bulk), newest first, with names, university, who and why", r.status === 200 && L.total === 4 && onRows.length === 2 && offRows.length === 2
+    && onRows[0].id === S && onRows[0].name === "sana" && onRows[0].university === "NED University" && onRows[0].setBy.name === "Ayesha Admin" && onRows[0].reason === "test student" && onRows[1].name === "Alpha Cafe"
+    && offRows.every((a) => a.reason === "undo"), JSON.stringify(L?.accounts));
   check("…no e-mail or phone in the list", !/@test\.local|0300/.test(r.text));
   r = await call("GET", "/api/admin/features/flag/loyaltyV2?limit=1&offset=1", { t: T.A });
-  check("…paged", r.json.data.accounts.length === 1 && r.json.data.accounts[0].id === B);
+  check("…paged", r.json.data.accounts.length === 1 && r.json.data.accounts[0].id === L.accounts[1].id);
   r = await call("GET", "/api/admin/features/flag/metaEvents", { t: T.A });
   check("…non-grantable flag → 400", r.status === 400);
   r = await withEnvAsync({ FLAG_LOYALTY_V2: `ids:${X},${S}` }, () => call("GET", "/api/admin/features/flags", { t: T.A }));
@@ -288,7 +291,7 @@ const on = (flag, who, role) => flags.isEnabled(flag, { id: String(ids[who] || w
   const users = [];
   const walk = (dir) => { for (const f of fs.readdirSync(dir, { withFileTypes: true })) { if (f.isDirectory()) { if (!["node_modules", "tests", ".git", "chat-service"].includes(f.name)) walk(path.join(dir, f.name)); } else if (f.name.endsWith(".js") && /FeatureAccess|featureAccess/.test(fs.readFileSync(path.join(dir, f.name), "utf8"))) users.push(path.relative(SERVER, path.join(dir, f.name)).replace(/\\/g, "/")); } };
   walk(SERVER);
-  const allowed = ["models/FeatureAccess.js", "services/featureAccess.js", "routes/adminFeatures.routes.js", "server.js", "services/accountDeletion.js", "config/featureFlags.js"];
+  const allowed = ["models/FeatureAccess.js", "models/FeatureDefault.js", "services/featureAccess.js", "routes/adminFeatures.routes.js", "server.js", "services/accountDeletion.js", "config/featureFlags.js"];
   check("FeatureAccess is used only by its model, service, admin route, startup, account deletion", users.every((u) => allowed.includes(u)), users.join(", "));
 
   access.stop();

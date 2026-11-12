@@ -1,13 +1,18 @@
 // routes/adminFeatures.routes.js — /api/admin/features: turn features on per account (brand, employer, student)
 // from the admin portal. Admins only, checked against the database (never the token alone). Every change needs a
-// reason and is written to AdminActionLog (feature.grant / feature.revoke) in the same transaction as the row.
-// No other route writes or reads FeatureAccess, so no brand, employer or student can turn on its own features.
+// reason and is written to AdminActionLog (feature.grant / feature.revoke / feature.reset / feature.default) in the
+// same transaction as the row. No other route writes FeatureAccess or FeatureDefault, so no brand, employer or student
+// can change its own features.
 //
-//   GET /flags                    grantable flags: label, roles, Railway state (counts only), admin access count
-//   GET /account/:id              per flag for one account: { killed, fromRailway, granted, effective, lastChange }
-//                                 (a brand with Loyalty / Surprise Box: + how many students have it too)
-//   PUT /account/:id/:flag        { enabled, reason }   one switch
-//   POST /bulk                    { flag, enabled, accountIds (max 500), reason }   → { changed, unchanged, skipped }
+//   GET /flags                    grantable flags: label, roles, Railway state (counts only), forced on / off counts,
+//                                 the student default (on / off / not set, who and why) for the flags that have one
+//   GET /account/:id              per flag for one account: { killed, forced, studentDefault, defaultForRole,
+//                                 fromRailway, source, effective, lastChange } (a brand: + how many students have it)
+//   PUT /account/:id/:flag        { state: "on" | "off" | "default", reason }   forced on, forced off, or reset to
+//                                 default (the row removed); { enabled: true / false } still works (= on / off)
+//   PUT /defaults/:flag           { role: "student", enabled, reason }   the default for every student (FeatureDefault;
+//                                 resumeStudioV2, careerRatings, loyaltyV2, careerTimeline, careerMatching, surplusBoxes)
+//   POST /bulk                    { flag, state | enabled, accountIds (max 500), reason }   → { changed, unchanged, skipped }
 //   GET /flag/:flag               ?offset=&limit=   every account with admin access, newest first
 // Replies: { success: true, data, requestId } or { success: false, error: { code, message }, requestId }.
 const express = require("express");
@@ -51,12 +56,17 @@ router.get("/account/:id", handle(async (req) => access.accountView(req.params.i
 
 router.put("/account/:id/:flag", handle(async (req) => access.setAccess({
   adminId: req.userId, accountId: req.params.id, flag: req.params.flag,
+  state: req.body?.state, enabled: req.body?.enabled, reason: req.body?.reason, requestId: req.id,
+})));
+
+router.put("/defaults/:flag", handle(async (req) => access.setDefault({
+  adminId: req.userId, flag: req.params.flag, role: req.body?.role ?? "student",
   enabled: req.body?.enabled, reason: req.body?.reason, requestId: req.id,
 })));
 
 router.post("/bulk", handle(async (req) => access.bulk({
   adminId: req.userId, accountIds: req.body?.accountIds, flag: req.body?.flag,
-  enabled: req.body?.enabled, reason: req.body?.reason, requestId: req.id,
+  state: req.body?.state, enabled: req.body?.enabled, reason: req.body?.reason, requestId: req.id,
 })));
 
 router.get("/flag/:flag", handle(async (req) => access.listFlag(req.params.flag, { offset: req.query.offset, limit: req.query.limit })));
