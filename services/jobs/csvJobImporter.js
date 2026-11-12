@@ -64,7 +64,16 @@ function mapJobType(rawType) {
   return 'Full-time';
 }
 
-// Extract skill tags from title & department
+const jobSkills = require('./skills');
+
+// The row's skills column, if it has one (any of these names)
+const SKILL_COLUMNS = ['Skills', 'skills', 'Required Skills', 'required_skills', 'Skill Tags', 'skill_tags'];
+function skillsCell(row) {
+  for (const k of SKILL_COLUMNS) if (row[k] !== undefined && String(row[k]).trim() !== '') return String(row[k]);
+  return null;
+}
+
+// Extract skill tags from title & department (rows without a skills column)
 function extractSkills(title, department, audience) {
   const text = `${title} ${department} ${audience}`.toLowerCase();
   const skillKeywords = [
@@ -94,7 +103,10 @@ function extractSkills(title, department, audience) {
  * 
  * @param {string|Buffer} filePathOrBuffer - Path to .csv/.xlsx file OR File Buffer
  * @param {string} [originalFilename=''] - Optional original filename for file extension detection
- * @returns {Promise<{ created: number, updated: number, skipped: number }>} Counts summary
+ * Skills: the row's skills column (split like a paste: commas, semicolons, new lines, " - ", bullets; never inside
+ * brackets), else tags found in the title / department. A row whose skills break the rules (more than 15, or one over
+ * 40 characters) is NOT saved: it's listed in "rejected" with its spreadsheet row number and the reason.
+ * @returns {Promise<{ created: number, updated: number, skipped: number, rejected: Array<{ row, title, company, reason }> }>}
  */
 async function importJobsFromFile(filePathOrBuffer, originalFilename = '') {
   let workbook;
@@ -109,7 +121,7 @@ async function importJobsFromFile(filePathOrBuffer, originalFilename = '') {
 
   const sheetName = workbook.SheetNames[0];
   if (!sheetName) {
-    return { created: 0, updated: 0, skipped: 0 };
+    return { created: 0, updated: 0, skipped: 0, rejected: [] };
   }
 
   const worksheet = workbook.Sheets[sheetName];
@@ -118,9 +130,12 @@ async function importJobsFromFile(filePathOrBuffer, originalFilename = '') {
   let createdCount = 0;
   let updatedCount = 0;
   let skippedCount = 0;
+  const rejected = [];
   const processedKeys = new Set();
 
-  for (const row of allRows) {
+  for (let index = 0; index < allRows.length; index++) {
+    const row = allRows[index];
+    const rowNumber = index + 2; // the header is row 1
     // Flexible column-name fallback matching
     const companyName = (
       row['Company'] || row['company'] || row['Company Name'] || row['company_name'] || ''
@@ -169,7 +184,15 @@ async function importJobsFromFile(filePathOrBuffer, originalFilename = '') {
     const category = mapCategory(department, title);
     const locationType = mapLocationType(location);
     const jobType = mapJobType(rawType);
-    const skills = extractSkills(title, department, audience);
+    const cell = skillsCell(row);
+    // typed skills are checked (a bad row is reported); derived ones just leave out a tag that is too long
+    const derived = cell === null ? jobSkills.cleanSkills(extractSkills(title, department, audience)).skills.filter((x) => x.length <= jobSkills.MAX_SKILL_LENGTH) : null;
+    const checked = cell !== null ? jobSkills.cleanSkills(jobSkills.splitSkillText(cell)) : { skills: derived, errors: [] };
+    if (checked.errors.length) {
+      rejected.push({ row: rowNumber, title, company: companyName, reason: jobSkills.skillsMessage(checked.errors) });
+      continue;
+    }
+    const skills = checked.skills;
 
     let description = `${title} at ${companyName}.\n\nDepartment: ${department}`;
     if (audience) description += `\nTarget Audience: ${audience}`;
@@ -235,7 +258,8 @@ async function importJobsFromFile(filePathOrBuffer, originalFilename = '') {
   return {
     created: createdCount,
     updated: updatedCount,
-    skipped: skippedCount
+    skipped: skippedCount,
+    rejected
   };
 }
 
@@ -244,5 +268,6 @@ module.exports = {
   mapCategory,
   mapLocationType,
   mapJobType,
-  extractSkills
+  extractSkills,
+  skillsCell
 };
