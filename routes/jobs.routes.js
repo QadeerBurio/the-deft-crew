@@ -12,6 +12,9 @@ const { generateJobEmbedding } = require('../services/jobEmbeddingService');
 const { getHybridRecommendations, getSimilarJobs } = require('../services/recommendationService');
 const { analyseSkillGap, validateApplication } = require('../services/skillGapService');
 const { importJobsFromFile } = require("../services/jobs/csvJobImporter");
+// a job's skills: at most 15 tags of at most 40 characters (services/jobs/skills.js)
+const jobSkills = require("../services/jobs/skills");
+const badSkills = (res, errors) => res.status(400).json({ error: jobSkills.skillsMessage(errors), code: "INVALID_SKILLS", limits: { maxSkills: jobSkills.MAX_SKILLS, maxLength: jobSkills.MAX_SKILL_LENGTH } });
 const { track } = require('../services/engagement');
 const careerLegacy = require('../services/career/legacyAdapter'); // FLAG_CAREER_TIMELINE pilot
 // may this user manage this job's applicants? an admin, or the job's own poster. An imported job has no
@@ -81,6 +84,8 @@ router.post("/add", authMiddleware, isAdminOrEmployee, async (req, res) => {
         if (!title || !department || !location || !type || !salary || !email || !description) {
             return res.status(400).json({ error: "Missing required job fields" });
         }
+        const sk = jobSkills.cleanSkills(skills);
+        if (sk.errors.length) return badSkills(res, sk.errors);
 
         const newJob = new Job({
             title, department, category, location, locationType, type, salary,
@@ -89,7 +94,7 @@ router.post("/add", authMiddleware, isAdminOrEmployee, async (req, res) => {
             responsibilities: responsibilities || [], benefits: benefits || [],
             experienceLevel: experienceLevel || "Mid Level",
             minExperience: minExperience || 0, education: education || "Bachelor's Degree",
-            skills: skills || [], active: active !== undefined ? active : true,
+            skills: sk.skills, active: active !== undefined ? active : true,
             featured: featured || false, urgent: urgent || false,
             applicationDeadline: applicationDeadline || new Date(+new Date() + 30*24*60*60*1000),
             postedBy: req.userId,
@@ -126,6 +131,29 @@ router.post("/add", authMiddleware, isAdminOrEmployee, async (req, res) => {
     }
 });
 
+// Skills to fix (admins, read-only): jobs whose stored skills look broken (over 40 characters, unbalanced brackets),
+// or that list more than 15 skills, so they can be fixed by hand in the job form. Reads only: no write of any kind.
+//   GET /admin/skills-report → { checked, jobs: [{ id, title, companyName, active, archived, skillCount, problems:
+//                                [{ skill, reasons }] }], limits }
+router.get("/admin/skills-report", authMiddleware, async (req, res) => {
+    try {
+        if (req.user?.role !== "admin") return res.status(403).json({ message: "Admin access required" });
+        const all = await Job.find({}).select("title companyName skills active archivedAt").lean();
+        const jobs = [];
+        for (const j of all) {
+            const list = Array.isArray(j.skills) ? j.skills : [];
+            const problems = list.map((skill) => ({ skill: String(skill), reasons: jobSkills.skillProblems(skill) })).filter((p) => p.reasons.length);
+            if (list.length > jobSkills.MAX_SKILLS) problems.push({ skill: null, reasons: [`${list.length} skills (max ${jobSkills.MAX_SKILLS})`] });
+            if (problems.length) jobs.push({ id: String(j._id), title: j.title || "", companyName: j.companyName || "", active: !!j.active, archived: !!j.archivedAt, skillCount: list.length, problems });
+        }
+        jobs.sort((a, b) => Number(a.archived) - Number(b.archived) || Number(b.active) - Number(a.active) || a.title.localeCompare(b.title));
+        res.json({ checked: all.length, jobs, limits: { maxSkills: jobSkills.MAX_SKILLS, maxLength: jobSkills.MAX_SKILL_LENGTH } });
+    } catch (err) {
+        console.error("[skills-report]", err.message);
+        res.status(500).json({ message: "Couldn't build the report" });
+    }
+});
+
 // Admin CSV/XLSX Job Importer Endpoint
 router.post('/admin/import-csv', authMiddleware, isAdminOrEmployee, (req, res, next) => {
   uploadJobCsvMulter.single('file')(req, res, (err) => {
@@ -149,7 +177,9 @@ router.post('/admin/import-csv', authMiddleware, isAdminOrEmployee, (req, res, n
       success: true,
       created: result.created,
       updated: result.updated,
-      skipped: result.skipped
+      skipped: result.skipped,
+      // rows not saved because of their skills: { row (spreadsheet row number), title, company, reason }
+      rejected: result.rejected || []
     });
   } catch (err) {
     console.error('❌ Error in /admin/import-csv endpoint:', err);
@@ -223,9 +253,15 @@ router.put("/update/:id", authMiddleware, isAdminOrEmployee, async (req, res) =>
         }
         if (job.archivedAt) return res.status(410).json({ message: "This job was deleted" });
 
+        const changes = { ...(req.body || {}) };
+        if (Object.prototype.hasOwnProperty.call(changes, "skills")) {
+            const sk = jobSkills.cleanSkills(changes.skills);
+            if (sk.errors.length) return badSkills(res, sk.errors);
+            changes.skills = sk.skills;
+        }
         const updatedJob = await Job.findByIdAndUpdate(
             req.params.id,
-            { ...req.body, updatedAt: Date.now() },
+            { ...changes, updatedAt: Date.now() },
             { new: true, runValidators: true }
         );
 
