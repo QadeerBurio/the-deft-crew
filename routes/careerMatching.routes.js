@@ -12,6 +12,10 @@
 //   GET /recommended              ?limit= (max 30): open jobs that match the signed-in student's resume (score >= 60, no
 //                                 mandatory criterion "not met"), with the matched skills and where the resume shows
 //                                 them. Students with FLAG_CAREER_MATCHING only (404 MATCHING_OFF otherwise).
+//   GET /jobs/:jobId/me           the signed-in student's own match for one job (job details "your match"): the
+//                                 estimate and band, the job's skills found in their resume (with where), the
+//                                 missing ones, the mandatory criteria and a one-line summary. Students with
+//                                 FLAG_CAREER_MATCHING only (404 MATCHING_OFF otherwise); match null without a resume.
 //   GET /jobs/:jobId/suggested    students who opted in (discoverable), haven't applied and match 70%+ of the job's
 //                                 skills: an anonymous label, the estimate, matched skills and the resume section only
 //                                 (never a name, university, city, contact or id). The job's employer, with
@@ -109,6 +113,20 @@ router.get("/recommended", auth, signedIn, handle(async (req, res) => {
     modelVersion: matching.MODEL_VERSION, formula: matching.FORMULA, minScore: recs.DEFAULT_MIN_SCORE, hasResume: r.hasResume,
     note: "Jobs whose listed skills your resume shows evidence for. An estimate from your resume, not a promise of an interview.",
     recommendations: r.recommendations,
+  });
+}));
+
+router.get("/jobs/:jobId/me", auth, signedIn, handle(async (req, res) => {
+  const recs = require("../services/career/recommendations");
+  if (req.matchRole !== "student") return fail(req, res, 404, "NOT_FOUND", "Job not found");
+  if (!recs.inPilot(req.userId)) return fail(req, res, 404, "MATCHING_OFF", "Matching isn't available for your account yet");
+  if (!isId(req.params.jobId)) return fail(req, res, 404, "NOT_FOUND", "Job not found");
+  const job = await Job.findById(req.params.jobId).select("title skills requirements minExperience education archivedAt").lean();
+  if (!job || job.archivedAt) return fail(req, res, 404, "NOT_FOUND", "Job not found");
+  const [r, applied] = await Promise.all([recs.matchJobFor(req.userId, job), JobApplication.exists({ jobId: job._id, userId: req.userId })]);
+  ok(req, res, {
+    jobId: String(job._id), modelVersion: matching.MODEL_VERSION, formula: matching.FORMULA, hasResume: r.hasResume, applied: !!applied, match: r.match,
+    note: "An estimate from your resume's skills, not a promise of an interview. Check the job yourself before deciding.",
   });
 }));
 
