@@ -10,6 +10,9 @@
 //       → { hasResume, recommendations: [job + matchPercentage, matchedSkills, matchReasons, explanation, match] }
 //     A recommendation: score >= minScore (default 60) and no mandatory criterion "not met". all: true scores every
 //     open job instead (the feed's order: highest estimate first, "insufficient" last, nothing hidden).
+//   matchJobFor(userId, job)                one job (job details "your match"): { hasResume, match } with the matched
+//                                           skills and where the resume shows them, the missing ones, the mandatory
+//                                           criteria and a one-line summary; match null without a resume.
 //
 // Results are cached in memory per (job version, resume version) fingerprint, 30 minutes, at most 20,000 entries:
 // a change to the job or the resume gives a new fingerprint and a fresh score (no database cache, no
@@ -101,4 +104,30 @@ async function recommend(userId, { resumeId = null, limit = 10, minScore = DEFAU
   return { hasResume: true, recommendations: limit ? out.slice(0, limit) : out };
 }
 
-module.exports = { inPilot, isPilotStudent, recommend, clearCache, DEFAULT_MIN_SCORE, CACHE_TTL_MS };
+/** the student's match for one job (their primary resume, else the latest); job needs skills, requirements,
+ *  minExperience, education, title */
+async function matchJobFor(userId, job) {
+  const resume = await resumeOf(userId);
+  if (!resume) return { hasResume: false, match: null };
+  const profile = matching.profileOf({ resume });
+  const m = cached(`${matching.jobFingerprint(job)}:${matching.profileFingerprint(profile)}`, () => matching.match(job, profile));
+  const score = m.relevance.score;
+  return {
+    hasResume: true,
+    match: {
+      modelVersion: m.modelVersion,
+      score,
+      quality: matching.qualityOf(score),
+      insufficient: m.relevance.insufficient,
+      label: m.relevance.label,
+      summary: matching.summaryLine(m),
+      matched: m.skills.matched.map((s) => ({ skill: s.skill, evidence: (s.evidence || []).map((e) => e.text).filter(Boolean).slice(0, 2) })),
+      missing: m.skills.missing.map((s) => s.skill),
+      unknown: m.skills.unknown.map((s) => s.skill),
+      mandatory: m.mandatory,
+      mandatorySummary: m.mandatorySummary,
+    },
+  };
+}
+
+module.exports = { inPilot, isPilotStudent, recommend, matchJobFor, clearCache, DEFAULT_MIN_SCORE, CACHE_TTL_MS };

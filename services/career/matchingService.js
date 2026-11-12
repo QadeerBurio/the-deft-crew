@@ -227,8 +227,27 @@ function qualitySummary(rows) {
   return out;
 }
 
+// ---------- one line of evidence ----------
+// e.g. "Matches 5 of 6 skills, missing MongoDB, meets all requirements". Built only from the match above (the
+// job's skills found / not found in the resume, the mandatory criteria): no model text, nothing about the person.
+const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+function summaryLine(m) {
+  if (!m?.relevance) return "";
+  if (m.relevance.insufficient) return `Not enough information: ${m.relevance.insufficient}`;
+  const matched = m.skills.matched.length;
+  const total = matched + m.skills.missing.length + m.skills.unknown.length;
+  const parts = [`Matches ${matched} of ${plural(total, "skill")}`];
+  const missing = m.skills.missing.map((s) => s.skill);
+  if (missing.length) parts.push(`missing ${missing.slice(0, 3).join(", ")}${missing.length > 3 ? ` +${missing.length - 3} more` : ""}`);
+  const { met = 0, notMet = 0, unknown = 0 } = m.mandatorySummary || {};
+  if (notMet) parts.push(`${plural(notMet, "requirement")} not met`);
+  if (unknown) parts.push(`${plural(unknown, "requirement")} to check`);
+  if (met && !notMet && !unknown) parts.push("meets all requirements");
+  return parts.join(", ");
+}
+
 const sha = (v) => crypto.createHash("sha256").update(canonical(v)).digest("hex");
 const jobFingerprint = (job) => sha({ v: MODEL_VERSION, title: clean(job.title), skills: (job.skills || []).map(clean), requirements: (job.requirements || []).map(clean), minExperience: Number(job.minExperience) || 0, education: job.education || "" });
 const profileFingerprint = (profile, statedYears = null) => sha({ v: MODEL_VERSION, profile, statedYears });
 
-module.exports = { MODEL_VERSION, FORMULA, profileOf, match, mandatoryCriteria, experienceMonths, degreeLevel, canon, termRe, jobFingerprint, profileFingerprint, QUALITY, qualityOf, qualitySummary };
+module.exports = { MODEL_VERSION, FORMULA, profileOf, match, mandatoryCriteria, experienceMonths, degreeLevel, canon, termRe, jobFingerprint, profileFingerprint, QUALITY, qualityOf, qualitySummary, summaryLine };
