@@ -898,7 +898,9 @@ router.delete("/interviews/cancel/:id", authMiddleware, async (req, res) => {
             title: "Interview Cancelled ❌",
             description: `Your interview for ${application.jobId.title} scheduled for ${oldInterviewDate ? new Date(oldInterviewDate).toLocaleString() : "the scheduled time"} has been cancelled.`,
             type: "Interview",
-            icon: "alert-circle"
+            icon: "alert-circle",
+            // the app opens this job (JobDetails) from the push / notification
+            metadata: { jobId: application.jobId?._id || application.jobId, applicationId: application._id }
         });
         
         res.json({ message: "Interview cancelled successfully" });
@@ -1061,7 +1063,9 @@ router.patch("/candidates/bulk-status", authMiddleware, async (req, res) => {
                 title: `Application Status Update - ${app.jobId.title}`,
                 description: statusMessage,
                 type: "Application Status",
-                icon: status === "shortlisted" ? "trophy" : "information-circle"
+                icon: status === "shortlisted" ? "trophy" : "information-circle",
+                // the app opens this job (JobDetails) from the push / notification
+                metadata: { jobId: app.jobId?._id || app.jobId, applicationId: app._id }
             });
         }
         

@@ -80,7 +80,7 @@ async function enqueue(event, ctx) {
     if (!recipient) continue;
     const channels = msg.to === "candidate" ? ["push", "inapp"] : ["inapp"];
     if (msg.email && emailReady()) channels.push("email");
-    const payload = { title: msg.title, body: msg.body, data: { applicationId: String(event.application), eventType: event.type, screen: msg.to === "candidate" ? "MyApplications" : "Candidates" } };
+    const payload = { title: msg.title, body: msg.body, data: { applicationId: String(event.application), jobId: event.job ? String(event.job) : undefined, eventType: event.type, screen: msg.to === "candidate" ? "MyApplications" : "Candidates" } };
     for (const channel of channels) {
       rows.push({ event: event._id, eventType: event.type, application: event.application, recipient, channel, key: `${event._id}:${recipient}:${channel}`, payload });
     }
