@@ -831,6 +831,17 @@ router.put('/:id', auth, rejectGuest, async (req, res) => {
       resume.template = req.body.template;
     }
 
+    // colours / font from the builder: merged, only the sent keys change
+    if (req.body.customStyles && typeof req.body.customStyles === 'object') {
+      const allowed = ['font', 'accentColor', 'headingColor', 'textColor', 'bgColor'];
+      const next = { ...(resume.customStyles || {}) };
+      for (const k of allowed) {
+        if (typeof req.body.customStyles[k] === 'string' && req.body.customStyles[k].length <= 40) next[k] = req.body.customStyles[k];
+      }
+      resume.customStyles = next;
+      resume.markModified('customStyles');
+    }
+
     if (req.body.uploadedResume) {
       resume.uploadedResume = {
         ...resume.uploadedResume,
