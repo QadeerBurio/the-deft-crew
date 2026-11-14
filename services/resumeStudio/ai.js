@@ -5,10 +5,12 @@
 const OpenAI = require("openai");
 
 let client;
+const ATTEMPT_MS = 45000;
 let override = null; // tests: async (messages) => replyText
 
 function getClient() {
-  if (!client) client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 45000, maxRetries: 1 });
+  // 45 s per attempt, no SDK retries: completeJson makes at most 2 attempts, so a tailoring waits 90 s at most
+  if (!client) client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: ATTEMPT_MS, maxRetries: 0 });
   return client;
 }
 
@@ -22,7 +24,10 @@ async function complete(messages) {
     temperature: 0.2,
     response_format: { type: "json_object" },
   });
-  return res.choices?.[0]?.message?.content || "";
+  const choice = res.choices?.[0];
+  // the answer was cut off (too long): never parse half a resume
+  if (choice?.finish_reason === "length") throw Object.assign(new Error("the model's answer was cut off"), { code: "truncated" });
+  return choice?.message?.content || "";
 }
 
 /**
@@ -37,7 +42,8 @@ async function completeJson(messages, parse) {
     try {
       text = await complete(messages);
     } catch (e) {
-      last = { ok: false, error: e?.status === 429 ? "model_rate_limited" : "model_error" };
+      const timedOut = e?.name === "APIConnectionTimeoutError" || e?.code === "ETIMEDOUT" || /timed? ?out/i.test(e?.message || "");
+      last = { ok: false, error: e?.status === 429 ? "model_rate_limited" : timedOut ? "model_timeout" : e?.code === "truncated" ? "model_truncated" : "model_error" };
       continue;
     }
     last = parse(text);
@@ -48,4 +54,4 @@ async function completeJson(messages, parse) {
 
 function setCaller(fn) { override = fn; }
 
-module.exports = { available, completeJson, setCaller };
+module.exports = { available, completeJson, setCaller, ATTEMPT_MS };

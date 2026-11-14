@@ -134,6 +134,8 @@ router.get("/jobs/:jobId/me", auth, signedIn, handle(async (req, res) => {
   const [r, applied] = await Promise.all([recs.matchJobFor(req.userId, job), JobApplication.exists({ jobId: job._id, userId: req.userId })]);
   ok(req, res, {
     jobId: String(job._id), modelVersion: matching.MODEL_VERSION, formula: matching.FORMULA, hasResume: r.hasResume, applied: !!applied, match: r.match,
+    // the newest approved tailored version for this job: { before, score } ("before X% → after Y%"), or null
+    tailored: r.tailored || null,
     note: "An estimate from your resume's skills, not a promise of an interview. Check the job yourself before deciding.",
   });
 }));

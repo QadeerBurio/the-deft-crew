@@ -128,7 +128,24 @@ async function matchJobFor(userId, job) {
       mandatory: m.mandatory,
       mandatorySummary: m.mandatorySummary,
     },
+    // the student's latest approved Resume Studio version for this job, scored the same way ("before X% → after Y%")
+    tailored: await tailoredMatch(userId, job),
   };
+}
+
+/**
+ * The newest approved tailored version for this job: { versionId, label, before, score, quality }. "before" is the
+ * resume it was tailored from (which may not be the primary / latest resume "your match" otherwise uses), so the app
+ * shows "before X% → after Y%" for the same resume. null when there's none.
+ */
+async function tailoredMatch(userId, job) {
+  const Version = require("../../models/CareerResumeApprovedVersion");
+  const v = await Version.findOne({ userId, "target.jobId": job._id }).sort({ approvedAt: -1 }).select("label contentSnapshot approvedAt sourceResumeId").lean();
+  if (!v?.contentSnapshot) return null;
+  const m = matching.match(job, matching.profileOf({ content: v.contentSnapshot }));
+  const base = v.sourceResumeId ? await Resume.findOne({ _id: v.sourceResumeId, user: userId }).lean() : null;
+  const before = base ? matching.match(job, matching.profileOf({ resume: base })).relevance.score : null;
+  return { versionId: String(v._id), label: v.label || "", before, score: m.relevance.score, quality: matching.qualityOf(m.relevance.score), approvedAt: v.approvedAt };
 }
 
 module.exports = { inPilot, isPilotStudent, recommend, matchJobFor, clearCache, DEFAULT_MIN_SCORE, CACHE_TTL_MS };

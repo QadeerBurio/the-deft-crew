@@ -196,7 +196,9 @@ const rewardsOf = (brand, who, f = () => true) => rows("LoyaltyReward", (r) => s
   await reqS("./services/featureAccess").load(); // account roles + defaults, as the script does before running
   const backfill = reqS("./scripts/loyaltyBackfill.js");
   const DAY = 864e5;
-  const ago = (d, h = 12) => new Date(Date.now() - d * DAY + (h - 12) * 3600e3);
+  // d days ago at h o'clock Karachi time (two times on the same day stay on the same Karachi day whenever the suite runs)
+  const { dayKey } = reqS("./utils/karachiTime");
+  const ago = (d, h = 12) => new Date(new Date(`${dayKey(new Date(Date.now() - d * DAY))}T00:00:00+05:00`).getTime() + h * 3600e3);
   const pR = oid(), pP = oid();
   // Roast: the bug: a 2-visit stamp card with a branch chosen (counter visits never counted), daily limit 1, only oR
   fake.seed(coll("LoyaltyProgram"), [

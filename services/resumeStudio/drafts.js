@@ -15,6 +15,8 @@ const { StudioError } = require("./tailor");
 const { revisionHashOf, hashContent } = require("./facts");
 const { checkText, checkVersion, corpusOf, getAt, setAt, listForOrder } = require("./validator");
 const { RENDERER_VERSION, pdfStatus } = require("./renderer");
+const matching = require("../career/matchingService");
+const SECTIONS = ["workExperience", "education", "projects", "skills", "certifications", "languages"];
 
 const clone = (x) => JSON.parse(JSON.stringify(x));
 
@@ -25,6 +27,37 @@ function applied(s) {
   return false;
 }
 
+/**
+ * The version is always the full source resume: a section the edits lost or shrank is put back from the source
+ * (and logged). Text fields may change; entries never disappear.
+ */
+function keepComplete(source, content) {
+  for (const k of SECTIONS) {
+    const a = Array.isArray(source[k]) ? source[k] : [];
+    const b = Array.isArray(content[k]) ? content[k] : null;
+    if (!b || b.length < a.length) {
+      console.warn(`[resume-studio] ${k}: ${b ? b.length : "none"} of ${a.length} entries after tailoring; the source section is kept`);
+      content[k] = clone(a);
+    }
+  }
+  if (!content.personalInfo) content.personalInfo = clone(source.personalInfo || {});
+  if (!content.professionalSummary || (!content.professionalSummary.summary && source.professionalSummary?.summary)) content.professionalSummary = clone(source.professionalSummary || { summary: "" });
+  return content;
+}
+const skillKey = (n) => matching.canon(String(n || ""));
+/** skills the version adds: surfaced from the resume's own experience / projects, and the ones the student confirmed */
+function addedSkills(draft) {
+  const m = draft.match || {};
+  const have = new Set((draft.sourceContent?.skills || []).map((s) => skillKey(s.name)));
+  const out = [];
+  for (const s of [...(m.surfaced || []).map((x) => ({ name: x.skill, why: "surfaced" })), ...(m.confirmedSkills || []).map((x) => ({ name: x.skill, why: "confirmed" }))]) {
+    const k = skillKey(s.name);
+    if (!k || have.has(k)) continue;
+    have.add(k);
+    out.push(s);
+  }
+  return out;
+}
 /** The draft's content with the applied decisions: rewords first (original indexes), then reorders. */
 function contentWithDecisions(draft) {
   const content = clone(draft.sourceContent);
@@ -37,7 +70,46 @@ function contentWithDecisions(draft) {
     const order = JSON.parse(s.proposed);
     if (Array.isArray(list) && order.length === list.length) setAt(content, s.fieldPath.replace(/^order\./, ""), order.map((i) => list[i]));
   }
-  return content;
+  // the job's skills the resume shows (and the ones the student confirmed) lead the skills section
+  const extra = addedSkills(draft).map((s) => ({ name: s.name, category: "" }));
+  if (extra.length) content.skills = [...extra, ...(content.skills || [])];
+  return keepComplete(draft.sourceContent, content);
+}
+/** the match estimate (the jobs list's skill-evidence matcher) on some content, for this draft's job: 0-100 or null */
+function scoreOf(draft, content) {
+  const skills = draft.match?.jobSkills || [...(draft.match?.matched || []), ...(draft.match?.missing || [])].filter((r) => r.kind === "skill").map((r) => r.requirement);
+  if (!skills.length) return null;
+  return matching.match({ skills, requirements: [] }, matching.profileOf({ content })).relevance.score;
+}
+/** the job's skills the (final) resume doesn't show: the student may confirm one, with a proof line */
+function missingSkills(draft, content) {
+  const skills = draft.match?.jobSkills || [];
+  if (!skills.length) return [];
+  const m = matching.match({ skills, requirements: [] }, matching.profileOf({ content }));
+  return (m.skills?.missing || []).map((s) => s.skill);
+}
+/** side by side: each section's text before and after (only what changed) */
+function changesOf(source, final) {
+  const out = [];
+  const push = (section, label, before, after) => { if (String(before || "") !== String(after || "")) out.push({ section, label, before: before || "", after: after || "" }); };
+  push("summary", "summary", source.professionalSummary?.summary, final.professionalSummary?.summary);
+  const names = (list, f) => (list || []).map(f).join("\n");
+  push("skills", "skills", names(source.skills, (s) => s.name), names(final.skills, (s) => s.name));
+  (final.workExperience || []).forEach((w, i) => {
+    const s = (source.workExperience || []).find((x) => x.company === w.company && x.position === w.position) || {};
+    push("experience", `${w.position} at ${w.company}`, [s.description, ...(s.achievements || [])].filter(Boolean).join("\n"), [w.description, ...(w.achievements || [])].filter(Boolean).join("\n"));
+    void i;
+  });
+  (final.projects || []).forEach((p) => {
+    const s = (source.projects || []).find((x) => x.name === p.name) || {};
+    push("projects", p.name, s.description, p.description);
+  });
+  push("order", "order of projects", names(source.projects, (p) => p.name), names(final.projects, (p) => p.name));
+  (final.education || []).forEach((e) => {
+    const s = (source.education || []).find((x) => x.institution === e.institution && x.degree === e.degree) || {};
+    push("education", `${e.degree}, ${e.institution}`, s.description, e.description);
+  });
+  return out;
 }
 
 // claims the student explicitly confirmed as true (they count as support at approval)
@@ -60,6 +132,13 @@ function studentView(draft) {
     })),
     facts: (d.facts || []).map((f) => ({ factId: f.factId, type: f.type, value: f.value })),
     match: d.match || { matched: [], missing: [], unknown: [] },
+    // the match estimate on the base resume and on this tailored version ("before X% → after Y%")
+    scores: { before: scoreOf(d, d.sourceContent), after: scoreOf(d, contentWithDecisions(d)) },
+    surfacedSkills: (d.match?.surfaced || []).map((s) => ({ skill: s.skill, evidence: (s.evidence || []).map((e) => e.text).filter(Boolean) })),
+    confirmedSkills: (d.match?.confirmedSkills || []).map((s) => ({ skill: s.skill, proof: s.proof, confirmedAt: s.confirmedAt })),
+    missingSkills: missingSkills(d, contentWithDecisions(d)),
+    changes: changesOf(d.sourceContent, contentWithDecisions(d)),
+    sections: Object.fromEntries(SECTIONS.map((k) => [k, (contentWithDecisions(d)[k] || []).length])),
     warnings: d.warnings || [],
     aiSuggestions: d.fallback ? "insufficient_information" : "available",
     fallback: d.fallback || null,
@@ -149,7 +228,7 @@ async function approve(userId, draftId, body) {
     throw new StudioError("SOURCE_CHANGED", "Your resume changed after this draft was made. Please tailor it again.");
   }
   const final = contentWithDecisions(draft);
-  const check = checkVersion(draft.sourceContent, final, corpusOf(draft.facts || []), confirmedClaims(draft));
+  const check = checkVersion(draft.sourceContent, final, corpusOf(draft.facts || []), confirmedClaims(draft), addedSkills(draft).map((s) => s.name));
   if (!check.ok) throw Object.assign(new StudioError("VALIDATION_FAILED", "Some changes add details that aren't in your resume."), { errors: check.errors });
   const label = String(body?.label || draft.target?.title || "Tailored resume").replace(/\s+/g, " ").trim().slice(0, 80);
   let version;
@@ -176,4 +255,46 @@ const versionView = (v) => ({
   usedInApplication: !!v.usedInApplication, retainUntil: v.retainUntil || null, deletable: !v.usedInApplication,
 });
 
-module.exports = { decide, approve, studentView, versionView, contentWithDecisions, applied };
+/**
+ * The student says they have a skill the job asks for that the resume doesn't show, with a short proof line (a project
+ * or experience). Only skills from this draft's "missing" list; a proof of 8-200 characters without links or e-mails.
+ * remove: true takes it back. Sent with the draft's revision (409 if stale).
+ */
+async function confirmSkill(userId, draftId, body = {}) {
+  const draft = await CareerResumeDraft.findOne({ _id: draftId, userId }).lean();
+  if (!draft) throw new StudioError("NOT_FOUND", "Draft not found");
+  if (draft.status !== "open") throw new StudioError("ALREADY_APPROVED", "This draft is already approved. Start a new tailoring to make changes.");
+  if (Number(body.revision) !== draft.revision) throw Object.assign(new StudioError("STALE_REVISION", "This draft changed on another device. Reload it and try again."), { current: draft.revision });
+  const skill = String(body.skill || "").replace(/\s+/g, " ").trim();
+  const list = clone(draft.match?.confirmedSkills || []);
+  const k = skillKey(skill);
+  if (body.remove === true) {
+    const next = list.filter((s) => skillKey(s.skill) !== k);
+    if (next.length === list.length) throw new StudioError("UNKNOWN_SKILL", "That skill isn't on your list");
+    return save(next);
+  }
+  const askable = new Set([...missingSkills(draft, contentWithDecisions(draft)), ...list.map((s) => s.skill)].map(skillKey));
+  if (!skill || !askable.has(k)) throw new StudioError("UNKNOWN_SKILL", "You can only add a skill this job asks for that your resume doesn't show yet");
+  const proof = String(body.proof || "").replace(/\s+/g, " ").trim();
+  if (proof.length < 8) throw new StudioError("PROOF_REQUIRED", "Add a short line saying where you used this skill (a project or experience)");
+  if (proof.length > 200) throw new StudioError("PROOF_TOO_LONG", "Keep the proof line under 200 characters");
+  if (/https?:\/\/|www\.|@/.test(proof)) throw new StudioError("PROOF_INVALID", "Leave links and e-mails out of the proof line");
+  if (body.confirmTrue !== true) throw new StudioError("CONFIRMATION_REQUIRED", "Tick \"I have this\" to add it");
+  const next = [...list.filter((s) => skillKey(s.skill) !== k), { skill, proof, confirmedAt: new Date() }];
+  return save(next);
+  async function save(confirmed) {
+    const updated = await CareerResumeDraft.findOneAndUpdate(
+      { _id: draft._id, userId, status: "open", revision: draft.revision },
+      { $set: { "match.confirmedSkills": confirmed }, $inc: { revision: 1 } },
+      { returnDocument: "after" }
+    ).lean();
+    if (!updated) throw new StudioError("STALE_REVISION", "This draft changed on another device. Reload it and try again.");
+    return updated;
+  }
+}
+
+module.exports = {
+  confirmSkill,
+  keepComplete,
+  scoreOf,
+  addedSkills, decide, approve, studentView, versionView, contentWithDecisions, applied };
