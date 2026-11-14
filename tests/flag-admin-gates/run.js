@@ -45,6 +45,8 @@ axios.request = async (cfg) => blocked((cfg.method || "get").toLowerCase())(cfg.
 const mongoose = reqS("mongoose");
 const fake = require(path.join(SERVER, "tests", "hide-user-secrets", "fake-mongo"));
 fake.install(mongoose, mongoose.Types.ObjectId, { unique: true, interleave: true });
+// these checks are about Railway rules / admin rows: no built-in "on" default (as before features-on-by-default)
+require(path.join(SERVER, "tests", "hide-user-secrets", "defaults-off"))(reqS("./config/featureFlags"));
 
 // the startup warning for a missing pickup-code secret, captured
 const errs = [];

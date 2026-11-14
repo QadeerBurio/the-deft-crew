@@ -126,10 +126,10 @@ const defaultRows = (f = () => true) => rows("FeatureDefault", f);
   const flagsMe = async (t) => (await call("GET", "/api/app/flags/me", { t })).json || {};
   const setDefault = (flag, enabled) => call("PUT", `/api/admin/features/defaults/${flag}`, { t: T.A, body: { role: "student", enabled, reason: "every student, from the test" } });
 
-  console.log("── 1. Railway FLAG_* unset, no rows, no defaults: everything off");
+  console.log("── 1. Railway FLAG_* unset, no rows: every student feature on by default (features-on-by-default)");
   await access.load();
   let me = await flagsMe(T.S);
-  check("a student with no rows and no defaults: every student flag off", ALL.every((f) => me[f] === false), JSON.stringify(me));
+  check("a student with no rows and no default rows: every student flag on", ALL.every((f) => me[f] === true), JSON.stringify(me));
 
   console.log("── 2. defaults on for every student (as in live admin)");
   for (const f of ALL) { const r = await setDefault(f, true); check(`default on: ${f}`, r.status === 200, r.status); }
@@ -175,10 +175,10 @@ const defaultRows = (f = () => true) => rows("FeatureDefault", f);
 
   console.log("── 6. loyalty: brands running a program now (for the app's empty state)");
   r = await call("GET", "/api/loyalty/programs/active", { t: T.S });
-  check("no brand has its own Loyalty switch on: enabled, zero programs ('no loyalty programs near you yet')", r.status === 200 && r.json?.data?.enabled === true && r.json.data.programs.length === 0, JSON.stringify(r.json?.data));
-  await call("PUT", `/api/admin/features/account/${ids.B}/loyaltyV2`, { t: T.A, body: { state: "on", reason: "test: brand pilot" } });
+  check("the brand's Loyalty is on by default and it runs an active program: listed with its name", r.status === 200 && r.json?.data?.enabled === true && r.json.data.programs.length === 1 && r.json.data.programs[0].brandName === "Alpha Cafe", JSON.stringify(r.json?.data));
+  await call("PUT", `/api/admin/features/account/${ids.B}/loyaltyV2`, { t: T.A, body: { state: "off", reason: "test: this brand off" } });
   r = await call("GET", "/api/loyalty/programs/active", { t: T.S });
-  check("the brand switched on with an active program: listed with its name", r.json?.data?.programs?.length === 1 && r.json.data.programs[0].brandName === "Alpha Cafe", JSON.stringify(r.json?.data));
+  check("the brand switched off: zero programs ('no loyalty programs near you yet')", r.json?.data?.enabled === true && r.json.data.programs.length === 0, JSON.stringify(r.json?.data));
   await call("PUT", `/api/admin/features/account/${ids.S}/loyaltyV2`, { t: T.A, body: { state: "off", reason: "test: off again" } });
   r = await call("GET", "/api/loyalty/programs/active", { t: T.S });
   check("the student's loyalty off: enabled false, no list", r.json?.data?.enabled === false && r.json.data.programs.length === 0);

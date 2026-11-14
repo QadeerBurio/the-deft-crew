@@ -17,19 +17,21 @@
 //   counts only, never the ids.
 //   GET /api/app/flags/me returns the "client" flags for the signed-in user (routes/appFlags.routes.js).
 //
-// ADMIN ACCESS AND STUDENT DEFAULTS (from the admin portal; models/FeatureAccess.js, models/FeatureDefault.js,
-// services/featureAccess.js). Flags with a "grant" entry can be forced on or off for one account by an admin; flags
-// with studentDefault: true can also be set on or off for every student at once. A flag is decided, in order:
+// ADMIN ACCESS AND ROLE DEFAULTS (from the admin portal; models/FeatureAccess.js, models/FeatureDefault.js,
+// services/featureAccess.js). Flags with a "grant" entry can be forced on or off for one account by an admin. Every
+// feature listed in ROLE_DEFAULTS is ON for every account of that role unless an admin turns the role's default off.
+// A flag is decided, in order:
 //     1. a Railway value that is only "off" (off / false / 0 / no) is the kill switch: off for everyone
 //     2. the account's own row (FeatureAccess): enabled true = forced on, enabled false = forced OFF. An admin "off"
 //        beats the student default and the Railway rules
-//     3. the default for the account's role (FeatureDefault; students only: employers, brands and admins have none)
+//     3. the default for the account's role: ON for the features ROLE_DEFAULTS lists (student, brand, employee), unless
+//        a FeatureDefault row turns it off for that role; admins and travelers have none
 //     4. the Railway rules (ids, %, roles)
 //     5. otherwise off (the flag's built-in default)
-//   "Students only" is checked against the account itself, not just the role a caller passes: the ids of every
-//   non-student account are kept in memory too, so a route that asks for role "student" never turns a default on
-//   for an employer, a brand or an admin.
-//   All of it lives in memory here (setAdminAccess, setDefaults, setNonStudentIds), loaded and refreshed every 30 s
+//   The role is checked against the account itself, not just the role a caller passes: every non-student account's
+//   role is kept in memory too (a missing role is a student), so a route that asks for "student" never turns a
+//   default on for an employer, and one that asks for "employee" never does for an admin.
+//   All of it lives in memory here (setAdminAccess, setDefaults, setAccountRoles), loaded and refreshed every 30 s
 //   by services/featureAccess.js (at once on the server that made a change), so isEnabled() stays synchronous and
 //   never reads the database.
 //
@@ -183,35 +185,83 @@ const adminAccessCounts = () => Object.fromEntries(Object.keys(FLAGS).filter((k)
 /** Counts only: { flag: accounts forced off } */
 const forcedOffCounts = () => Object.fromEntries(Object.keys(FLAGS).filter((k) => FLAGS[k].grant).map((k) => [k, [...(adminAccess.get(k)?.values() || [])].filter((v) => v === false).length]));
 
-// student defaults: flag → true / false (no entry = not set: the Railway rules decide)
-const STUDENT_DEFAULTABLE = Object.keys(FLAGS).filter((k) => FLAGS[k].grant && FLAGS[k].studentDefault && FLAGS[k].grant.roles.includes("student"));
-let studentDefaults = new Map();
-/** Replace the defaults: Map / object flag → boolean, or [{ flag, role: "student", enabled }] */
+// role defaults: every listed feature is ON for every account of the role, unless an admin turned that role's
+// default off (FeatureDefault row enabled: false). No row = on. Roles not listed (admin, traveler) get none.
+const ROLE_DEFAULTS = {
+  student: ["resumeStudioV2", "careerRatings", "loyaltyV2", "careerTimeline", "careerMatching", "surplusBoxes"],
+  brand: ["loyaltyV2", "surplusBoxes"],
+  employee: ["careerTimeline", "careerMatching", "careerRatings", "employerFirstHireFree"],
+};
+const DEFAULT_ROLES = Object.keys(ROLE_DEFAULTS);
+/** may this role have a default for this flag? (listed above, and a role the flag can be granted to) */
+const defaultable = (flag, role) => !!(ROLE_DEFAULTS[role] || []).includes(flag) && !!FLAGS[flag]?.grant?.roles.includes(role);
+// kept for the student-only callers (models, older code)
+const STUDENT_DEFAULTABLE = ROLE_DEFAULTS.student.filter((f) => defaultable(f, "student"));
+const DEFAULTABLE_FLAGS = [...new Set(DEFAULT_ROLES.flatMap((r) => ROLE_DEFAULTS[r].filter((f) => defaultable(f, r))))];
+
+// the rows admins set: "role:flag" → true / false
+let roleDefaults = new Map();
+const rdKey = (role, flag) => `${role}:${flag}`;
+/**
+ * Replace the defaults: [{ flag, role, enabled }] (rows), or the older student-only Map / object flag → boolean
+ */
 function setDefaults(input) {
   const next = new Map();
-  const entries = Array.isArray(input) ? input.filter((r) => r && r.role === "student").map((r) => [r.flag, r.enabled]) : input instanceof Map ? [...input] : Object.entries(input || {});
-  for (const [flag, enabled] of entries) if (STUDENT_DEFAULTABLE.includes(flag) && typeof enabled === "boolean") next.set(flag, enabled);
-  studentDefaults = next;
+  const rows = Array.isArray(input)
+    ? input.filter(Boolean).map((r) => [r.role, r.flag, r.enabled])
+    : (input instanceof Map ? [...input] : Object.entries(input || {})).map(([flag, enabled]) => ["student", flag, enabled]);
+  for (const [role, flag, enabled] of rows) if (defaultable(flag, role) && typeof enabled === "boolean") next.set(rdKey(role, flag), enabled);
+  roleDefaults = next;
 }
-/** One default in memory (the server that made the change applies it at once); null removes it */
+/** One default in memory (the server that made the change applies it at once); null removes the row (back to on) */
 function applyDefault(flag, role, enabled) {
-  if (role !== "student" || !STUDENT_DEFAULTABLE.includes(flag)) return;
-  if (enabled === null || enabled === undefined) studentDefaults.delete(flag);
-  else studentDefaults.set(flag, !!enabled);
+  if (!defaultable(flag, role)) return;
+  if (enabled === null || enabled === undefined) roleDefaults.delete(rdKey(role, flag));
+  else roleDefaults.set(rdKey(role, flag), !!enabled);
 }
-const studentDefaultOf = (flag) => (studentDefaults.has(flag) ? studentDefaults.get(flag) : null);
+// "no row = on". setBuiltInDefaults(false) brings back the old meaning, "no row = not set: the Railway rules decide"
+// (pilot-only behaviour: used by the pilot test suites; production never calls it)
+let builtInDefaults = true;
+function setBuiltInDefaults(on) { builtInDefaults = !!on; }
+/** The default for every account of a role: true / false, or null when the role has none for this flag */
+function roleDefaultOf(flag, role) {
+  if (!defaultable(flag, role)) return null;
+  const k = rdKey(role, flag);
+  if (roleDefaults.has(k)) return roleDefaults.get(k);
+  return builtInDefaults ? true : null; // no row = on
+}
+/** Was the default set by an admin (a row), or is it the built-in "on"? */
+const roleDefaultSet = (flag, role) => roleDefaults.has(rdKey(role, flag));
+const studentDefaultOf = (flag) => roleDefaultOf(flag, "student");
 
-// accounts that are NOT students (employers, brands, admins): a default never applies to them, whatever role a
-// caller passes. Replaced as a whole on each refresh; a new non-student account is added at once by markAccountRole.
-let nonStudents = new Set();
-let nonStudentsLoaded = false;
-function setNonStudentIds(ids) { nonStudents = new Set([...ids].map(String)); nonStudentsLoaded = true; }
-function markAccountRole(id, role) { if (!id) return; if (role && role !== "student") nonStudents.add(String(id)); else nonStudents.delete(String(id)); }
-/** the student default that applies to this user (true / false), or undefined */
+// every account with an explicit role other than student: id → role (a missing role is a student). A default
+// applies only when the role a caller passes is the account's own, so a route that asks for "employee" for a job's
+// poster never gives an admin's job the employer defaults, and "student" never reaches a brand. Replaced as a whole
+// on each refresh; a new or changed account is updated at once by markAccountRole.
+let accountRoles = new Map();
+let accountRolesLoaded = false;
+/** [id, role] pairs (or plain ids: an unknown non-student role) */
+function setAccountRoles(pairs) {
+  const next = new Map();
+  for (const p of pairs) {
+    if (Array.isArray(p)) { if (p[0] && p[1] && p[1] !== "student") next.set(String(p[0]), String(p[1])); }
+    else if (p) next.set(String(p), "other");
+  }
+  accountRoles = next;
+  accountRolesLoaded = true;
+}
+const setNonStudentIds = (ids) => setAccountRoles([...ids]);
+function markAccountRole(id, role) { if (!id) return; if (role && role !== "student") accountRoles.set(String(id), String(role)); else accountRoles.delete(String(id)); }
+/** the account's own role as far as the defaults go ("student" when it has none stored) */
+const accountRoleOf = (id) => accountRoles.get(String(id)) || "student";
+/** the role default that applies to this user (true / false), or undefined */
 function defaultFor(flag, user) {
-  if (!user?.id || user.role !== "student" || !studentDefaults.has(flag)) return undefined;
-  if (nonStudents.has(String(user.id))) return undefined; // the caller said "student", the account isn't one
-  return studentDefaults.get(flag);
+  if (!user?.id || !user.role || !defaultable(flag, user.role)) return undefined;
+  // until the account list has loaded, only a student default can apply (as before); after, the role must match
+  if (!accountRolesLoaded && user.role !== "student") return undefined;
+  if (accountRoleOf(user.id) !== user.role) return undefined;
+  const d = roleDefaultOf(flag, user.role);
+  return d === null ? undefined : d;
 }
 
 /** The Railway value is only "off": the kill switch */
@@ -272,7 +322,7 @@ function pilotConfigured(flag) {
   if (isKilled(flag)) return false;
   const raw = rawValue(flag);
   if (raw != null && unquote(raw) && !OFF.has(unquote(raw).toLowerCase())) return true;
-  if (studentDefaults.get(flag) === true) return true; // on for every student
+  if (DEFAULT_ROLES.some((r) => roleDefaultOf(flag, r) === true)) return true; // on by default for a role
   return !!FLAGS[flag].grant && (adminAccessCounts()[flag] || 0) > 0;
 }
 
@@ -320,9 +370,14 @@ function describeForcedOff() {
   return `[flags] forced off: ${parts.join(", ") || "none"}`;
 }
 
-/** One startup line, e.g. "[flags] student defaults: loyaltyV2 on, careerMatching off, surplusBoxes not set" (no ids) */
+/**
+ * One startup line (no ids), e.g.
+ * "[flags] defaults: student {resumeStudioV2 on, careerRatings on, …}, brand {loyaltyV2 on, surplusBoxes off}, employee {…}"
+ */
 function describeDefaults() {
-  return `[flags] student defaults: ${STUDENT_DEFAULTABLE.map((k) => `${k} ${studentDefaults.has(k) ? (studentDefaults.get(k) ? "on" : "off") : "not set"}`).join(", ")}`;
+  const word = (v) => (v === null ? "not set" : v ? "on" : "off");
+  const role = (r) => `${r} {${ROLE_DEFAULTS[r].filter((f) => defaultable(f, r)).map((f) => `${f} ${word(roleDefaultOf(f, r))}`).join(", ")}}`;
+  return `[flags] defaults: ${DEFAULT_ROLES.map(role).join(", ")}`;
 }
 
 /** The client flags for one user, for GET /api/app/flags/me */
@@ -358,5 +413,6 @@ module.exports = {
   FLAGS, JOBS, isEnabled, clientFlags, publicFlags, jobEnabled, describeJobs, describeFlags, parseRules, isStaging, envName,
   flagState, isKilled, railwayIds, railwayCoversRole, pilotConfigured, setAdminAccess, applyAdminAccess, adminAccessCounts, describeAdminAccess,
   forcedOffCounts, describeForcedOff, STUDENT_DEFAULTABLE, setDefaults, applyDefault, studentDefaultOf, describeDefaults,
-  setNonStudentIds, markAccountRole, isNonStudentListLoaded: () => nonStudentsLoaded,
+  ROLE_DEFAULTS, DEFAULT_ROLES, DEFAULTABLE_FLAGS, defaultable, roleDefaultOf, roleDefaultSet, setBuiltInDefaults,
+  setNonStudentIds, setAccountRoles, markAccountRole, accountRoleOf, isNonStudentListLoaded: () => accountRolesLoaded,
 };

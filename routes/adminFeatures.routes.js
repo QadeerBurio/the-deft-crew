@@ -10,7 +10,8 @@
 //                                 fromRailway, source, effective, lastChange } (a brand: + how many students have it)
 //   PUT /account/:id/:flag        { state: "on" | "off" | "default", reason }   forced on, forced off, or reset to
 //                                 default (the row removed); { enabled: true / false } still works (= on / off)
-//   PUT /defaults/:flag           { role: "student", enabled, reason }   the default for every student (FeatureDefault;
+//   PUT /defaults/:flag           { role: "student" | "brand" | "employee", enabled, reason }   the default for every
+//                                 account of that role (on unless turned off; FeatureDefault;
 //                                 resumeStudioV2, careerRatings, loyaltyV2, careerTimeline, careerMatching, surplusBoxes)
 //   POST /bulk                    { flag, state | enabled, accountIds (max 500), reason }   → { changed, unchanged, skipped }
 //   GET /flag/:flag               ?offset=&limit=   every account with admin access, newest first
