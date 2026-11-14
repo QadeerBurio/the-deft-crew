@@ -329,7 +329,7 @@ function seedRedemption(offerId, who, bill = 1000) {
   r = await call("PATCH", `/api/loyalty/programs/${prog.id}`, { tok: T.A, body: { branchIds: [String(ids.bA1)] } });
   check("program limited to the Clifton branch", r.status === 200 && r.json.data.branchIds.join() === String(ids.bA1));
   r = await call("POST", "/api/offers/redeem-payment", { tok: T.A, body: { offerId: String(ids.oA), userId: String(ids.S5), billAmount: 1000, branchId: String(ids.bA2) } });
-  check("at the DHA branch (not in the program): offer % (20), no credit", r.status === 200 && r.json.savedAmount === 200 && !r.json.loyalty && credits("S5").length === 0, JSON.stringify(r.json));
+  check("at the DHA branch (not in the program): offer % (20), no credit, and the brand is told why", r.status === 200 && r.json.savedAmount === 200 && r.json.loyalty?.credited === false && r.json.loyalty.reason === "branch-not-in-program" && /this branch isn't part of your loyalty program/.test(r.json.loyalty.message) && credits("S5").length === 0, JSON.stringify(r.json));
   r = await call("POST", "/api/offers/redeem-payment", { tok: T.A, body: { offerId: String(ids.oA), userId: String(ids.S5), billAmount: 1000, branchId: String(ids.bA1) } });
   check("at the Clifton branch: tier % (15), visit credited with the branch", r.status === 200 && r.json.savedAmount === 150 && r.json.loyalty?.credited && same(counted("S5")[0].branch, ids.bA1), JSON.stringify(r.json?.loyalty));
   await call("PATCH", `/api/loyalty/programs/${prog.id}`, { tok: T.A, body: { branchIds: [] } });

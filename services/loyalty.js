@@ -27,6 +27,7 @@ const { recordSafe } = require("./domainEvents");
 const { takeSlot, releaseSlot } = require("../models/RedemptionGuard");
 const { withTransaction } = require("../utils/transaction");
 const { dayKey } = require("../utils/karachiTime");
+const User = require("../models/User");
 
 const DEFAULT_TIERS = [
   { name: "Member", minVisit: 1, maxVisit: 5, discountPct: 15 },
@@ -255,7 +256,9 @@ async function activeProgram(brandId, now = new Date()) {
   return running(p, now) ? withPeriod(p) : null;
 }
 const offerCovered = (p, offerId) => !(p.eligibleOfferIds || []).length || p.eligibleOfferIds.some((o) => same(o, offerId));
-const branchCovered = (p, branchId) => !(p.branchIds || []).length || (!!branchId && p.branchIds.some((b) => same(b, branchId)));
+// a branch outside the program doesn't count; an unknown branch does (the counter QR screen, promo codes and store
+// webhooks don't know the branch: before, a program with chosen branches silently counted none of those visits)
+const branchCovered = (p, branchId) => !(p.branchIds || []).length || !branchId || p.branchIds.some((b) => same(b, branchId));
 
 // ---------- visits, from the ledger ----------
 function windowStart(program, now = new Date()) {
@@ -398,6 +401,10 @@ async function onVerifiedRedemption(redemptionId, opts = {}) {
     if (counts && modeOf(program) === "reward") {
       const earned = await earnRewardIfDue(program, brandId, studentId);
       rewardProgress = stampsView(program, await rewardState(program, brandId, studentId), !!earned);
+    }
+    if (!counts) {
+      // the daily limit: tell the student (in-app + push, once per row) that this visit was already counted today
+      await require("./loyaltyNotify").notifyRow(result.entry, { ...(rewardProgress || result.progress || {}), maxVisitsPerDay: program.maxVisitsPerDay }, {});
     }
     if (counts) {
       await recordSafe("loyalty.credited", String(redemptionId), {
@@ -702,8 +709,138 @@ async function rewardCounts(program) {
   return { earned: list.length, used: list.filter((r) => r.status === "used").length, waiting: list.filter((r) => r.status === "available").length };
 }
 
+// ---------- what a redemption did for loyalty (the brand's verify screen and the app say this) ----------
+const OUTCOME_MESSAGE = {
+  "": "visit counted",
+  "daily-limit": "visit already counted today",
+  "offer-not-in-program": "this offer isn't part of your loyalty program, so the visit didn't count",
+  "branch-not-in-program": "this branch isn't part of your loyalty program, so the visit didn't count",
+  "no-program": "no active loyalty program",
+  "not-enabled": "loyalty isn't on for this account",
+  error: "the visit couldn't be counted right now",
+};
+/**
+ * One shape for every redemption reply: { credited, reason, message, visitNumber, progress, stamps, maxVisitsPerDay }.
+ * result: what creditSafe returned (null: not called).
+ */
+function outcomeOf(result) {
+  if (!result) return null;
+  const reason = result.credited ? "" : result.duplicate ? (result.entry?.reason || "") : (result.reason || "");
+  const credited = !!result.credited || (!!result.duplicate && result.entry?.visitsDelta > 0);
+  return {
+    credited,
+    duplicate: !!result.duplicate,
+    reason,
+    message: credited ? (result.stamps?.justEarned ? "visit counted · reward ready" : "visit counted") : OUTCOME_MESSAGE[reason] || reason || "the visit didn't count",
+    visitNumber: result.visitNumber ?? result.entry?.visitNumber ?? null,
+    progress: result.progress || null,
+    stamps: result.stamps || null,
+  };
+}
+
+// ---------- the student's own cards: "my loyalty" (GET /api/loyalty/me/cards) ----------
+/** every brand the student has visits at: its card (stamps or tier), rewards earned / ready / used, recent history */
+async function myCards(studentId, { historyPerBrand = 10 } = {}) {
+  if (!isId(studentId)) return [];
+  const rows = await LoyaltyLedger.find({ student: studentId }).sort({ effectiveAt: -1 }).limit(2000).lean();
+  const brandIds = [...new Set(rows.map((r) => String(r.brand)))];
+  const names = new Map((await User.find({ _id: { $in: brandIds } }).select("brandName name").lean()).map((u) => [String(u._id), u.brandName || u.name || ""]));
+  const out = [];
+  for (const b of brandIds) {
+    if (!enabledFor(b, studentId)) continue;
+    const program = await activeProgram(b);
+    const mine = rows.filter((r) => String(r.brand) === b);
+    const rewards = program ? await LoyaltyReward.find({ brand: b, student: studentId, status: { $ne: "void" } }).sort({ earnedAt: -1 }).lean() : [];
+    const card = { brandId: b, brandName: names.get(b) || "", program: program ? publicProgram(program) : null, active: !!program };
+    if (program && modeOf(program) === "reward") card.stamps = stampsView(program, await rewardState(program, b, studentId));
+    else if (program) card.progress = progressOf(program, tally(mine.slice().reverse(), program).visits);
+    card.rewardsEarned = rewards.length;
+    card.rewardsUsed = rewards.filter((r) => r.status === "used").length;
+    card.rewardReady = rewards.some((r) => r.status === "available");
+    const reversed = new Set(mine.filter((r) => r.type === "REVERSAL" && r.reverses).map((r) => String(r.reverses)));
+    card.history = [
+      ...mine.filter((r) => r.type === "CREDIT").slice(0, historyPerBrand).map((r) => ({
+        kind: "visit", at: r.effectiveAt, status: r.visitsDelta > 0 ? (reversed.has(String(r._id)) ? "reversed" : "counted") : "not-counted",
+        reason: r.visitsDelta > 0 ? "" : r.reason || "", message: r.visitsDelta > 0 ? "" : OUTCOME_MESSAGE[r.reason] || r.reason || "",
+      })),
+      ...rewards.slice(0, historyPerBrand).flatMap((r) => [
+        { kind: "reward-earned", at: r.earnedAt, label: r.label },
+        ...(r.status === "used" ? [{ kind: "reward-used", at: r.usedAt, label: r.label }] : []),
+      ]),
+    ].sort((x, y) => new Date(y.at) - new Date(x.at)).slice(0, historyPerBrand);
+    card.lastVisitAt = mine.find((r) => r.type === "CREDIT" && r.visitsDelta > 0)?.effectiveAt || null;
+    out.push(card);
+  }
+  // reward ready first, then the most recent visit
+  return out.sort((a, c) => (c.rewardReady - a.rewardReady) || (new Date(c.lastVisitAt || 0) - new Date(a.lastVisitAt || 0)));
+}
+
+// ---------- members: who has the brand's loyalty (brand portal "members" tab, admin per brand) ----------
+const MEMBER_FILTERS = ["all", "reward-ready", "reward-used"];
+/**
+ * Every student with a visit (counted or not) at this brand in the current program period:
+ *   { members: [{ studentId, label, university, visits, visitsNeeded, rewardsEarned, rewardsUsed, rewardReady, lastVisitAt }],
+ *     totals: { members, visitsThisMonth, rewardsEarned, rewardsUsed }, filter, mode }
+ * label is "tdc verified user" (as in recent claims): never a name, phone or e-mail.
+ */
+async function members(brandId, { filter = "all", now = new Date() } = {}) {
+  if (!isId(brandId)) throw new LoyaltyError(400, "INVALID_ID", "Invalid brand id");
+  const f = MEMBER_FILTERS.includes(filter) ? filter : "all";
+  const program = (await LoyaltyProgram.findOne({ brand: brandId, status: { $in: ["active", "paused", "ended"] } }).sort({ updatedAt: -1 }).lean()) || null;
+  const after = Number(program?.countAfterVersion) || 0;
+  const rows = (await LoyaltyLedger.find({ brand: brandId }).lean()).filter((r) => (Number(r.programVersion) || 0) > after);
+  const rewards = program ? (await LoyaltyReward.find({ brand: brandId, status: { $ne: "void" } }).lean()).filter((r) => r.programVersion > after) : [];
+  const ids = [...new Set([...rows.map((r) => String(r.student)), ...rewards.map((r) => String(r.student))])];
+  const users = new Map((await User.find({ _id: { $in: ids } }).select("university").populate({ path: "university", select: "name" }).lean()).map((u) => [String(u._id), u]));
+  const isReward = program && modeOf(program) === "reward";
+  const list = [];
+  for (const id of ids) {
+    const mine = rows.filter((r) => String(r.student) === id);
+    const rw = rewards.filter((r) => String(r.student) === id);
+    let visits = 0;
+    if (program && isReward) visits = (await rewardState(program, brandId, id)).stamps;
+    else if (program) visits = tally(mine, program, now).visits;
+    const lastVisit = mine.filter((r) => r.type === "CREDIT" && r.visitsDelta > 0).sort((a, b) => new Date(b.effectiveAt) - new Date(a.effectiveAt))[0];
+    list.push({
+      studentId: id,
+      label: "tdc verified user",
+      university: users.get(id)?.university?.name || "",
+      visits: isReward ? Math.min(visits, Number(program.reward?.visitsNeeded) || visits) : visits,
+      visitsNeeded: isReward ? Number(program.reward?.visitsNeeded) || null : null,
+      rewardsEarned: rw.length,
+      rewardsUsed: rw.filter((r) => r.status === "used").length,
+      rewardReady: rw.some((r) => r.status === "available"),
+      lastVisitAt: lastVisit?.effectiveAt || null,
+    });
+  }
+  list.sort((a, b) => new Date(b.lastVisitAt || 0) - new Date(a.lastVisitAt || 0));
+  const mk = monthKey(now);
+  const totals = {
+    members: list.length,
+    visitsThisMonth: rows.filter((r) => r.type === "CREDIT" && r.visitsDelta > 0 && monthKey(r.effectiveAt) === mk).length
+      - rows.filter((r) => r.type === "REVERSAL" && r.visitsDelta < 0 && monthKey(r.effectiveAt) === mk).length,
+    rewardsEarned: rewards.length,
+    rewardsUsed: rewards.filter((r) => r.status === "used").length,
+  };
+  const shown = f === "reward-ready" ? list.filter((m) => m.rewardReady) : f === "reward-used" ? list.filter((m) => m.rewardsUsed > 0) : list;
+  return { filter: f, mode: program ? modeOf(program) : null, programId: program ? String(program._id) : null, totals, members: shown };
+}
+/** the same rows as CSV (no phone, no e-mail, no name) */
+function membersCsv(view) {
+  const esc = (v) => { const s = v == null ? "" : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const head = ["student", "university", "visits", "visits needed", "rewards earned", "rewards used", "reward ready", "last visit"];
+  const lines = view.members.map((m) => [m.label, m.university, m.visits, m.visitsNeeded ?? "", m.rewardsEarned, m.rewardsUsed, m.rewardReady ? "yes" : "no", m.lastVisitAt ? new Date(m.lastVisitAt).toISOString().slice(0, 10) : ""].map(esc).join(","));
+  return [head.join(","), ...lines].join("\n") + "\n";
+}
+
 module.exports = {
   DEFAULT_TIERS,
+  outcomeOf,
+  OUTCOME_MESSAGE,
+  myCards,
+  members,
+  membersCsv,
+  MEMBER_FILTERS,
   LoyaltyError,
   enabledFor,
   validateTiers,

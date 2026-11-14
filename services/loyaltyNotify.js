@@ -25,8 +25,13 @@ async function brandOf(brandId) {
   return { name, ref: { _id: String(brandId), name: b?.name || name, brandName: name } };
 }
 
-/** What to say for a ledger row: { kind, title, body } or null (a credit that didn't count says nothing) */
+/** What to say for a ledger row: { kind, title, body } or null (a credit that didn't count says nothing, except the daily limit) */
 function messageFor(row, progress, brandName, thisVisitPct = null) {
+  // the daily limit: "visit already counted today" (kind "visit": the notice kinds are unchanged)
+  if (row.type === "CREDIT" && !(row.visitsDelta > 0) && row.reason === "daily-limit") {
+    const n = Number(progress?.maxVisitsPerDay) || 1;
+    return { kind: "visit", title: `Visit already counted today at ${brandName}`, body: `${n === 1 ? "One visit a day counts" : `${n} visits a day count`} at ${brandName}. Your discount still applied; come back tomorrow for your next visit.` };
+  }
   if (row.type === "CREDIT" && progress?.mode === "reward") {
     // reward mode: stamps toward a reward ("unlocked" when this visit earned it; the notice kinds are unchanged)
     if (!(row.visitsDelta > 0)) return null;
