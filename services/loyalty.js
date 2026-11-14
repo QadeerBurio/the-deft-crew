@@ -155,7 +155,7 @@ async function rewardState(program, brandId, studentId, session = null) {
   const thisMonth = rewards.filter((r) => monthKey(r.earnedAt) === monthKey(now)).length;
   const limit = program.reward?.maxPerStudent && rewards.length >= program.reward.maxPerStudent ? "program-limit"
     : program.reward?.maxPerMonth && thisMonth >= program.reward.maxPerMonth ? "monthly-limit" : null;
-  return { stamps: visits, visitsToday, needed, available, limit, cycleKey: `${after}:${lastUsed ? lastUsed._id : "start"}`, earned: rewards.length };
+  return { stamps: visits, visitsToday, needed, available, limit, cycleKey: `${after}:${lastUsed ? lastUsed._id : "start"}`, earned: rewards.length, lastUsedAt: lastUsed ? lastUsed.usedAt : null };
 }
 // what the app and the brand see
 function stampsView(program, st, justEarned = false) {
@@ -337,8 +337,12 @@ async function quoteFor({ brandId, studentId, offerId, branchId = null }) {
 }
 
 // ---------- the hook ----------
-// opts: { source, branchId, actor, discountPct } — discountPct: the loyalty % the caller applied (null: none)
+// opts: { source, branchId, actor, discountPct, at, silent } — discountPct: the loyalty % the caller applied (null:
+// none); at: when the visit happened (default now; scripts/loyaltyBackfill.js passes the redemption's own time, so the
+// visit is dated then and the daily limit counts that day); silent: no notification to the student (the backfill)
 async function onVerifiedRedemption(redemptionId, opts = {}) {
+  const at = opts.at ? new Date(opts.at) : new Date();
+  if (Number.isNaN(at.getTime())) return { credited: false, reason: "invalid" };
   const none = (reason, extra = {}) => ({ credited: false, reason, ...extra });
   if (!isId(redemptionId)) return none("invalid");
   const offer = await Offer.findOne({ "redemptions._id": redemptionId }).select("brand redemptions").lean();
@@ -363,10 +367,10 @@ async function onVerifiedRedemption(redemptionId, opts = {}) {
   let dayKeyTaken = null;
   try {
     const entries = await ledgerOf(brandId, studentId);
-    const { visits, visitsToday } = tally(entries, program);
+    const { visits, visitsToday } = tally(entries, program, at);
     let counts = true;
     if (program.maxVisitsPerDay) {
-      const k = `loyalty-day:${program._id}:${studentId}:${dayKey()}`;
+      const k = `loyalty-day:${program._id}:${studentId}:${dayKey(at)}`;
       counts = await takeSlot(k, program.maxVisitsPerDay, visitsToday, new Date(Date.now() + 3 * DAY_MS));
       if (counts) dayKeyTaken = k;
     }
@@ -390,7 +394,7 @@ async function onVerifiedRedemption(redemptionId, opts = {}) {
       savedAmount: Number(r.savedAmount) || null,
       actor: isId(opts.actor) ? opts.actor : null,
       idempotencyKey: key,
-      effectiveAt: new Date(),
+      effectiveAt: at,
     };
     const { result } = await withTransaction(async (session) => {
       const [entry] = await LoyaltyLedger.create([row], { session });
@@ -402,7 +406,7 @@ async function onVerifiedRedemption(redemptionId, opts = {}) {
       const earned = await earnRewardIfDue(program, brandId, studentId);
       rewardProgress = stampsView(program, await rewardState(program, brandId, studentId), !!earned);
     }
-    if (!counts) {
+    if (!counts && !opts.silent) {
       // the daily limit: tell the student (in-app + push, once per row) that this visit was already counted today
       await require("./loyaltyNotify").notifyRow(result.entry, { ...(rewardProgress || result.progress || {}), maxVisitsPerDay: program.maxVisitsPerDay }, {});
     }
@@ -411,8 +415,8 @@ async function onVerifiedRedemption(redemptionId, opts = {}) {
         actor: row.actor, subject: { kind: "LoyaltyLedger", id: result.entry._id },
         data: { brand: String(brandId), student: String(studentId), visitNumber: row.visitNumber, tier: tier.name, source: row.source },
       });
-      // push + in-app, once per ledger row (services/loyaltyNotify.js); never fails the credit
-      await require("./loyaltyNotify").notifyRow(result.entry, rewardProgress || result.progress, { thisVisitPct: rewardProgress ? null : pctOf(program, tier) });
+      // push + in-app, once per ledger row (services/loyaltyNotify.js); never fails the credit (not for the backfill)
+      if (!opts.silent) await require("./loyaltyNotify").notifyRow(result.entry, rewardProgress || result.progress, { thisVisitPct: rewardProgress ? null : pctOf(program, tier) });
     }
     return { credited: counts, reason: row.reason, visitNumber: row.visitNumber, entry: result.entry, progress: result.progress, ...(rewardProgress ? { stamps: rewardProgress } : {}) };
   } catch (err) {
@@ -834,6 +838,7 @@ function membersCsv(view) {
 }
 
 module.exports = {
+  rewardStateOf: rewardState,
   DEFAULT_TIERS,
   outcomeOf,
   OUTCOME_MESSAGE,
