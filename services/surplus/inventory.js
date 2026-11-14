@@ -50,7 +50,7 @@ function assertConfigured(where) {
 }
 
 const brandBlocked = async (brandId) => !!(await SurplusBrandBlock.exists({ brand: brandId, active: true }));
-const flagOn = (id) => isEnabled("surplusBoxes", { id: String(id) });
+const flagOn = (id) => isEnabled("surplusBoxes", { id: String(id), role: "brand" }); // a listing's brand
 
 /** Can a student order from this listing right now? (published, before cutoff, brand in the pilot and not blocked) */
 async function assertOrderable(listing, now = new Date()) {

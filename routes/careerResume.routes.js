@@ -21,6 +21,7 @@
 //   GET    /applications/:applicationId/resume           which version was sent (metadata)
 //   GET    /applications/:applicationId/resume.pdf       exactly that snapshot
 const express = require("express");
+const { roleOf } = require("../utils/userRole");
 const auth = require("../middleware/auth.middleware");
 const User = require("../models/User");
 const Resume = require("../models/Resume");
@@ -68,8 +69,9 @@ const gate = (...roles) => async (req, res, next) => {
   if (req.isGuest || !isId(req.userId)) return fail(req, res, 401, "SIGN_IN", "Sign in first");
   const u = await User.findById(req.userId).select("role").lean();
   if (!u) return fail(req, res, 401, "SIGN_IN", "Sign in first");
-  if (!isEnabled("resumeStudioV2", { id: String(req.userId), role: u.role })) return fail(req, res, 404, "STUDIO_OFF", "Resume Studio is not available for your account yet");
-  if (roles.length && !roles.includes(u.role)) return fail(req, res, 403, "FORBIDDEN", "Not allowed for your account");
+  const r = roleOf(u); // a missing role is a student
+  if (!isEnabled("resumeStudioV2", { id: String(req.userId), role: r })) return fail(req, res, 404, "STUDIO_OFF", "Resume Studio is not available for your account yet");
+  if (roles.length && !roles.includes(r)) return fail(req, res, 403, "FORBIDDEN", "Not allowed for your account");
   req.studioRole = u.role;
   next();
 };

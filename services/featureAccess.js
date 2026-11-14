@@ -21,6 +21,7 @@
 const mongoose = require("mongoose");
 const FeatureAccess = require("../models/FeatureAccess");
 const FeatureDefault = require("../models/FeatureDefault");
+const { roleOf, NON_STUDENT_QUERY } = require("../utils/userRole");
 const User = require("../models/User");
 const adminLog = require("./adminActionLog");
 const { withTransaction } = require("../utils/transaction");
@@ -58,7 +59,8 @@ async function load() {
       FeatureAccess.find({ flag: { $in: GRANTABLE } }).select("account flag enabled").lean(),
       FeatureDefault.find({}).select("flag role enabled").lean(),
       // accounts that aren't students: a student default never applies to them (ids only, never logged)
-      User.find({ role: { $nin: ["student"] } }).select("_id").lean(),
+      // (a missing role is a student: the schema default, as the auth middleware reads it)
+      User.find(NON_STUDENT_QUERY).select("_id").lean(),
     ]);
     const byFlag = new Map(GRANTABLE.map((f) => [f, []]));
     for (const r of rows) byFlag.get(r.flag)?.push([String(r.account), r.enabled === true]);
@@ -233,8 +235,10 @@ async function pilotStudents(flag, brandId) {
 
 async function accountView(accountId) {
   if (!isId(accountId)) throw new FeatureAccessError(400, "BAD_ACCOUNT", "Unknown account");
-  const user = await User.findById(accountId).select("role name brandName").lean();
-  if (!user) throw new FeatureAccessError(404, "NOT_FOUND", "Account not found");
+  const stored = await User.findById(accountId).select("role name brandName").lean();
+  if (!stored) throw new FeatureAccessError(404, "NOT_FOUND", "Account not found");
+  // the role as the app sees it (an older account without a stored role is a student)
+  const user = { ...stored, role: roleOf(stored) };
   const rows = await FeatureAccess.find({ account: user._id }).lean();
   const byFlag = new Map(rows.map((r) => [r.flag, r]));
   const admins = new Map((await User.find({ _id: { $in: [...new Set(rows.map((r) => String(r.setBy)))] } }).select("name").lean()).map((u) => [String(u._id), u.name || "admin"]));
@@ -253,7 +257,13 @@ async function accountView(accountId) {
     if (user.role === "brand" && (flag === "loyaltyV2" || flag === "surplusBoxes")) item.students = await pilotStudents(flag, user._id);
     list.push(item);
   }
-  return { account: { id: String(user._id), role: user.role, name: user.brandName || user.name || "" }, flags: list };
+  // what the app sees: exactly what GET /api/app/flags/me answers this account right now
+  const appView = flags.clientFlags({ id: String(user._id), role: user.role });
+  return {
+    account: { id: String(user._id), role: user.role, roleStored: !!stored.role, name: user.brandName || user.name || "" },
+    flags: list,
+    appView: { flags: appView, at: new Date().toISOString(), loaded: isLoaded() },
+  };
 }
 
 async function flagsOverview() {

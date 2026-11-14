@@ -4,6 +4,7 @@
 //   GET   /brands/:brandId/program   the brand's active program (public view)
 //   GET   /brands/:brandId/me        student: my visits, tier, next tier, terms
 //   GET   /me/credits                student: my loyalty ledger (which redemptions counted as visits)
+//   GET   /programs/active           student: brands running a loyalty program now (the app's empty state)
 //   GET   /brands/me/analytics       brand: verified visits, repeat customers, tier counts
 //   GET   /programs/mine             brand: my program (any status)
 //   POST  /programs                  brand: create my program (own brand only; draft unless status given)
@@ -23,6 +24,7 @@
 //   POST  /admin/programs/:id/restart  admin: restart an ended program as a draft; version + reason required
 //   Every admin write here is logged in the AdminActionLog, in the same transaction as the change.
 const express = require("express");
+const { roleOf } = require("../utils/userRole");
 const mongoose = require("mongoose");
 const auth = require("../middleware/auth.middleware");
 const User = require("../models/User");
@@ -58,8 +60,9 @@ async function me(req) {
 const role = (...roles) => async (req, res, next) => {
   const u = await me(req);
   if (!u) return fail(req, res, 401, "SIGN_IN", "Sign in first");
-  if (!roles.includes(u.role)) return fail(req, res, 403, "FORBIDDEN", "Not allowed for your account");
-  req.loyaltyRole = u.role;
+  const r = roleOf(u); // a missing role is a student
+  if (!roles.includes(r)) return fail(req, res, 403, "FORBIDDEN", "Not allowed for your account");
+  req.loyaltyRole = r;
   next();
 };
 const flagOn = (id, r) => isEnabled("loyaltyV2", { id: String(id), role: r });
@@ -104,6 +107,23 @@ router.get("/me/credits", auth, role("student"), handle(async (req, res) => {
       at: r.effectiveAt,
     }));
   ok(req, res, { enabled: true, credits });
+}));
+
+// the brands a student can earn visits at right now (the app shows them, or "no loyalty programs near you yet")
+router.get("/programs/active", auth, role("student"), handle(async (req, res) => {
+  if (!flagOn(req.userId, "student")) return ok(req, res, { enabled: false, programs: [] });
+  const rows = await LoyaltyProgram.find({ status: "active" }).select("brand").limit(300).lean();
+  const live = [];
+  for (const r of rows) {
+    if (!flagOn(r.brand, "brand")) continue; // the brand's own Loyalty switch
+    const p = await loyalty.activeProgram(r.brand); // within its dates
+    if (p) live.push(p);
+  }
+  const names = new Map((await User.find({ _id: { $in: live.map((p) => p.brand) } }).select("brandName name").lean()).map((u) => [String(u._id), u.brandName || u.name || ""]));
+  ok(req, res, {
+    enabled: true,
+    programs: live.slice(0, 30).map((p) => ({ brandId: String(p.brand), brandName: names.get(String(p.brand)) || "", name: p.name || "" })),
+  });
 }));
 
 // ---------- brand ----------
