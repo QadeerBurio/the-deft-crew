@@ -293,8 +293,8 @@ const on = (flag, who, role) => flags.isEnabled(flag, { id: String(ids[who] || w
   const users = [];
   const walk = (dir) => { for (const f of fs.readdirSync(dir, { withFileTypes: true })) { if (f.isDirectory()) { if (!["node_modules", "tests", ".git", "chat-service"].includes(f.name)) walk(path.join(dir, f.name)); } else if (f.name.endsWith(".js") && /FeatureAccess|featureAccess/.test(fs.readFileSync(path.join(dir, f.name), "utf8"))) users.push(path.relative(SERVER, path.join(dir, f.name)).replace(/\\/g, "/")); } };
   walk(SERVER);
-  const allowed = ["models/FeatureAccess.js", "models/FeatureDefault.js", "services/featureAccess.js", "routes/adminFeatures.routes.js", "server.js", "services/accountDeletion.js", "config/featureFlags.js"];
-  check("FeatureAccess is used only by its model, service, admin route, startup, account deletion", users.every((u) => allowed.includes(u)), users.join(", "));
+  const allowed = ["models/FeatureAccess.js", "models/FeatureDefault.js", "services/featureAccess.js", "routes/adminFeatures.routes.js", "server.js", "services/accountDeletion.js", "config/featureFlags.js", "scripts/loyaltyBackfill.js"];
+  check("FeatureAccess is used only by its model, service, admin route, startup, account deletion, the loyalty backfill (loads it as startup does)", users.every((u) => allowed.includes(u)), users.join(", "));
 
   access.stop();
   server.close();
