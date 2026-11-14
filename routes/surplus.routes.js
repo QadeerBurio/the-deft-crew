@@ -30,6 +30,7 @@
 //   GET /admin/orders   GET /admin/no-shows   GET /admin/cases   POST /admin/cases/:id/decide
 //   GET /admin/brands   POST /admin/brands/:brandId/block   { blocked, reason }
 const express = require("express");
+const { roleOf } = require("../utils/userRole");
 const mongoose = require("mongoose");
 const auth = require("../middleware/auth.middleware");
 const User = require("../models/User");
@@ -86,9 +87,10 @@ const gate = (role) => async (req, res, next) => {
   if (req.isGuest || !isId(req.userId)) return fail(req, res, 401, "SIGN_IN", "Sign in first");
   const u = await User.findById(req.userId).select("role brandApprovalStatus name").lean();
   if (!u) return fail(req, res, 401, "SIGN_IN", "Sign in first");
-  const on = role === "admin" ? pilotConfigured() : isEnabled("surplusBoxes", { id: String(req.userId), role: u.role });
+  const r = roleOf(u); // a missing role is a student
+  const on = role === "admin" ? pilotConfigured() : isEnabled("surplusBoxes", { id: String(req.userId), role: r });
   if (!on) return fail(req, res, 404, "SURPLUS_OFF", "Surprise Boxes aren't available for your account yet");
-  if (u.role !== role) return fail(req, res, 403, "FORBIDDEN", "Not allowed for your account");
+  if (r !== role) return fail(req, res, 403, "FORBIDDEN", "Not allowed for your account");
   if (role === "brand" && u.brandApprovalStatus && u.brandApprovalStatus !== "approved") return fail(req, res, 403, "BRAND_NOT_APPROVED", "Your brand isn't approved yet");
   req.surplusUser = u;
   next();

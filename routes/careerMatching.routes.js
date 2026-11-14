@@ -30,6 +30,7 @@
 // A match is computed once per (job version, resume version) and stored (CareerMatchSnapshot): a change to the
 // job or to the candidate's resume gives a new fingerprint and a fresh computation; nothing else does.
 const express = require("express");
+const { roleOf } = require("../utils/userRole");
 const mongoose = require("mongoose");
 const auth = require("../middleware/auth.middleware");
 const User = require("../models/User");
@@ -63,7 +64,7 @@ const signedIn = async (req, res, next) => {
   if (req.isGuest || !isId(req.userId)) return fail(req, res, 401, "SIGN_IN", "Sign in first");
   const u = await User.findById(req.userId).select("role").lean();
   if (!u) return fail(req, res, 401, "SIGN_IN", "Sign in first");
-  req.matchRole = u.role;
+  req.matchRole = roleOf(u); // a missing role is a student
   next();
 };
 

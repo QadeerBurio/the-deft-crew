@@ -24,6 +24,7 @@ const JobApplication = require("../../models/JobApplication");
 const matching = require("./matchingService");
 const { isEnabled } = require("../../config/featureFlags");
 
+const { roleOf } = require("../../utils/userRole");
 const DEFAULT_MIN_SCORE = 60;
 const MAX_JOBS = 1000;
 const CACHE_TTL_MS = 30 * 60 * 1000;
@@ -36,7 +37,7 @@ async function isPilotStudent(userId) {
   if (!userId || !mongoose.Types.ObjectId.isValid(String(userId))) return false;
   if (!inPilot(userId)) return false;
   const u = await require("../../models/User").findById(userId).select("role").lean();
-  return u?.role === "student";
+  return roleOf(u) === "student"; // a missing role is a student
 }
 
 function cached(key, compute) {
