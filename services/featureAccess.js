@@ -8,7 +8,7 @@
 //                         account into memory (after the database connects)
 //   start({ intervalMs }) load, then re-read every 30 s (changes made on another server process show within that)
 //   setAccess(...)        one account and flag: state "on" / "off" (a row) or "default" (the row removed)
-//   setDefault(...)       the default of a flag for every student (on / off), with a reason
+//   setDefault(...)       the default of a flag for every student / brand / employer (on / off), with a reason
 //   waitReady             middleware: until the first load has finished (or failed, or 5 s after start, whichever
 //                         comes first), requests wait,
 //                         so a pilot account never sees its features off for the first seconds after a deploy
@@ -60,13 +60,13 @@ async function load() {
       FeatureDefault.find({}).select("flag role enabled").lean(),
       // accounts that aren't students: a student default never applies to them (ids only, never logged)
       // (a missing role is a student: the schema default, as the auth middleware reads it)
-      User.find(NON_STUDENT_QUERY).select("_id").lean(),
+      User.find(NON_STUDENT_QUERY).select("_id role").lean(),
     ]);
     const byFlag = new Map(GRANTABLE.map((f) => [f, []]));
     for (const r of rows) byFlag.get(r.flag)?.push([String(r.account), r.enabled === true]);
     flags.setAdminAccess(byFlag);
     flags.setDefaults(defaults);
-    flags.setNonStudentIds(others.map((u) => String(u._id)));
+    flags.setAccountRoles(others.map((u) => [String(u._id), u.role]));
     const first = !loaded;
     loaded = true;
     return { ok: true, first };
@@ -160,22 +160,23 @@ async function setAccess({ adminId, accountId, flag, enabled, state, reason, req
   return applyOne({ adminId, user, flag, state: st, reason: why, requestId });
 }
 
-// the default of a flag for every student: on / off, with a reason; the row, the admin log entry (same transaction),
-// the in-memory copy. Only flags listed for the student default (config/featureFlags.js STUDENT_DEFAULTABLE).
+// the default of a flag for every account of a role (student, brand, employee): on / off, with a reason; the row, the
+// admin log entry (same transaction), the in-memory copy. Only the role / flag pairs config/featureFlags.js
+// ROLE_DEFAULTS lists. No row means on, so turning a default on without a row changes nothing.
 async function setDefault({ adminId, flag, role = "student", enabled, reason, requestId }) {
-  if (role !== "student") throw new FeatureAccessError(400, "BAD_ROLE", "Defaults can only be set for students");
-  if (!flags.STUDENT_DEFAULTABLE.includes(flag)) throw new FeatureAccessError(400, "BAD_FLAG", "This feature has no student default");
+  if (!flags.DEFAULT_ROLES.includes(role)) throw new FeatureAccessError(400, "BAD_ROLE", "Defaults can be set for students, brands and employers");
+  if (!flags.defaultable(flag, role)) throw new FeatureAccessError(400, "BAD_FLAG", "This feature has no default for that role");
   if (typeof enabled !== "boolean") throw new FeatureAccessError(400, "BAD_ENABLED", "enabled must be true or false");
   const why = reasonOf(reason);
   const { result } = await withTransaction(async (session) => {
     const row = await FeatureDefault.findOne({ flag, role }).session(session).lean();
-    const before = row ? row.enabled : null;
+    const before = row ? row.enabled : flags.roleDefaultOf(flag, role); // no row: on by default (null: not set)
     if (before === enabled) return { changed: false, before, after: before };
     const now = new Date();
     await FeatureDefault.updateOne({ flag, role }, { $set: { enabled, setBy: adminId, reason: why, setAt: now } }, { upsert: true, session, runValidators: true });
     await adminLog.record({
       adminId, action: "feature.default", targetType: "FeatureDefault", targetId: `${flag}:${role}`,
-      before: { flag, role, enabled: before }, after: { flag, role, enabled }, reason: why, requestId, at: now,
+      before: { flag, role, enabled: before, set: !!row }, after: { flag, role, enabled }, reason: why, requestId, at: now,
     }, { session });
     return { changed: true, before, after: enabled };
   });
@@ -250,7 +251,8 @@ async function accountView(accountId) {
       ...flagInfo(flag),
       ...flags.flagState(flag, { id: String(user._id), role: user.role }),
       // the student default for this flag (students only): true / false / null (not set)
-      defaultForRole: user.role === "student" && flags.STUDENT_DEFAULTABLE.includes(flag) ? flags.studentDefaultOf(flag) : null,
+      // the default for this account's role: true / false, or null (the role has none for this flag)
+      defaultForRole: flags.roleDefaultOf(flag, user.role),
       // the row as stored (the in-memory set may lag on another server process by up to 30 s)
       lastChange: row ? { enabled: row.enabled, reason: row.reason, setAt: row.setAt, setBy: { id: String(row.setBy), name: admins.get(String(row.setBy)) || "admin" } } : null,
     };
@@ -271,11 +273,17 @@ async function flagsOverview() {
   const counts = flags.adminAccessCounts();
   const offCounts = flags.forcedOffCounts();
   // the stored defaults (who set them and why); the decision itself uses the in-memory copy
-  const rows = await FeatureDefault.find({ role: "student" }).lean();
-  const byFlag = new Map(rows.map((r) => [r.flag, r]));
+  const rows = await FeatureDefault.find({}).lean();
+  const byKey = new Map(rows.map((r) => [`${r.role}:${r.flag}`, r]));
   const admins = new Map((await User.find({ _id: { $in: [...new Set(rows.map((r) => String(r.setBy)))] } }).select("name").lean()).map((u) => [String(u._id), u.name || "admin"]));
+  const who = (row) => (row ? { id: String(row.setBy), name: admins.get(String(row.setBy)) || "admin" } : null);
   return GRANTABLE.map((flag) => {
-    const row = byFlag.get(flag);
+    const row = byKey.get(`student:${flag}`);
+    // the default per role this flag has one for: { enabled, set (an admin row) or the built-in on, reason, setAt, setBy }
+    const defaults = Object.fromEntries(flags.DEFAULT_ROLES.filter((r) => flags.defaultable(flag, r)).map((r) => {
+      const rr = byKey.get(`${r}:${flag}`);
+      return [r, { enabled: flags.roleDefaultOf(flag, r), set: !!rr, reason: rr?.reason || null, setAt: rr?.setAt || null, setBy: who(rr) }];
+    }));
     return {
       ...flagInfo(flag),
       killed: flags.isKilled(flag),
@@ -285,8 +293,9 @@ async function flagsOverview() {
       forcedOffCount: offCounts[flag] || 0,
       studentDefaultable: flags.STUDENT_DEFAULTABLE.includes(flag),
       studentDefault: flags.STUDENT_DEFAULTABLE.includes(flag)
-        ? { enabled: flags.studentDefaultOf(flag), reason: row?.reason || null, setAt: row?.setAt || null, setBy: row ? { id: String(row.setBy), name: admins.get(String(row.setBy)) || "admin" } : null }
+        ? { enabled: flags.studentDefaultOf(flag), reason: row?.reason || null, setAt: row?.setAt || null, setBy: who(row) }
         : null,
+      defaults,
     };
   });
 }
@@ -309,6 +318,7 @@ async function listFlag(flag, { offset = 0, limit = 50 } = {}) {
     killed: flags.isKilled(flag),
     railwayIdCount: flags.railwayIds(flag).length,
     studentDefault: flags.STUDENT_DEFAULTABLE.includes(flag) ? flags.studentDefaultOf(flag) : null,
+    defaults: Object.fromEntries(flags.DEFAULT_ROLES.filter((r) => flags.defaultable(flag, r)).map((r) => [r, flags.roleDefaultOf(flag, r)])),
     total, offset: off, limit: lim,
     accounts: rows.map((r) => {
       const u = users.get(String(r.account));

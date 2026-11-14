@@ -45,6 +45,8 @@ axios.request = async (cfg) => blocked((cfg.method || "get").toLowerCase())(cfg.
 const mongoose = reqS("mongoose");
 const fake = require(path.join(SERVER, "tests", "hide-user-secrets", "fake-mongo"));
 fake.install(mongoose, mongoose.Types.ObjectId, { unique: true, interleave: true });
+// these checks are about Railway rules / admin rows: no built-in "on" default (as before features-on-by-default)
+require(path.join(SERVER, "tests", "hide-user-secrets", "defaults-off"))(reqS("./config/featureFlags"));
 
 const express = reqS("express");
 const jwt = reqS("jsonwebtoken");
@@ -124,7 +126,7 @@ const defaultRows = (f = () => true) => rows("FeatureDefault", f);
     && withEnv({ FLAG_LOYALTY_V2: "100%" }, () => on("loyaltyV2", "S", "student")) && withEnv({ FLAG_LOYALTY_V2: "on" }, () => on("loyaltyV2", "S", "student")));
   check("off;ids:X is on for X (not a kill switch)", withEnv({ FLAG_LOYALTY_V2: `off;ids:${S}` }, () => on("loyaltyV2", "S", "student") && !flags.isKilled("loyaltyV2")));
   check("the state says which step decided (railway)", state("loyaltyV2", "S", "student").source === "railway" && state("loyaltyV2", "S", "student").studentDefault === null && state("loyaltyV2", "S", "student").forced === null);
-  check("startup line: every defaultable flag 'not set' (no ids)", flags.describeDefaults() === "[flags] student defaults: resumeStudioV2 not set, careerRatings not set, loyaltyV2 not set, careerTimeline not set, careerMatching not set, surplusBoxes not set", flags.describeDefaults());
+  check("startup line: every defaultable flag 'not set' (no ids)", flags.describeDefaults() === "[flags] defaults: student {resumeStudioV2 not set, careerRatings not set, loyaltyV2 not set, careerTimeline not set, careerMatching not set, surplusBoxes not set}, brand {loyaltyV2 not set, surplusBoxes not set}, employee {careerTimeline not set, careerMatching not set, careerRatings not set, employerFirstHireFree not set}", flags.describeDefaults());
 
   console.log("── 2. the student default (admin portal)");
   let r = await call("PUT", "/api/admin/features/defaults/loyaltyV2", { body: { role: "student", enabled: true }, t: T.A });
@@ -133,8 +135,10 @@ const defaultRows = (f = () => true) => rows("FeatureDefault", f);
   check("First Hire Free has no student default → 400 BAD_FLAG", r.status === 400 && r.json?.error?.code === "BAD_FLAG");
   r = await call("PUT", "/api/admin/features/defaults/metaEvents", { body: { enabled: true, reason: "try" }, t: T.A });
   check("a non-grantable flag → 400", r.status === 400);
+  r = await call("PUT", "/api/admin/features/defaults/loyaltyV2", { body: { role: "admin", enabled: true, reason: "try" }, t: T.A });
+  check("a default for admins → 400 BAD_ROLE (students, brands and employers only)", r.status === 400 && r.json?.error?.code === "BAD_ROLE");
   r = await call("PUT", "/api/admin/features/defaults/loyaltyV2", { body: { role: "employee", enabled: true, reason: "try" }, t: T.A });
-  check("a default for employers → 400 BAD_ROLE (students only)", r.status === 400 && r.json?.error?.code === "BAD_ROLE");
+  check("Loyalty has no employer default → 400 BAD_FLAG", r.status === 400 && r.json?.error?.code === "BAD_FLAG");
   r = await call("PUT", "/api/admin/features/defaults/loyaltyV2", { body: { role: "student", enabled: true, reason: "launch loyalty for every student" }, t: T.A });
   check("on for every student → 200, changed, the row stored", r.status === 200 && r.json.data.changed === true && r.json.data.before === null && r.json.data.after === true
     && defaultRows((d) => d.flag === "loyaltyV2" && d.role === "student" && d.enabled === true && String(d.setBy) === A && d.reason === "launch loyalty for every student").length === 1, r.text);
@@ -241,7 +245,7 @@ const defaultRows = (f = () => true) => rows("FeatureDefault", f);
     await access.start({ intervalMs: 60_000 }); access.stop();
     console.log = cl;
     const joined = logs.join("\n");
-    return logs.some((l) => /^\[flags\] admin access: /.test(l)) && logs.some((l) => /^\[flags\] forced off: /.test(l)) && logs.some((l) => /^\[flags\] student defaults: .*loyaltyV2 off.*surplusBoxes on/.test(l)) && ![S, S2, String(ids.S3), E].some((id) => joined.includes(id));
+    return logs.some((l) => /^\[flags\] admin access: /.test(l)) && logs.some((l) => /^\[flags\] forced off: /.test(l)) && logs.some((l) => /^\[flags\] defaults: student \{.*loyaltyV2 off.*surplusBoxes on/.test(l)) && ![S, S2, String(ids.S3), E].some((id) => joined.includes(id));
   })());
   const User = reqS("./models/User");
   const fresh = new User({ name: "fresh co", email: "freshco@test.local", phone: "03001234568", role: "employee", password: "x".repeat(12) });

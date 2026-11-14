@@ -46,6 +46,8 @@ axios.request = async (cfg) => blocked((cfg.method || "get").toLowerCase())(cfg.
 const mongoose = reqS("mongoose");
 const fake = require(path.join(SERVER, "tests", "hide-user-secrets", "fake-mongo"));
 fake.install(mongoose, mongoose.Types.ObjectId, { unique: true, interleave: true });
+// pilot checks: no built-in "on" default (as before this branch), so "outside the pilot" still means off
+require(path.join(SERVER, "tests", "hide-user-secrets", "defaults-off"))(reqS("./config/featureFlags"));
 const express = reqS("express");
 const jwt = reqS("jsonwebtoken");
 const coll = (name) => reqS(`./models/${name}`).collection.collectionName;

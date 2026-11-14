@@ -7,6 +7,8 @@ const fs = require("fs");
 const Module = require("module");
 const SERVER = path.resolve(process.argv[2] || path.join(__dirname, "..", ".."));
 const reqS = Module.createRequire(path.join(SERVER, "server.js"));
+// these checks are about Railway rules / admin rows: no built-in "on" default (as before features-on-by-default)
+require(path.join(SERVER, "tests", "hide-user-secrets", "defaults-off"))(reqS("./config/featureFlags"));
 for (const k of Object.keys(process.env)) if (/^(FLAG|JOB)_/.test(k) || k === "META_EVENTS_ENABLED") delete process.env[k];
 const flags = reqS("./config/featureFlags");
 
