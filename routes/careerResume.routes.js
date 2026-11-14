@@ -50,6 +50,13 @@ const fail = (req, res, status, code, message, extra = {}) => res.status(status)
 const STATUS = {
   NOT_FOUND: 404, RESUME_NOT_FOUND: 404, SOURCE_UNVERIFIED: 409, SOURCE_CHANGED: 409, STALE_REVISION: 409, ALREADY_APPROVED: 409,
   ALREADY_ATTACHED: 409, VERSION_IN_USE: 409, RATE_LIMITED: 429, TOO_MANY_RUNNING: 429,
+  UNKNOWN_SKILL: 400, PROOF_REQUIRED: 400, PROOF_TOO_LONG: 400, PROOF_INVALID: 400,
+};
+// a failed tailoring: what the student is told (nothing was saved; they can try again)
+const FAILED_MESSAGE = {
+  AI_TIMEOUT: "Tailoring took too long. Nothing was saved. Please try again.",
+  AI_FAILED: "Tailoring didn't work this time. Nothing was saved. Please try again.",
+  TIMED_OUT: "Tailoring took too long. Nothing was saved. Please try again.",
 };
 const handle = (fn) => async (req, res) => {
   try {
@@ -108,7 +115,8 @@ router.post("/sources/:resumeId/confirm", ...student, handle(async (req, res) =>
 }));
 
 // ---------- tailor jobs ----------
-const jobView = (j) => ({ id: String(j._id), status: j.status, draftId: j.draftId ? String(j.draftId) : null, errorCode: j.errorCode || null, target: { kind: j.target?.kind, jobId: j.target?.jobId ? String(j.target.jobId) : null, title: j.target?.title || "" }, pollAfterMs: ["queued", "running"].includes(j.status) ? 1500 : null, createdAt: j.createdAt });
+const jobView = (j) => ({ id: String(j._id), status: j.status, draftId: j.draftId ? String(j.draftId) : null, errorCode: j.errorCode || null,
+  ...(j.status === "failed" ? { errorMessage: FAILED_MESSAGE[j.errorCode] || "Tailoring didn't work. Nothing was saved. Please try again.", retryable: !["RESUME_NOT_FOUND", "SOURCE_UNVERIFIED"].includes(j.errorCode) } : {}), target: { kind: j.target?.kind, jobId: j.target?.jobId ? String(j.target.jobId) : null, title: j.target?.title || "" }, pollAfterMs: ["queued", "running"].includes(j.status) ? 1500 : null, createdAt: j.createdAt });
 
 router.post("/tailor-jobs", ...student, handle(async (req, res) => {
   const { resumeId, jobId, jobTitle, jobDescription, idempotencyKey } = req.body || {};
@@ -167,6 +175,13 @@ router.get("/drafts/:id", ...student, handle(async (req, res) => {
   const d = await ownDraft(req);
   if (!d) return fail(req, res, 404, "NOT_FOUND", "Draft not found");
   ok(req, res, drafts.studentView(d));
+}));
+
+// "I have this": a skill the job asks for that the resume doesn't show, with a proof line ({ revision, skill, proof,
+// confirmTrue: true } or { revision, skill, remove: true }); the match % is recalculated in the reply
+router.post("/drafts/:id/skills", ...student, handle(async (req, res) => {
+  if (!isId(req.params.id)) return fail(req, res, 404, "NOT_FOUND", "Draft not found");
+  ok(req, res, drafts.studentView(await drafts.confirmSkill(req.userId, req.params.id, req.body || {})));
 }));
 
 router.patch("/drafts/:id/decisions", ...student, handle(async (req, res) => {

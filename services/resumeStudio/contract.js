@@ -4,7 +4,14 @@
 // path (services/resumeTailorService.js). The job description and the resume are passed as data inside
 // delimited JSON, never as instructions.
 
-const PROMPT_VERSION = "resume-studio-v2.1";
+const PROMPT_VERSION = "resume-studio-v2.2";
+
+// tailoring rules (enforced in code too: the version always starts as the full source resume, and approval re-checks it)
+const TAILORING_RULES =
+  "Tailoring rules: the resume stays complete: you only change wording, order and emphasis of the editable fields, never remove an entry. " +
+  "Rewrite the summary for the target role using only the facts. Put the most relevant achievements and projects first (order.*). " +
+  "Use the job's wording for a skill only when it is the same skill the facts show (e.g. React.js and React). " +
+  "Never add a skill, job, degree, date, company, number or link that isn't in VerifiedResumeFacts.";
 
 // PART B 6.2, exactly
 const INSTRUCTION_CONTRACT =
@@ -30,7 +37,7 @@ function buildMessages({ facts, editable, job }) {
     TargetJob: { title: job.title || "", requirements: job.requirements || [], descriptionExcerpt: job.excerpt || "" },
   };
   return [
-    { role: "system", content: `${INSTRUCTION_CONTRACT}\n\n${OUTPUT_SHAPE}` },
+    { role: "system", content: `${INSTRUCTION_CONTRACT}\n\n${TAILORING_RULES}\n\n${OUTPUT_SHAPE}` },
     {
       role: "user",
       content:
@@ -40,4 +47,4 @@ function buildMessages({ facts, editable, job }) {
   ];
 }
 
-module.exports = { PROMPT_VERSION, INSTRUCTION_CONTRACT, OUTPUT_SHAPE, buildMessages };
+module.exports = { PROMPT_VERSION, INSTRUCTION_CONTRACT, TAILORING_RULES, OUTPUT_SHAPE, buildMessages };

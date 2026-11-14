@@ -8,6 +8,24 @@ const { parseModelOutput } = require("./output");
 const { checkSuggestion, corpusOf } = require("./validator");
 const { explainMatch } = require("./match");
 const ai = require("./ai");
+const matching = require("../career/matchingService");
+
+// the job's skills (its requirements of kind "skill"), as the matcher reads them
+const jobSkillsOf = (job) => [...new Set((job.requirements || []).filter((r) => r.kind === "skill").map((r) => String(r.requirement || "").trim()).filter(Boolean))];
+
+/**
+ * Skills the job asks for that the resume already SHOWS in experience / projects / certifications but doesn't list
+ * under skills: they go into the skills section in the job's wording (e.g. "React.js" in a project → "React").
+ * Never a skill without evidence in the resume. [{ skill, evidence: [{ path, text }] }]
+ */
+function surfacedSkills(content, job) {
+  const skills = jobSkillsOf(job);
+  if (!skills.length) return [];
+  const m = matching.match({ skills, requirements: [] }, matching.profileOf({ content }));
+  return (m.skills?.matched || [])
+    .filter((s) => (s.evidence || []).length && !(s.evidence || []).some((e) => /^skills\[/.test(e.path)))
+    .map((s) => ({ skill: s.skill, evidence: (s.evidence || []).filter((e) => e.path && !/^skills\[/.test(e.path)).slice(0, 2) }));
+}
 
 class StudioError extends Error {
   constructor(code, message) { super(message); this.code = code; }
@@ -32,7 +50,10 @@ async function generateSuggestions({ resume, confirmation = null, job }) {
     const ctx = { editablePaths: new Set(editable.map((e) => e.fieldPath)), factIds: new Set(facts.map((f) => f.factId)) };
     const r = await ai.completeJson(contract.buildMessages({ facts, editable, job }), (text) => parseModelOutput(text, ctx));
     if (r.ok) model = r.value;
-    else fallback = r.error; // malformed twice, or the model failed: no suggestions, the student keeps their resume
+    // the model failed, timed out, was cut off or answered badly twice: nothing is saved (no half-empty draft);
+    // the student is told and can try again
+    else if (r.error === "model_timeout") throw new StudioError("AI_TIMEOUT", "Tailoring took too long. Please try again.");
+    else throw new StudioError("AI_FAILED", "Tailoring didn't work this time. Please try again.");
   }
 
   const corpus = corpusOf(facts);
@@ -54,10 +75,10 @@ async function generateSuggestions({ resume, confirmation = null, job }) {
     sourceContent: content,
     facts,
     suggestions,
-    match: explainMatch(resume, facts, job, model),
+    match: { ...explainMatch(resume, facts, job, model), jobSkills: jobSkillsOf(job), surfaced: surfacedSkills(content, job), confirmedSkills: [] },
     warnings: [...new Set(warnings)].slice(0, 20),
     fallback, // null when the model answered; else why there are no AI suggestions
   };
 }
 
-module.exports = { generateSuggestions, StudioError };
+module.exports = { generateSuggestions, StudioError, surfacedSkills, jobSkillsOf };

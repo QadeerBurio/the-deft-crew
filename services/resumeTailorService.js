@@ -225,6 +225,8 @@ Return raw JSON matching the requested structure.` },
     response_format: { type: 'json_object' }
   });
 
+  // a reply cut off by the length limit is never parsed into a half resume: the request fails, nothing is saved
+  if (completion.choices[0]?.finish_reason === 'length') throw new Error('The AI answer was cut off. Please try again.');
   const rawText = completion.choices[0]?.message?.content || '{}';
   const parsedResponse = guardTailoredOutput(sourceResume, JSON.parse(rawText));
 

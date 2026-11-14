@@ -137,12 +137,18 @@ function sameItems(source, final, fields) {
  * @param confirmedClaims texts the student explicitly confirmed (accepted "needs confirmation" changes / edits)
  * @returns { ok, errors: [{ fieldPath, riskFlags }] }
  */
-function checkVersion(source, final, corpus, confirmedClaims = []) {
+// allowedNewSkills: skills the version may add (surfaced from experience / projects, or confirmed by the student)
+function checkVersion(source, final, corpus, confirmedClaims = [], allowedNewSkills = []) {
   const errors = [];
   const err = (fieldPath, riskFlags) => errors.push({ fieldPath, riskFlags });
   if (JSON.stringify(source.personalInfo) !== JSON.stringify(final.personalInfo)) err("personalInfo", [{ flag: "identity_changed", values: [] }]);
   const skillKey = (s) => norm(s.name);
-  if (JSON.stringify(source.skills.map(skillKey).sort()) !== JSON.stringify(final.skills.map(skillKey).sort())) err("skills", [{ flag: "skills_changed", values: [] }]);
+  const had = new Set(source.skills.map(skillKey));
+  const allowed = new Set(allowedNewSkills.map(norm));
+  const now = new Set(final.skills.map(skillKey));
+  const dropped = [...had].filter((k) => !now.has(k));
+  const added = [...now].filter((k) => !had.has(k) && !allowed.has(k));
+  if (dropped.length || added.length) err("skills", [{ flag: "skills_changed", values: [...dropped, ...added] }]);
   for (const [list, fields] of Object.entries(IDENTITY_FIELDS)) {
     if (!sameItems(source[list] || [], final[list] || [], fields)) err(list, [{ flag: "entries_changed", values: [] }]);
   }
