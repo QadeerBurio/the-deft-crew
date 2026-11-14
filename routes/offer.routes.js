@@ -369,7 +369,9 @@ router.post('/redeem-payment', auth, async (req, res) => {
     });
     // one loyalty visit for this verified redemption (exactly once; never fails the redemption)
     // (reward mode: the visit counts as a stamp; the offer's own % applied, so no loyalty % is recorded)
-    const loyaltyResult = quote.applies || quote.mode === 'reward' ? await loyalty.creditSafe(redemptionId, { source: 'redeem-payment', branchId, actor: req.userId, discountPct: quote.applies ? discount : null }) : null;
+    // every verified redemption goes to the counter (it decides: daily limit, offer / branch outside the program, ...)
+    const loyaltyResult = await loyalty.creditSafe(redemptionId, { source: 'redeem-payment', branchId, actor: req.userId, discountPct: quote.applies ? discount : null });
+    const loyaltyOutcome = loyalty.outcomeOf(loyaltyResult);
 
     // Redemption changes claimedBy + redemptions → clear every list that shows them
     await clearBrandCaches(offer.brand, userId);
@@ -416,7 +418,9 @@ router.post('/redeem-payment', auth, async (req, res) => {
       redemptionsUsed: totalRedemptions.length,
       redemptionsRemaining: 2 - totalRedemptions.length,
       savedAmount: computedSaved,
-      ...(quote.applies ? { loyalty: { discountPct: discount, tierName: quote.tierName, credited: !!loyaltyResult?.credited, reason: loyaltyResult?.reason || quote.reason || '', visitNumber: loyaltyResult?.visitNumber ?? null, progress: loyaltyResult?.progress || null } } : {}),
+      // loyalty: what this redemption did ({ credited, reason, message: "visit counted" / "visit already counted today" / ...})
+      ...(quote.applies ? { loyalty: { ...loyaltyOutcome, discountPct: discount, tierName: quote.tierName } }
+        : loyaltyOutcome && loyaltyResult?.reason !== 'no-program' && loyaltyResult?.reason !== 'not-enabled' ? { loyalty: { ...loyaltyOutcome, mode: quote.mode || null } } : {}),
     });
   } catch (err) {
     console.error('Error in redeem-payment:', err);

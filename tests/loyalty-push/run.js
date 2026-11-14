@@ -161,13 +161,15 @@ const inapp = () => rows("Notification", (n) => same(n.recipient, S));
   r = await call("PUT", "/api/engagement/notification-prefs", { tok: TS, body: { loyalty: true } });
   check("…and back on", r.json.loyalty === true);
 
-  console.log("-- a visit that doesn't count says nothing");
+  console.log("-- a visit over the daily limit: 'visit already counted today' (once)");
   rows("LoyaltyProgram")[0].maxVisitsPerDay = 1;
   const capped = oid();
   rows("Offer")[0].redemptions.push({ _id: capped, student: S, billAmount: 1000, savedAmount: 200, redeemedAt: new Date() });
   const before = notices().length;
   const c = await loyalty.onVerifiedRedemption(capped);
-  check("a credit over the daily limit (not counted): no notification", c.credited === false && notices().length === before);
+  check("a credit over the daily limit (not counted): one notice 'Visit already counted today'", c.credited === false && notices().length === before + 1 && /Visit already counted today/.test(notices()[notices().length - 1].title) && /One visit a day counts/.test(notices()[notices().length - 1].body), JSON.stringify(notices().slice(-1)));
+  await loyalty.onVerifiedRedemption(capped);
+  check("…a retry of the same redemption: no second notice", notices().length === before + 1);
   check("the message text names no amounts, bills or other students", !/1000|200|taha/i.test(JSON.stringify(notices().map((n) => [n.title, n.body]))));
 
   server.close();

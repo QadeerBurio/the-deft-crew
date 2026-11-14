@@ -5,6 +5,9 @@
 //   GET   /brands/:brandId/me        student: my visits, tier, next tier, terms
 //   GET   /me/credits                student: my loyalty ledger (which redemptions counted as visits)
 //   GET   /programs/active           student: brands running a loyalty program now (the app's empty state)
+//   GET   /me/cards                  student: "my loyalty": each brand's card, visits, rewards ready / used, history
+//   GET   /brands/me/members         brand: students in my program (?filter=all|reward-ready|reward-used, ?format=csv)
+//   GET   /admin/programs/:id/members  admin: the same for one program's brand
 //   GET   /brands/me/analytics       brand: verified visits, repeat customers, tier counts
 //   GET   /programs/mine             brand: my program (any status)
 //   POST  /programs                  brand: create my program (own brand only; draft unless status given)
@@ -107,6 +110,27 @@ router.get("/me/credits", auth, role("student"), handle(async (req, res) => {
       at: r.effectiveAt,
     }));
   ok(req, res, { enabled: true, credits });
+}));
+
+router.get("/me/cards", auth, role("student"), handle(async (req, res) => {
+  if (!flagOn(req.userId, "student")) return ok(req, res, { enabled: false, cards: [] });
+  ok(req, res, { enabled: true, cards: await loyalty.myCards(req.userId) });
+}));
+
+// members: who has the loyalty (no name, phone or e-mail; "tdc verified user · university" as in recent claims)
+const sendMembers = async (req, res, brandId) => {
+  const view = await loyalty.members(brandId, { filter: String(req.query.filter || "all") });
+  if (req.query.format === "csv") {
+    res.set("Content-Type", "text/csv; charset=utf-8");
+    res.set("Content-Disposition", `attachment; filename="loyalty-members-${view.filter}.csv"`);
+    res.set("Cache-Control", "private, no-store");
+    return res.send(loyalty.membersCsv(view));
+  }
+  ok(req, res, view);
+};
+router.get("/brands/me/members", auth, role("brand"), handle(async (req, res) => {
+  if (!flagOn(req.userId, "brand")) return fail(req, res, 404, "LOYALTY_OFF", "Loyalty is not available for your brand yet");
+  await sendMembers(req, res, req.userId);
 }));
 
 // the brands a student can earn visits at right now (the app shows them, or "no loyalty programs near you yet")
@@ -273,6 +297,12 @@ router.get("/admin/programs", auth, role("admin"), handle(async (req, res) => {
   const q = String(req.query.q || "").trim().toLowerCase().slice(0, 80);
   const rows = list.map((p) => adminProgramView(p, names)).filter((p) => !q || p.brandName.toLowerCase().includes(q));
   ok(req, res, { programs: rows });
+}));
+
+router.get("/admin/programs/:id/members", auth, role("admin"), handle(async (req, res) => {
+  const p = await loadProgram(req, res);
+  if (!p) return;
+  await sendMembers(req, res, p.brand);
 }));
 
 router.get("/admin/programs/:id", auth, role("admin"), handle(async (req, res) => {
