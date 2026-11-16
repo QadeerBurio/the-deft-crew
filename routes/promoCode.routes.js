@@ -242,6 +242,31 @@ router.post("/generate", auth, async (req, res) => {
       $push: { promoCodesGenerated: newPromoCode._id },
     });
 
+    // A waiting % loyalty reward goes into this code (feat/loyalty-control): the store coupon carries the offer and
+    // the reward together (on top, or the bigger one), and the reward is used when the order is confirmed. One code
+    // at a time carries it. PKR-off and free-item rewards are used at the counter (a store coupon here is a %).
+    let rewardIncluded = null;
+    try {
+      const ready = await loyalty.readyRewardFor({ brandId: offer.brand._id, studentId, offerPct: offer.discountPercentage });
+      if (ready && ready.kind === "percent") {
+        const LoyaltyReward = require("../models/LoyaltyReward");
+        const current = await LoyaltyReward.findById(ready.id).select("promoCodeId").lean();
+        const busy = current?.promoCodeId && (await PromoCode.exists({ _id: current.promoCodeId, status: "active" }));
+        if (!busy) {
+          const offerPct = Number(offer.discountPercentage) || 0;
+          const pct = ready.combine === "replace" ? Math.max(offerPct, Number(ready.value)) : Math.min(100, offerPct + Number(ready.value));
+          const reserved = await LoyaltyReward.findOneAndUpdate({ _id: ready.id, status: "available" }, { $set: { promoCodeId: newPromoCode._id, reservedOfferPct: offerPct } }, { new: true }).lean();
+          if (reserved) {
+            newPromoCode.discountPercentage = pct;
+            await PromoCode.updateOne({ _id: newPromoCode._id }, { $set: { discountPercentage: pct } });
+            rewardIncluded = { id: ready.id, label: ready.label, combine: ready.combine, offerPct, totalPct: pct };
+          }
+        }
+      }
+    } catch (err) {
+      console.error("[loyalty] putting the reward into the code failed:", err.message); // the code works without it
+    }
+
     // ------- EXTERNAL PROVIDERS -------
     const brandUser = await User.findById(offer.brand._id).select("shopifyStoreUrl platform").lean();
 
@@ -330,6 +355,8 @@ router.post("/generate", auth, async (req, res) => {
         qrData: newPromoCode.qrData,
         externalProvider: newPromoCode.externalProvider,
         onlineStore: onlineStoreOf(newPromoCode, brandUser ? { ...brandUser, _id: offer.brand._id } : offer.brand, await storeUrlsFor([{ ...(brandUser || {}), _id: offer.brand._id }])),
+        // the loyalty reward this code carries ("your 25% reward is included"), or null
+        rewardIncluded,
       },
     });
   } catch (err) {
@@ -345,6 +372,23 @@ router.post("/generate", auth, async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
+
+// ============================================================
+// LOYALTY REWARD ON A PROMO-CODE BILL (feat/loyalty-control)
+// The reward to apply: the one the brand ticked (applyRewardId), or the one an online code carries (its % already
+// includes the reward, so the breakdown starts from the offer's own %). null: none. Throws LoyaltyError.
+// ============================================================
+async function promoRewardPlan({ applyRewardId, promoCodeDoc, offer, studentId, bill, codePct }) {
+  const LoyaltyReward = require("../models/LoyaltyReward");
+  const carried = await LoyaltyReward.findOne({ promoCodeId: promoCodeDoc._id, status: "available" }).select("_id reservedOfferPct").lean();
+  const rewardId = applyRewardId || carried?._id || null;
+  if (!rewardId) return null;
+  const offerPct = carried && String(carried._id) === String(rewardId) && carried.reservedOfferPct != null ? carried.reservedOfferPct : codePct;
+  return loyalty.planReward({ rewardId, brandId: offer.brand, studentId, bill, offerPct });
+}
+// a promo code marked used by a request whose reward then couldn't be applied: the code goes back to active
+const giveCodeBack = (code) => PromoCode.updateOne({ _id: code._id, status: "used" }, { $set: { status: "active", usedAt: null, usedBy: null }, $inc: { usedCount: -1 } }).catch(() => {});
+const duplicateReply = (earlier) => ({ success: true, duplicate: true, message: "Already recorded: this reward was applied to that bill.", data: { transaction: { billAmount: earlier.billAmount, savedAmount: earlier.savedAmount }, breakdown: earlier.breakdown, redemptionId: earlier.redemptionId } });
 
 // ============================================================
 // VERIFY PROMO CODE (brand dashboard, in-person)
@@ -472,9 +516,16 @@ router.post("/verify", auth, async (req, res) => {
     // Loyalty (FLAG_LOYALTY_V2): the student's tier % replaces the code's
     const quote = await loyalty.quoteFor({ brandId: offer.brand, studentId, offerId: offer._id });
     const loyaltyPct = quote.applies ? quote.discountPct : promoCodeDoc.discountPercentage;
-    const discountAmount =
-      (Number(billAmount) * loyaltyPct) / 100;
-    const savedAmount = Math.round(discountAmount);
+    // a loyalty reward on this bill (the brand's choice, or the one the code carries): the breakdown's total
+    let rewardPlan = null;
+    try {
+      rewardPlan = await promoRewardPlan({ applyRewardId: req.body.applyRewardId, promoCodeDoc, offer, studentId, bill: Number(billAmount), codePct: loyaltyPct });
+    } catch (err) {
+      if (err.code === "ALREADY_USED" && err.earlier) return res.json(duplicateReply(err.earlier));
+      if (err instanceof loyalty.LoyaltyError) return res.status(err.status).json({ success: false, message: err.message, code: err.code });
+      throw err;
+    }
+    const savedAmount = rewardPlan ? rewardPlan.breakdown.totalDiscount : Math.round((Number(billAmount) * loyaltyPct) / 100);
     const finalAmount = Number(billAmount) - savedAmount;
 
     // only one verification wins: the code is marked used only if it is still active, and the
@@ -489,19 +540,20 @@ router.post("/verify", auth, async (req, res) => {
     }
 
     const redemptionId = new mongoose.Types.ObjectId();
-    await Offer.findByIdAndUpdate(offerId, {
-      $push: {
-        redemptions: {
-          _id: redemptionId,
-          student: studentId,
-          billAmount: Number(billAmount),
-          savedAmount,
-          redeemedAt: new Date(),
-          promoCode: promoCodeDoc.code,
-          promoCodeId: promoCodeDoc._id,
-        },
-      },
-    });
+    const redemption = { _id: redemptionId, student: studentId, billAmount: Number(billAmount), savedAmount, redeemedAt: new Date(), promoCode: promoCodeDoc.code, promoCodeId: promoCodeDoc._id };
+    let usedReward = null;
+    if (rewardPlan) {
+      try {
+        usedReward = await loyalty.redeemWithReward(rewardPlan, { offerId, redemption, actor: req.userId });
+      } catch (err) {
+        await giveCodeBack(promoCodeDoc);
+        if (err.code === "ALREADY_USED" && err.earlier) return res.json(duplicateReply(err.earlier));
+        if (err instanceof loyalty.LoyaltyError) return res.status(err.status).json({ success: false, message: err.message, code: err.code });
+        throw err;
+      }
+    } else {
+      await Offer.findByIdAndUpdate(offerId, { $push: { redemptions: redemption } });
+    }
     await recordSafe("promo.redeemed", String(promoCodeDoc._id), {
       actor: req.userId, subject: { kind: "PromoCode", id: promoCodeDoc._id },
       data: { offer: String(offerId), student: String(studentId), billAmount: Number(billAmount), savedAmount },
@@ -532,6 +584,7 @@ router.post("/verify", auth, async (req, res) => {
     // every verified redemption goes to the counter (it decides: daily limit, offer outside the program, ...)
     const loyaltyResult = await loyalty.creditSafe(redemptionId, { source: "promo-verify", actor: req.userId, discountPct: quote.applies ? loyaltyPct : null });
     const loyaltyOutcome = loyalty.outcomeOf(loyaltyResult);
+    if (usedReward) await loyalty.afterRewardUsed(usedReward, rewardPlan.breakdown, req.userId);
 
     res.json({
       success: true,
@@ -541,12 +594,15 @@ router.post("/verify", auth, async (req, res) => {
         offer: {
           id: offer._id,
           title: offer.title,
-          discountPercentage: loyaltyPct,
+          discountPercentage: rewardPlan ? rewardPlan.breakdown.offerPct : loyaltyPct,
         },
         billAmount: Number(billAmount),
         savedAmount,
         finalAmount,
         promoCode: promoCodeDoc.code,
+        redemptionId: String(redemptionId),
+        breakdown: rewardPlan ? rewardPlan.breakdown : loyalty.breakdownOf({ bill: Number(billAmount), offerPct: loyaltyPct }),
+        ...(usedReward ? { rewardUsed: { id: String(usedReward._id), label: usedReward.label, kind: usedReward.kind } } : {}),
         // loyalty: what this redemption did ({ credited, reason, message: "visit counted" / "visit already counted today" / ...})
         ...(quote.applies ? { loyalty: { ...loyaltyOutcome, discountPct: loyaltyPct, tierName: quote.tierName } }
           : loyaltyOutcome && !["no-program", "not-enabled"].includes(loyaltyResult?.reason) ? { loyalty: { ...loyaltyOutcome, mode: quote.mode || null } } : {}),
@@ -990,6 +1046,14 @@ router.post("/brand-verify", auth, async (req, res) => {
       (Number(billAmount) * loyaltyPct) / 100;
     const savedAmount = Math.round(discountAmount);
     const finalAmount = Number(billAmount) - savedAmount;
+    // a waiting loyalty reward, shown BEFORE confirming ("apply reward to this bill"), with its breakdown; a code
+    // that carries the reward (made online) applies it on confirm (carried: true)
+    let readyReward = null;
+    try {
+      const plan = await promoRewardPlan({ applyRewardId: null, promoCodeDoc, offer, studentId, bill: Number(billAmount), codePct: loyaltyPct });
+      if (plan) readyReward = { id: String(plan.reward._id), kind: plan.reward.kind, value: plan.reward.value, item: plan.reward.item, label: plan.reward.label, combine: plan.breakdown.combine || loyalty.combineOf(plan.program), carried: true, breakdown: plan.breakdown };
+    } catch { readyReward = null; }
+    if (!readyReward) readyReward = await loyalty.readyRewardFor({ brandId: offer.brand, studentId, bill: Number(billAmount), offerPct: loyaltyPct });
 
     // 🚫 engagement hook removed here — this is a DRY-RUN endpoint
 
@@ -1022,6 +1086,7 @@ router.post("/brand-verify", auth, async (req, res) => {
           discountPercentage: loyaltyPct,
         },
         ...(quote.applies ? { loyalty: { tierName: quote.tierName, discountPct: quote.discountPct, visits: quote.visits, nextVisitNumber: quote.nextVisitNumber, nextTier: quote.nextTier, visitsBeforeNextTier: quote.visitsBeforeNextTier, countsAsVisit: quote.countsAsVisit } } : {}),
+        readyReward,
       },
     });
   } catch (err) {
@@ -1102,9 +1167,16 @@ router.post("/confirm-redemption", auth, async (req, res) => {
     // Loyalty (FLAG_LOYALTY_V2): the student's tier % replaces the code's (brand-verify showed the same)
     const quote = await loyalty.quoteFor({ brandId: offer.brand, studentId, offerId: offer._id });
     const loyaltyPct = quote.applies ? quote.discountPct : promoCodeDoc.discountPercentage;
-    const discountAmount =
-      (Number(billAmount) * loyaltyPct) / 100;
-    const savedAmount = Math.round(discountAmount);
+    // a loyalty reward on this bill (the brand ticked "apply reward", or the code carries one)
+    let rewardPlan = null;
+    try {
+      rewardPlan = await promoRewardPlan({ applyRewardId: req.body.applyRewardId, promoCodeDoc, offer, studentId, bill: Number(billAmount), codePct: loyaltyPct });
+    } catch (err) {
+      if (err.code === "ALREADY_USED" && err.earlier) return res.json(duplicateReply(err.earlier));
+      if (err instanceof loyalty.LoyaltyError) return res.status(err.status).json({ success: false, message: err.message, code: err.code });
+      throw err;
+    }
+    const savedAmount = rewardPlan ? rewardPlan.breakdown.totalDiscount : Math.round((Number(billAmount) * loyaltyPct) / 100);
 
     // only one confirmation wins (see /verify)
     const won = await PromoCode.findOneAndUpdate(
@@ -1117,19 +1189,20 @@ router.post("/confirm-redemption", auth, async (req, res) => {
     }
 
     const redemptionId = new mongoose.Types.ObjectId();
-    await Offer.findByIdAndUpdate(offerId, {
-      $push: {
-        redemptions: {
-          _id: redemptionId,
-          student: studentId,
-          billAmount: Number(billAmount),
-          savedAmount,
-          redeemedAt: new Date(),
-          promoCode: promoCodeDoc.code,
-          promoCodeId: promoCodeDoc._id,
-        },
-      },
-    });
+    const redemption = { _id: redemptionId, student: studentId, billAmount: Number(billAmount), savedAmount, redeemedAt: new Date(), promoCode: promoCodeDoc.code, promoCodeId: promoCodeDoc._id };
+    let usedReward = null;
+    if (rewardPlan) {
+      try {
+        usedReward = await loyalty.redeemWithReward(rewardPlan, { offerId, redemption, actor: req.userId });
+      } catch (err) {
+        await giveCodeBack(promoCodeDoc);
+        if (err.code === "ALREADY_USED" && err.earlier) return res.json(duplicateReply(err.earlier));
+        if (err instanceof loyalty.LoyaltyError) return res.status(err.status).json({ success: false, message: err.message, code: err.code });
+        throw err;
+      }
+    } else {
+      await Offer.findByIdAndUpdate(offerId, { $push: { redemptions: redemption } });
+    }
     await recordSafe("promo.redeemed", String(promoCodeDoc._id), {
       actor: req.userId, subject: { kind: "PromoCode", id: promoCodeDoc._id },
       data: { offer: String(offerId), student: String(studentId), billAmount: Number(billAmount), savedAmount },
@@ -1171,6 +1244,7 @@ router.post("/confirm-redemption", auth, async (req, res) => {
     // every verified redemption goes to the counter (it decides: daily limit, offer outside the program, ...)
     const loyaltyResult = await loyalty.creditSafe(redemptionId, { source: "promo-confirm", actor: req.userId, discountPct: quote.applies ? loyaltyPct : null });
     const loyaltyOutcome = loyalty.outcomeOf(loyaltyResult);
+    if (usedReward) await loyalty.afterRewardUsed(usedReward, rewardPlan.breakdown, req.userId);
 
     res.json({
       success: true,
@@ -1183,6 +1257,9 @@ router.post("/confirm-redemption", auth, async (req, res) => {
           savedAmount,
           promoCode: promoCodeDoc.code,
         },
+        redemptionId: String(redemptionId),
+        breakdown: rewardPlan ? rewardPlan.breakdown : loyalty.breakdownOf({ bill: Number(billAmount), offerPct: loyaltyPct }),
+        ...(usedReward ? { rewardUsed: { id: String(usedReward._id), label: usedReward.label, kind: usedReward.kind } } : {}),
         // loyalty: what this redemption did ({ credited, reason, message: "visit counted" / "visit already counted today" / ...})
         ...(quote.applies ? { loyalty: { ...loyaltyOutcome, discountPct: loyaltyPct, tierName: quote.tierName } }
           : loyaltyOutcome && !["no-program", "not-enabled"].includes(loyaltyResult?.reason) ? { loyalty: { ...loyaltyOutcome, mode: quote.mode || null } } : {}),

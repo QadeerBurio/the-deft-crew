@@ -205,10 +205,12 @@ const rewardsOf = (brand, who, f = () => true) => rows("LoyaltyReward", (r) => s
   console.log("── 2. setting up a reward program: validation");
   const bad = [
     [{ mode: "reward" }, "INVALID_REWARD", "reward mode without a reward"],
-    [{ mode: "reward", reward: { visitsNeeded: 1, kind: "item", item: "coffee" } }, "INVALID_REWARD", "1 visit"],
-    [{ mode: "reward", reward: { visitsNeeded: 21, kind: "item", item: "coffee" } }, "INVALID_REWARD", "21 visits"],
+    // feat/loyalty-control: 1 to 10 visits
+    [{ mode: "reward", reward: { visitsNeeded: 0, kind: "item", item: "coffee" } }, "INVALID_REWARD", "0 visits"],
+    [{ mode: "reward", reward: { visitsNeeded: 11, kind: "item", item: "coffee" } }, "INVALID_REWARD", "11 visits"],
     [{ mode: "reward", reward: { visitsNeeded: 3, kind: "cash", value: 5 } }, "INVALID_REWARD", "an unknown kind"],
-    [{ mode: "reward", maxDiscountPct: 25, reward: { visitsNeeded: 3, kind: "percent", value: 30 } }, "OVER_MAX_DISCOUNT", "% off above the maximum"],
+    [{ mode: "reward", reward: { visitsNeeded: 3, kind: "percent", value: 101 } }, "INVALID_REWARD", "101% off"],
+    [{ mode: "reward", reward: { visitsNeeded: 3, kind: "percent", value: 20, combine: "both" } }, "INVALID_REWARD", "an unknown combine setting"],
     [{ mode: "reward", reward: { visitsNeeded: 3, kind: "amount", value: 0 } }, "INVALID_REWARD", "PKR 0 off"],
     [{ mode: "reward", reward: { visitsNeeded: 3, kind: "item", item: "x" } }, "INVALID_REWARD", "an item without a name"],
     [{ mode: "reward", reward: { visitsNeeded: 3, kind: "item", item: "coffee", maxPerMonth: 0 } }, "INVALID_REWARD", "a monthly limit of 0"],
@@ -223,7 +225,7 @@ const rewardsOf = (brand, who, f = () => true) => rows("LoyaltyReward", (r) => s
   const pR = r.json?.data;
   check("Roast: reward program, 3 visits = a free coffee, max 2 a month", r.status === 201 && pR.mode === "reward" && pR.reward.visitsNeeded === 3 && pR.reward.kind === "item" && pR.reward.label === "a free coffee" && pR.reward.maxPerMonth === 2, r.text.slice(0, 200));
   let ver = 1;
-  for (const [n, label] of [[2, "quick pick 2"], [5, "quick pick 5"], [20, "custom 20 (the most)"], [3, "back to 3"]]) {
+  for (const [n, label] of [[2, "quick pick 2"], [5, "quick pick 5"], [10, "quick pick 10 (the most)"], [1, "quick pick 1 (the fewest)"], [3, "back to 3"]]) {
     r = await call("PATCH", `${LP}/${pR.id}`, { tok: T.R, body: { reward: { visitsNeeded: n, kind: "item", item: "a free coffee", maxPerMonth: 2 }, version: ver } });
     check(`visits needed: ${label} → saved`, r.status === 200 && r.json.data.reward.visitsNeeded === n, r.text.slice(0, 120));
     ver = r.json?.data?.version ?? ver;
@@ -299,7 +301,7 @@ const rewardsOf = (brand, who, f = () => true) => rows("LoyaltyReward", (r) => s
   const pP = r.json.data;
   await call("PATCH", `${LP}/${pP.id}`, { tok: T.P, body: { status: "active", version: 1 } });
   r = await call("PATCH", `${LP}/${pP.id}`, { tok: T.P, body: { maxDiscountPct: 15, version: 2 } });
-  check("the brand can't lower its maximum below its own 20% reward (400)", r.status === 400 && r.json.error.code === "OVER_MAX_DISCOUNT", r.text.slice(0, 120));
+  check("the brand's old 'maximum' no longer limits: lowering it to 15 is accepted, the 20% reward stays 20%", r.status === 200 && r.json.data.reward.value === 20, r.text.slice(0, 160));
   r = await call("PATCH", `${LP}/${pP.id}`, { tok: T.admin, body: { adminMaxDiscountPct: 10 } });
   check("admin caps Pizza at 10%: the reward shows as 10% off", r.status === 200 && r.json.data.reward.value === 10 && r.json.data.reward.label === "10% off", JSON.stringify(r.json?.data?.reward));
   for (let i = 0; i < 2; i++) await visit("oP", "S2");

@@ -26,7 +26,16 @@ const loyaltyRewardSchema = new mongoose.Schema(
     usedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
     useKey: { type: String, default: null },
     billAmount: { type: Number, default: null },
-    savedAmount: { type: Number, default: null },
+    savedAmount: { type: Number, default: null }, // what the reward itself took off the bill
+    // applied to a bill (feat/loyalty-control): the redemption it was used on and the breakdown on the original bill
+    redemptionId: { type: mongoose.Schema.Types.ObjectId, default: null },
+    offerDiscount: { type: Number, default: null }, // the offer's part of the discount
+    totalDiscount: { type: Number, default: null }, // offer + reward, never above the bill
+    combine: { type: String, default: null }, // "stack" or "replace", as the program said when used
+    // an online promo code that carries this reward (the store coupon includes it); used when that order is confirmed
+    promoCodeId: { type: mongoose.Schema.Types.ObjectId, default: null },
+    reservedOfferPct: { type: Number, default: null }, // the offer's own % when the code was made
+    usedNotifiedAt: { type: Date, default: null }, // the student was told "reward used, you saved PKR X" (once)
   },
   { timestamps: true }
 );

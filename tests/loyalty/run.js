@@ -219,15 +219,16 @@ function seedRedemption(offerId, who, bill = 1000) {
   check("a student can't create a program (403)", r.status === 403, r.status);
   r = await call("POST", "/api/loyalty/programs", { tok: T.A, body: { tiers: [{ minVisit: 1, maxVisit: 3, discountPct: 15 }, { minVisit: 5, maxVisit: null, discountPct: 25 }] } });
   check("tiers with a gap → 400 INVALID_TIERS", r.status === 400 && r.json?.error?.code === "INVALID_TIERS", r.text);
-  r = await call("POST", "/api/loyalty/programs", { tok: T.A, body: { maxDiscountPct: 20 } });
-  check("default 25% tier over a 20% maximum → 400 OVER_MAX_DISCOUNT", r.status === 400 && r.json?.error?.code === "OVER_MAX_DISCOUNT", r.text);
+  // feat/loyalty-control: the brand's own "maximum" no longer limits (only an admin cap does); a 0% tier is still refused
+  r = await call("POST", "/api/loyalty/programs", { tok: T.A, body: { tiers: [{ minVisit: 1, maxVisit: null, discountPct: 0 }] } });
+  check("a 0% tier → 400 INVALID_TIERS", r.status === 400 && r.json?.error?.code === "INVALID_TIERS", r.text);
   r = await call("POST", "/api/loyalty/programs", { tok: T.A, body: { adminMaxDiscountPct: 50 } });
   check("a brand can't set the admin maximum (403)", r.status === 403 && r.json?.error?.code === "ADMIN_ONLY", r.text);
   r = await call("POST", "/api/loyalty/programs", { tok: T.A, body: { eligibleOfferIds: [String(ids.oB)] } });
   check("another brand's offer in the program → 403", r.status === 403 && r.json?.error?.code === "NOT_YOUR_OFFER", r.text);
   r = await call("POST", "/api/loyalty/programs", { tok: T.A, body: { brand: String(ids.B), terms: "One visit a day counts. Visits expire after 12 months." } });
   const prog = r.json?.data;
-  check("brand A creates its program: draft, default tiers 1-5 = 15%, 6+ = 25%, max 25%, own brand", r.status === 201 && prog?.status === "draft" && same(prog.brand, ids.A) && JSON.stringify(prog.tiers.map((t) => [t.minVisit, t.maxVisit, t.discountPct])) === "[[1,5,15],[6,null,25]]" && prog.maxDiscountPct === 25, r.text.slice(0, 200));
+  check("brand A creates its program: draft, default tiers 1-5 = 15%, 6+ = 25%, no cap (100) until an admin sets one, own brand", r.status === 201 && prog?.status === "draft" && same(prog.brand, ids.A) && JSON.stringify(prog.tiers.map((t) => [t.minVisit, t.maxVisit, t.discountPct])) === "[[1,5,15],[6,null,25]]" && prog.maxDiscountPct === 100, r.text.slice(0, 200));
   check("…requestId in the reply (common contract)", typeof r.json?.requestId === "string" && r.json.success === true);
   r = await call("POST", "/api/loyalty/programs", { tok: T.A, body: {} });
   check("a second program for the same brand → 409", r.status === 409 && r.json?.error?.code === "EXISTS", r.status);

@@ -204,7 +204,10 @@ router.post("/quotes", auth, role("brand"), handle(async (req, res) => {
   if (String(offer.brand) !== String(req.userId)) return fail(req, res, 403, "NOT_YOUR_OFFER", "This offer belongs to another brand");
   const q = await loyalty.quoteFor({ brandId: req.userId, studentId, offerId, branchId });
   // discountPercentage: what to apply now (the loyalty % when loyalty applies, else the offer's)
-  ok(req, res, { ...q, discountPercentage: q.applies ? q.discountPct : Number(offer.discountPercentage) || 0 });
+  const discountPercentage = q.applies ? q.discountPct : Number(offer.discountPercentage) || 0;
+  // a waiting reward to offer on the verify screen, with the breakdown for this bill (billAmount optional)
+  const readyReward = await loyalty.readyRewardFor({ brandId: req.userId, studentId, bill: req.body?.billAmount, offerPct: discountPercentage });
+  ok(req, res, { ...q, discountPercentage, readyReward });
 }));
 
 // ---------- admin ----------

@@ -389,6 +389,7 @@ router.post("/order-webhook", verifyApiKey, async (req, res) => {
             });
             const pushed = offer.redemptions[offer.redemptions.length - 1];
             await offer.save();
+            await require("../services/loyalty").useCarriedReward({ promoCodeId: promo._id, redemptionId: pushed._id, bill: orderTotal, saved: Math.round(totalDiscount) }); // a reward the code carries (feat/loyalty-control)
             await creditSafe(pushed._id, { source: "shopify-app" }); // a loyalty visit (FLAG_LOYALTY_V2)
           }
         }

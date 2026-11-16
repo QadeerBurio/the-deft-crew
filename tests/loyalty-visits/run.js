@@ -309,7 +309,7 @@ const setDay = (n) => { if (n > 0) nextDay(); };
   check("filter 'reward used': S1", r.json?.data?.members?.length === 1);
   r = await call("GET", "/api/loyalty/brands/me/members?format=csv", { tok: T.R });
   const lines = r.text.trim().split("\n");
-  check("CSV export: the same fields, no phone or e-mail", r.status === 200 && lines[0] === "student,university,visits,visits needed,rewards earned,rewards used,reward ready,last visit" && lines.length === 2 && /^tdc verified user,NED University,1,2,1,1,no,\d{4}-\d\d-\d\d$/.test(lines[1]) && !/@|0300/.test(r.text), r.text);
+  check("CSV export: the same fields, no phone or e-mail", r.status === 200 && lines[0] === "student,university,visits,visits needed,rewards earned,rewards used,saved with rewards (PKR),reward ready,last visit" && lines.length === 2 && /^tdc verified user,NED University,1,2,1,1,\d+,no,\d{4}-\d\d-\d\d$/.test(lines[1]) && !/@|0300/.test(r.text), r.text);
   r = await call("GET", "/api/loyalty/brands/me/members", { tok: T.S1 });
   check("students can't see members", r.status === 403, r.status);
   r = await call("GET", `/api/loyalty/admin/programs/${pR.id}/members`, { tok: T.admin });

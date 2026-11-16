@@ -130,6 +130,7 @@ router.post("/confirm", confirmLimit, async (req, res) => {
                 { _id: promoCodeDoc.offer },
                 { $push: { redemptions: { _id: redemptionId, student: promoCodeDoc.student, billAmount, savedAmount, redeemedAt: new Date(), promoCode: promoCodeDoc.code, promoCodeId: promoCodeDoc._id, source: "webhook", externalOrderId: orderId } } }
             );
+            await require("../services/loyalty").useCarriedReward({ promoCodeId: promoCodeDoc._id, redemptionId: redemptionId, bill: billAmount, saved: savedAmount }); // a reward the code carries (feat/loyalty-control)
             await creditSafe(redemptionId, { source: "webhook-confirm" }); // a loyalty visit (FLAG_LOYALTY_V2)
         }
 
@@ -274,6 +275,7 @@ router.post("/shopify/confirm", async (req, res) => {
         });
         const pushed = offer.redemptions[offer.redemptions.length - 1];
         await offer.save();
+        await require("../services/loyalty").useCarriedReward({ promoCodeId: promoCodeDoc._id, redemptionId: pushed._id, bill: billAmount, saved: savedAmount }); // a reward the code carries (feat/loyalty-control)
         await creditSafe(pushed._id, { source: "shopify-webhook" }); // a loyalty visit (FLAG_LOYALTY_V2)
       }
     }
