@@ -152,10 +152,16 @@ async function deleteInDatabase({ id, role, deletionId, ghost, session }) {
     // every redemption, with the student who made it: their savings and history stay right.
     // One read and one insert (a big brand has thousands); rows archived by an earlier run are skipped.
     const all = offers.flatMap((offer) => (offer.redemptions || []).filter((r) => r?._id).map((r) => ({ offer, r })));
-    const alreadyArchived = new Set((await q(RedemptionArchive.find({ kind: "redemption", redemptionId: { $in: all.map((x) => x.r._id) } }).select("redemptionId"))).map((x) => String(x.redemptionId)));
+    // older used promo codes no redemption points to (services/brandSales.js): a sale too, kept as a row with the
+    // code's id and NO offerId, so revenue keeps it but the student's own savings and Meta list (which skip rows
+    // without an offer) stay as they were
+    const { rowsFrom } = require("./brandSales");
+    const promoSales = rowsFrom(offers, usedPromos).filter((x) => x.kind === "promo");
+    const alreadyArchived = new Set((await q(RedemptionArchive.find({ kind: "redemption", redemptionId: { $in: [...all.map((x) => x.r._id), ...promoSales.map((x) => x.id)] } }).select("redemptionId"))).map((x) => String(x.redemptionId)));
     const rowsToAdd = all
       .filter(({ r }) => !alreadyArchived.has(String(r._id)))
-      .map(({ offer, r }) => ({ kind: "redemption", deletionId, redemptionId: r._id, offerId: offer._id, student: r.student || undefined, billAmount: r.billAmount || 0, savedAmount: r.savedAmount || 0, redeemedAt: r.redeemedAt || now, createdAt: now }));
+      .map(({ offer, r }) => ({ kind: "redemption", deletionId, redemptionId: r._id, offerId: offer._id, student: r.student || undefined, billAmount: r.billAmount || 0, savedAmount: r.savedAmount || 0, redeemedAt: r.redeemedAt || now, createdAt: now }))
+      .concat(promoSales.filter((x) => !alreadyArchived.has(x.id)).map((x) => ({ kind: "redemption", deletionId, redemptionId: x.id, student: x.studentId || undefined, billAmount: x.bill, savedAmount: x.saved, redeemedAt: x.at || now, createdAt: now })));
     if (rowsToAdd.length) await RedemptionArchive.insertMany(rowsToAdd, o);
     add("redemptionarchives", "redemptions", rowsToAdd.length);
     await upd(DailyDrop, { "contentRef.id": { $in: offerIds } }, { $set: { "contentRef.kind": null, "contentRef.id": null } });

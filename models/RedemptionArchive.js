@@ -3,6 +3,8 @@
 // figures don't change when a brand account is deleted. Never holds the brand's id, name or offer titles.
 //   kind "redemption":   one per redemption of the deleted brand's offers. Keeps the student who made it
 //                        (that student's account still exists), so their savings and history stay right.
+//                        Also one per older used promo code no redemption pointed to (redemptionId = the code's id,
+//                        no offerId): counted in revenue (services/brandSales.js), not in the student's own lists.
 //   kind "brand-totals": one per deleted brand: the figures /api/offers/admin/brands-revenue showed for
 //                        it, added to the grand totals there.
 const mongoose = require("mongoose");

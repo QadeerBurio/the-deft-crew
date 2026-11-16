@@ -36,7 +36,6 @@ const DAY = 864e5;
 const PKT = 5 * 3600e3;
 const MIN_COHORT = 5;
 const PRESETS = ["today", "7d", "30d", "month", "custom"];
-const isId = (v) => mongoose.Types.ObjectId.isValid(String(v || "")) && /^[0-9a-f]{24}$/i.test(String(v));
 
 // ---------- the range ----------
 const karachiMidnight = (d) => { const k = dayKey(d); return new Date(`${k}T00:00:00+05:00`); };
@@ -62,34 +61,8 @@ function rangeOf(q = {}, now = new Date()) {
   return { preset, from, to, days, previous };
 }
 
-// ---------- who counts ----------
-const listEnv = (k) => String(process.env[k] || "").split(/[\s,]+/).map((s) => s.trim().toLowerCase()).filter(Boolean);
-/** the test-account rule from the Railway variables (no schema field) */
-function testRule() {
-  return { emails: new Set(listEnv("METRICS_TEST_EMAILS")), domains: listEnv("METRICS_TEST_EMAIL_DOMAINS").map((d) => d.replace(/^@/, "")), ids: new Set(listEnv("METRICS_TEST_USER_IDS")) };
-}
-const isTestUser = (u, rule) => {
-  const email = String(u?.email || "").toLowerCase();
-  return rule.ids.has(String(u?._id).toLowerCase()) || (email && (rule.emails.has(email) || rule.domains.some((d) => email.endsWith(`@${d}`))));
-};
-/** a Mongo filter for real accounts (not test) on the User collection */
-function realUserFilter(rule) {
-  const nor = [];
-  if (rule.ids.size) nor.push({ _id: { $in: [...rule.ids].filter(isId) } });
-  if (rule.emails.size) nor.push({ email: { $in: [...rule.emails] } });
-  for (const d of rule.domains) nor.push({ email: { $regex: `@${d.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, $options: "i" } });
-  return nor.length ? { $nor: nor } : {};
-}
-/**
- * From some account ids (students, authors, brands), the ones that still exist and aren't test accounts. Rows whose
- * account was deleted (a placeholder id) or is a test account are then left out of every count.
- */
-async function liveIds(ids, rule) {
-  const uniq = [...new Set(ids.map(String).filter(isId))];
-  if (!uniq.length) return new Set();
-  const users = await User.find({ _id: { $in: uniq } }).select("_id email").lean();
-  return new Set(users.filter((u) => !isTestUser(u, rule)).map((u) => String(u._id)));
-}
+// ---------- who counts (services/analytics/accountRules.js: the same rule for every admin figure) ----------
+const { testRule, isTestUser, realUserFilter, liveIds, NOT_ACTIVE } = require("./accountRules");
 
 // ---------- one metric ----------
 const change = (value, previous) => (previous == null ? null : { delta: value - previous, pct: previous ? Math.round(((value - previous) / previous) * 1000) / 10 : null });
@@ -101,15 +74,11 @@ async function windowFigures(r, rule) {
   const within = { $gte: r.from, $lte: r.to };
   // students
   const signups = await User.countDocuments({ role: "student", createdAt: within, ...realUserFilter(rule) });
-  // brand-confirmed redemptions (live brands + archived ones of deleted brands), only of existing, real students
-  const offers = await Offer.find({ "redemptions.redeemedAt": within }).select("brand redemptions").lean();
-  let rows = [];
-  for (const o of offers) for (const x of o.redemptions || []) if (x.redeemedAt >= r.from && x.redeemedAt <= r.to) rows.push({ brand: String(o.brand), student: String(x.student), bill: x.billAmount || 0, saved: x.savedAmount || 0, at: x.redeemedAt });
-  const archived = await RedemptionArchive.find({ kind: "redemption", redeemedAt: within }).select("student billAmount savedAmount redeemedAt").lean();
-  rows.push(...archived.map((x) => ({ brand: "deleted", student: String(x.student), bill: x.billAmount || 0, saved: x.savedAmount || 0, at: x.redeemedAt })));
-  const liveStudents = await liveIds(rows.map((x) => x.student), rule);
-  const realBrands = await liveIds(rows.map((x) => x.brand).filter(isId), rule); // brands that exist and aren't test
-  rows = rows.filter((x) => liveStudents.has(x.student) && (x.brand === "deleted" || realBrands.has(x.brand)));
+  // sales (services/brandSales.js, the same list as admin "brand revenue" and the brand portal): brand-confirmed
+  // redemptions, older used promo codes no redemption points to, deleted brands' archived redemptions; a store
+  // order once; test accounts left out, deleted students' sales kept (they happened)
+  const rows = (await require("../brandSales").salesRows({ from: r.from, to: r.to, includeArchived: true, rule }))
+    .map((x) => ({ brand: x.brand, student: x.studentId, bill: x.bill, saved: x.saved, at: x.at }));
   const newlyApproved = await User.countDocuments({ role: "brand", brandApprovedAt: within, ...realUserFilter(rule) });
   // loyalty (the ledger)
   const ledger = await LoyaltyLedger.find({ effectiveAt: within }).select("brand student type visitsDelta").lean();
@@ -152,14 +121,14 @@ async function windowFigures(r, rule) {
 async function snapshotFigures(rule, now = new Date()) {
   const real = realUserFilter(rule);
   const activeSince = (days) => new Date(now.getTime() - days * DAY);
-  const profiles = await EngagementProfile.find({ "stats.lastActiveAt": { $gte: activeSince(30) } }).select("user stats.lastActiveAt").lean();
-  const students = new Map((await User.find({ _id: { $in: profiles.map((p) => p.user) }, role: "student", ...real }).select("_id university").lean()).map((u) => [String(u._id), u]));
-  const active = profiles.filter((p) => students.has(String(p.user)));
+  const { activeStudents, userCounts } = require("./activity");
+  const active = await activeStudents({ since: activeSince(30), rule });
   return {
     verified: await User.countDocuments({ role: "student", status: "Verified", ...real }),
-    active7: active.filter((p) => new Date(p.stats.lastActiveAt) >= activeSince(7)).length,
+    active7: active.filter((p) => p.lastActiveAt >= activeSince(7)).length,
     active30: active.length,
-    activeByUniversity: active.reduce((m, p) => { const u = students.get(String(p.user))?.university; if (u) m.set(String(u), (m.get(String(u)) || 0) + 1); return m; }, new Map()),
+    activeByUniversity: active.reduce((m, p) => { if (p.university) m.set(String(p.university), (m.get(String(p.university)) || 0) + 1); return m; }, new Map()),
+    users: await userCounts(rule),
     approvedBrands: await User.countDocuments({ role: "brand", brandApprovalStatus: "approved", ...real }),
     activeOffers: await Offer.countDocuments({ status: "active", archivedAt: null }),
   };
@@ -222,8 +191,8 @@ async function adminMetrics(q = {}, { now = new Date() } = {}) {
     approvedBrands: "brand accounts approved now (all time); no history, so no previous period",
     newlyApproved: "brands approved in the range",
     activeOffers: "offers live now (not archived)",
-    redemptions: "bills the brand confirmed in the range (QR / promo verify, store orders; deleted brands' redemptions included), by existing, non-test students; claims are not redemptions",
-    revenue: "money students paid brands through tdc in the range: bill minus the tdc discount, on confirmed redemptions (tdc takes no commission)",
+    redemptions: "bills the brand confirmed in the range (QR / promo verify, store orders — a store order once; deleted brands' and deleted students' redemptions included), not test accounts; claims are not redemptions",
+    revenue: "money students paid brands through tdc in the range: bill minus the discount (each promo code's own %), a store order once (tdc takes no commission); the same figure as admin brand revenue and the brand portal",
     members: "student-brand pairs with a counted loyalty visit in the range",
     visits: "loyalty visits counted in the range minus visits reversed",
     rewardsEarned: "loyalty rewards earned in the range (not voided)",
@@ -269,7 +238,9 @@ async function adminMetrics(q = {}, { now = new Date() } = {}) {
     topBrands, topUniversities, minCohort: MIN_COHORT,
     funnel: { applications: f.applications || 0, shortlisted: f.shortlisted || 0, interviews: f.interviewsCompleted || 0, offers: f.offersAccepted || 0, hires: f.verifiedHires || 0 },
     needsAction: action,
+    // accounts now (the dashboard cards): not suspended / banned / deactivated, never test accounts
+    users: { ...snap.users, definition: "accounts now, not suspended, banned or deactivated, not test accounts; includingSuspended adds those" },
   };
 }
 
-module.exports = { adminMetrics, rangeOf, testRule, isTestUser, realUserFilter, PRESETS, MIN_COHORT };
+module.exports = { adminMetrics, rangeOf, karachiMidnight, endOfKarachiDay, testRule, isTestUser, realUserFilter, PRESETS, MIN_COHORT };

@@ -412,7 +412,8 @@ const textAnywhere = (needle, skip = []) => [...fake.STORE].filter(([n]) => !ski
   check("student T: total saved and count unchanged", JSON.stringify(afterB.t) === JSON.stringify(before.t), `${JSON.stringify(before.t)} → ${JSON.stringify(afterB.t)}`);
   check("student T: my-redemptions same ids (Meta dedupe)", afterB.tr === before.tr && afterB.tr.includes(String(red.bT._id)), afterB.tr);
   const archive = rows(Models.RedemptionArchive);
-  check("archive: one row per redemption, student kept, plus brand totals", archive.filter((a) => a.kind === "redemption").length === 2 && archive.some((a) => a.kind === "redemption" && same(a.student, ids.T) && a.savedAmount === 200) && archive.filter((a) => a.kind === "brand-totals").length === 1);
+  // fix/metric-audit: B's older used code (no redemption points to it) is kept too, as a row with no offer
+  check("archive: one row per redemption (+ B's older used code, no offer), student kept, plus brand totals", archive.filter((a) => a.kind === "redemption").length === 3 && archive.filter((a) => a.kind === "redemption" && !a.offerId).length === 1 && archive.some((a) => a.kind === "redemption" && same(a.student, ids.T) && a.savedAmount === 200) && archive.filter((a) => a.kind === "brand-totals").length === 1);
   check("archive holds no brand id, name or offer title", !JSON.stringify(archive).includes(String(ids.B)) && !JSON.stringify(archive).includes(NAMES.B) && !JSON.stringify(archive).includes("B: 20% off"));
   check("B's offers, promo codes, branches, campaigns, rewards, Shopify store gone", [Models.Offer, Models.PromoCode, Models.Branch, Models.Campaign, Models.Reward].every((Mdl) => rows(Mdl, (d) => same(d.brand, ids.B)).length === 0) && rows(Models.ShopifyStore).length === 0);
   const rActive = rows(Models.RewardRedemption, (x) => same(x._id, ids.rrActiveT))[0];
@@ -439,6 +440,7 @@ const textAnywhere = (needle, skip = []) => [...fake.STORE].filter(([n]) => !ski
   res = await call("DELETE", `/api/admin/users/${ids.S}`, { tok: ADMIN, body: { confirmName: ` ${NAMES.S} ` } });
   check("admin deletes student S (name typed with spaces around) → 200", res.status === 200 && res.json?.role === "student", `${res.status} ${res.text.slice(0, 160)}`);
   const afterS = { s: await summary(), travel: await travel() };
+  // a deleted student's sales happened: revenue keeps them (only test accounts are left out of revenue)
   check("revenue figures unchanged (unique students too)", figs(afterS.s) === figs(beforeS.s), `${figs(beforeS.s)} → ${figs(afterS.s)}`);
   check("travel revenue unchanged", afterS.travel === beforeS.travel && afterS.travel === 50000, `${beforeS.travel} → ${afterS.travel}`);
   const oC = rows(Models.Offer, (o) => same(o._id, ids.oC1))[0];
