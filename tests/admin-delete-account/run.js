@@ -412,7 +412,8 @@ const textAnywhere = (needle, skip = []) => [...fake.STORE].filter(([n]) => !ski
   check("student T: total saved and count unchanged", JSON.stringify(afterB.t) === JSON.stringify(before.t), `${JSON.stringify(before.t)} → ${JSON.stringify(afterB.t)}`);
   check("student T: my-redemptions same ids (Meta dedupe)", afterB.tr === before.tr && afterB.tr.includes(String(red.bT._id)), afterB.tr);
   const archive = rows(Models.RedemptionArchive);
-  check("archive: one row per redemption, student kept, plus brand totals", archive.filter((a) => a.kind === "redemption").length === 2 && archive.some((a) => a.kind === "redemption" && same(a.student, ids.T) && a.savedAmount === 200) && archive.filter((a) => a.kind === "brand-totals").length === 1);
+  // fix/metric-audit: B's older used code (no redemption points to it) is kept too, as a row with no offer
+  check("archive: one row per redemption (+ B's older used code, no offer), student kept, plus brand totals", archive.filter((a) => a.kind === "redemption").length === 3 && archive.filter((a) => a.kind === "redemption" && !a.offerId).length === 1 && archive.some((a) => a.kind === "redemption" && same(a.student, ids.T) && a.savedAmount === 200) && archive.filter((a) => a.kind === "brand-totals").length === 1);
   check("archive holds no brand id, name or offer title", !JSON.stringify(archive).includes(String(ids.B)) && !JSON.stringify(archive).includes(NAMES.B) && !JSON.stringify(archive).includes("B: 20% off"));
   check("B's offers, promo codes, branches, campaigns, rewards, Shopify store gone", [Models.Offer, Models.PromoCode, Models.Branch, Models.Campaign, Models.Reward].every((Mdl) => rows(Mdl, (d) => same(d.brand, ids.B)).length === 0) && rows(Models.ShopifyStore).length === 0);
   const rActive = rows(Models.RewardRedemption, (x) => same(x._id, ids.rrActiveT))[0];
@@ -439,7 +440,11 @@ const textAnywhere = (needle, skip = []) => [...fake.STORE].filter(([n]) => !ski
   res = await call("DELETE", `/api/admin/users/${ids.S}`, { tok: ADMIN, body: { confirmName: ` ${NAMES.S} ` } });
   check("admin deletes student S (name typed with spaces around) → 200", res.status === 200 && res.json?.role === "student", `${res.status} ${res.text.slice(0, 160)}`);
   const afterS = { s: await summary(), travel: await travel() };
-  check("revenue figures unchanged (unique students too)", figs(afterS.s) === figs(beforeS.s), `${figs(beforeS.s)} → ${figs(afterS.s)}`);
+  // fix/metric-audit: revenue leaves out deleted students (the same rule as the metrics page), so S's sales drop out:
+  // B's archived 500/100, C's 600/120 and S's used code at C (1500 at its own 20% = 300 saved): 2080 paid, 3 sales
+  check("revenue: exactly S's sales leave the totals (2080 paid, 3 sales, 1 student); nothing else changes",
+    afterS.s.totalRevenue === beforeS.s.totalRevenue - 2080 && afterS.s.totalBill === beforeS.s.totalBill - 2600 && afterS.s.totalSaved === beforeS.s.totalSaved - 520 && afterS.s.totalRedemptions === beforeS.s.totalRedemptions - 3 && afterS.s.uniqueStudents === beforeS.s.uniqueStudents - 1,
+    `${figs(beforeS.s)} → ${figs(afterS.s)}`);
   check("travel revenue unchanged", afterS.travel === beforeS.travel && afterS.travel === 50000, `${beforeS.travel} → ${afterS.travel}`);
   const oC = rows(Models.Offer, (o) => same(o._id, ids.oC1))[0];
   check("C's offer: S's redemption kept with a placeholder id, claim removed", oC.redemptions.length === 2 && !oC.redemptions.some((x) => same(x.student, ids.S)) && oC.claimedBy.length === 1 && same(oC.claimedBy[0], ids.T));

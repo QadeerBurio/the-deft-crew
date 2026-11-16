@@ -1023,14 +1023,17 @@ router.get("/pending-payments", auth, isAdmin, async (req, res) => {
 
 router.get("/card-stats", auth, isAdmin, async (req, res) => {
   try {
-    const printing = await User.countDocuments({ cardStatus: "Printing" });
-    const shipped = await User.countDocuments({ cardStatus: "Shipped" });
-    const delivered = await User.countDocuments({ cardStatus: "Delivered" });
-    const pending = await User.countDocuments({ paymentStatus: "Pending Verification" });
-    const approvedTotal = await User.countDocuments({ paymentStatus: "Verified" });
-    const totalRevenue = approvedTotal * 750;
-
-    res.json({ printing, shipped, delivered, pending, approvedTotal, totalRevenue });
+    // test accounts left out like every admin figure (services/analytics/accountRules.js)
+    const { testRule, realUserFilter } = require("../services/analytics/accountRules");
+    const real = realUserFilter(testRule());
+    const printing = await User.countDocuments({ cardStatus: "Printing", ...real });
+    const shipped = await User.countDocuments({ cardStatus: "Shipped", ...real });
+    const delivered = await User.countDocuments({ cardStatus: "Delivered", ...real });
+    const pending = await User.countDocuments({ paymentStatus: "Pending Verification", ...real });
+    const approvedTotal = await User.countDocuments({ paymentStatus: "Verified", ...real });
+    // card revenue isn't tracked: a card payment keeps a status, an id and a receipt image, but no amount, so a total
+    // would be a guess (it used to be approved cards × 750). null = "not tracked".
+    res.json({ printing, shipped, delivered, pending, approvedTotal, totalRevenue: null, revenueTracked: false, revenueNote: "card payments are recorded without an amount" });
   } catch (err) { 
     res.status(500).json({ message: "Error fetching stats" }); 
   }

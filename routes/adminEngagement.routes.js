@@ -391,94 +391,11 @@ router.get('/drops/:dayKey/results', async (req, res) => {
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
 
+// the engagement page: last N weeks in Karachi days, test accounts left out, delivered pushes, used reward codes
+// (services/analytics/engagementMetrics.js)
 router.get('/metrics', async (req, res) => {
   try {
-    const weeks = Math.min(parseInt(req.query.weeks) || 8, 26);
-    const since = new Date(Date.now() - weeks * 7 * 24 * 60 * 60 * 1000);
-    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-
-    const [
-      totalProfiles, activeUsers, badgesEarned, pushSent, pushOpened,
-      rewardsRedeemed, totalDrops, totalDropReactions, fullySortedCount,
-      examModeActive, totalReferrals,
-      weeklyUsers, missionAgg, levelAgg, topBadgesAgg, eventBreakdownAgg,
-      pointsAgg, streakAgg,
-    ] = await Promise.all([
-      EngagementProfile.countDocuments({}),
-      EngagementProfile.countDocuments({ 'stats.lastActiveAt': { $gte: thirtyDaysAgo } }),
-      UserBadge.countDocuments({ earnedAt: { $gte: since } }),
-      PushLog.countDocuments({ createdAt: { $gte: since } }),
-      PushLog.countDocuments({ createdAt: { $gte: since }, openedAt: { $ne: null } }),
-      RewardRedemption.countDocuments({ createdAt: { $gte: since } }),
-      DailyDrop.countDocuments({ createdAt: { $gte: since } }),
-      DropReaction.countDocuments({ createdAt: { $gte: since } }),
-      EngagementProfile.countDocuments({ sortedCount: 8 }),
-      EngagementProfile.countDocuments({ 'streak.examModeUntil': { $gte: new Date().toISOString().slice(0, 10) } }),
-      User.countDocuments({ referralCount: { $gt: 0 } }),
-      EngagementEvent.aggregate([
-        { $match: { createdAt: { $gte: since } } },
-        { $group: { _id: { week: { $isoWeek: '$createdAt' }, year: { $isoWeekYear: '$createdAt' } }, users: { $addToSet: '$user' } } },
-        { $project: { _id: 1, users: { $size: '$users' } } },
-        { $sort: { '_id.year': 1, '_id.week': 1 } },
-      ]),
-      EngagementProfile.aggregate([
-        { $group: {
-          _id: null,
-          discounts: { $sum: { $cond: [{ $ne: ['$sorted.discounts', null] }, 1, 0] } },
-          resume: { $sum: { $cond: [{ $ne: ['$sorted.resume', null] }, 1, 0] } },
-          jobs: { $sum: { $cond: [{ $ne: ['$sorted.jobs', null] }, 1, 0] } },
-          social: { $sum: { $cond: [{ $ne: ['$sorted.social', null] }, 1, 0] } },
-          events: { $sum: { $cond: [{ $ne: ['$sorted.events', null] }, 1, 0] } },
-          scholarship: { $sum: { $cond: [{ $ne: ['$sorted.scholarship', null] }, 1, 0] } },
-          skillshare: { $sum: { $cond: [{ $ne: ['$sorted.skillshare', null] }, 1, 0] } },
-          traveling: { $sum: { $cond: [{ $ne: ['$sorted.traveling', null] }, 1, 0] } },
-        } },
-      ]),
-      EngagementProfile.aggregate([
-        { $group: { _id: '$level.id', count: { $sum: 1 } } },
-        { $sort: { count: -1 } },
-      ]),
-      UserBadge.aggregate([
-        { $match: { earnedAt: { $gte: since } } },
-        { $group: { _id: '$badgeId', count: { $sum: 1 } } },
-        { $sort: { count: -1 } },
-        { $limit: 10 },
-      ]),
-      EngagementEvent.aggregate([
-        { $match: { createdAt: { $gte: since } } },
-        { $group: { _id: '$name', count: { $sum: 1 } } },
-        { $sort: { count: -1 } },
-        { $limit: 20 },
-      ]),
-      PointsLedger.aggregate([
-        { $match: { createdAt: { $gte: since }, delta: { $gt: 0 } } },
-        { $group: { _id: null, total: { $sum: '$delta' } } },
-      ]),
-      EngagementProfile.aggregate([
-        { $group: { _id: null, avgStreak: { $avg: '$streak.count' }, longestStreak: { $max: '$streak.best' } } },
-      ]),
-    ]);
-
-    const missionBreakdown = missionAgg[0]
-      ? Object.fromEntries(Object.entries(missionAgg[0]).filter(([k]) => k !== '_id').map(([k, v]) => [k, v || 0]))
-      : {};
-    const levelBreakdown = {};
-    levelAgg.forEach((row) => { levelBreakdown[row._id || 'member'] = row.count; });
-    const topBadges = topBadgesAgg.map((row) => ({ badgeId: row._id, count: row.count }));
-    const eventBreakdown = {};
-    eventBreakdownAgg.forEach((row) => { eventBreakdown[row._id] = row.count; });
-    const totalPointsAwarded = pointsAgg[0]?.total || 0;
-    const streakStats = streakAgg[0] || { avgStreak: 0, longestStreak: 0 };
-
-    res.json({
-      totalProfiles, activeUsers, badgesEarned, pushSent, pushOpened,
-      pushOpenRate: pushSent > 0 ? pushOpened / pushSent : 0,
-      rewardsRedeemed, totalDrops, totalDropReactions, totalPointsAwarded,
-      fullySortedCount, examModeActive, totalReferrals,
-      avgStreak: streakStats.avgStreak || 0,
-      longestStreak: streakStats.longestStreak || 0,
-      weeklyUsers, missionBreakdown, levelBreakdown, topBadges, eventBreakdown,
-    });
+    res.json(await require('../services/analytics/engagementMetrics').engagementMetrics({ weeks: req.query.weeks }));
   } catch (err) {
     console.error('[admin/metrics]', err);
     res.status(500).json({ message: err.message });
@@ -600,9 +517,12 @@ router.post('/nudge/streak/:userId', async (req, res) => {
 router.get('/drilldown', async (req, res) => {
   try {
     const { kind, key } = req.query;
-    const weeks = Math.min(parseInt(req.query.weeks) || 8, 26);
-    const since = new Date(Date.now() - weeks * 7 * 24 * 60 * 60 * 1000);
-    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    // the same range and rules as GET /metrics (services/analytics/engagementMetrics.js)
+    const { weeksRange } = require('../services/analytics/engagementMetrics');
+    const { testRule, isTestUser } = require('../services/analytics/accountRules');
+    const { dayKey } = require('../utils/karachiTime');
+    const rule = testRule();
+    const { since } = weeksRange(req.query.weeks);
 
     let items = [];
 
@@ -792,7 +712,7 @@ router.get('/drilldown', async (req, res) => {
 
           case 'activeUsers': {
             const profiles = await EngagementProfile.find({
-              'stats.lastActiveAt': { $gte: thirtyDaysAgo },
+              'stats.lastActiveAt': { $gte: since },
             })
               .limit(500)
               .populate('user', 'name email role rollNo')
@@ -833,8 +753,14 @@ router.get('/drilldown', async (req, res) => {
           }
 
           case 'pushSent':
+          case 'pushFailed':
+          case 'pushQueued':
           case 'pushOpened': {
-            const filter = { createdAt: { $gte: since } };
+            // sent = delivered (the push service confirmed it)
+            const filter = { sentAt: { $gte: since } };
+            if (key === 'pushSent') filter.deliveredAt = { $ne: null };
+            if (key === 'pushFailed') filter.status = 'failed';
+            if (key === 'pushQueued') filter.status = 'queued';
             if (key === 'pushOpened') filter.openedAt = { $ne: null };
             const logs = await PushLog.find(filter)
               .sort({ createdAt: -1 })
@@ -855,10 +781,10 @@ router.get('/drilldown', async (req, res) => {
             break;
           }
 
-          case 'rewardsRedeemed': {
-            const redemptions = await RewardRedemption.find({
-              createdAt: { $gte: since },
-            })
+          case 'rewardsRedeemed':
+          case 'codesIssued': {
+            // redeemed = codes used at the brand; issued = codes students took
+            const redemptions = await RewardRedemption.find(key === 'rewardsRedeemed' ? { status: 'used', usedAt: { $gte: since } } : { createdAt: { $gte: since } })
               .sort({ createdAt: -1 })
               .limit(500)
               .populate('user', 'name email role rollNo')
@@ -873,7 +799,7 @@ router.get('/drilldown', async (req, res) => {
                 role: r.user.role,
                 rollNo: r.user.rollNo,
                 when: r.createdAt,
-                detail: `redeemed ${r.reward?.title || 'reward'} (${r.costPoints} pts)`,
+                detail: `${key === 'rewardsRedeemed' ? 'used' : 'took'} ${r.reward?.title || 'reward'} (${r.costPoints} pts)`,
               }));
             break;
           }
@@ -921,7 +847,7 @@ router.get('/drilldown', async (req, res) => {
           }
 
           case 'examModeActive': {
-            const today = new Date().toISOString().slice(0, 10);
+            const today = dayKey(); // Karachi date
             const profiles = await EngagementProfile.find({
               'streak.examModeUntil': { $gte: today },
             })
@@ -942,11 +868,15 @@ router.get('/drilldown', async (req, res) => {
             break;
           }
 
-          case 'totalReferrals': {
-            const users = await User.find({ referralCount: { $gt: 0 } })
-              .sort({ referralCount: -1 })
+          case 'totalReferrals':
+          case 'studentsWhoInvited': {
+            // students who invited someone: accounts that signed up with their code (not the counter on the user)
+            const referred = await User.find({ referredBy: { $ne: null } }).select('referredBy email').lean();
+            const count = new Map();
+            for (const u of referred) if (u.referredBy && !isTestUser(u, rule)) count.set(String(u.referredBy), (count.get(String(u.referredBy)) || 0) + 1);
+            const users = await User.find({ _id: { $in: [...count.keys()] } })
               .limit(500)
-              .select('name email role rollNo referralCount createdAt')
+              .select('name email role rollNo createdAt')
               .lean();
             items = users.map((u) => ({
               _id: String(u._id),
@@ -955,8 +885,18 @@ router.get('/drilldown', async (req, res) => {
               role: u.role,
               rollNo: u.rollNo,
               when: u.createdAt,
-              detail: `${u.referralCount} referrals`,
-            }));
+              detail: `${count.get(String(u._id))} signed up with their code`,
+            })).sort((x, y) => count.get(y._id) - count.get(x._id));
+            break;
+          }
+
+          case 'invitedSignups': {
+            const users = await User.find({ referredBy: { $ne: null }, createdAt: { $gte: since } })
+              .sort({ createdAt: -1 })
+              .limit(500)
+              .select('name email role rollNo createdAt')
+              .lean();
+            items = users.map((u) => ({ _id: String(u._id), name: u.name, email: u.email, role: u.role, rollNo: u.rollNo, when: u.createdAt, detail: 'signed up with an invite code' }));
             break;
           }
 
@@ -1009,6 +949,8 @@ router.get('/drilldown', async (req, res) => {
         items = [];
     }
 
+    // test accounts never listed (same rule as the counts)
+    items = items.filter((i) => !isTestUser({ _id: i._id, email: i.email }, rule));
     res.json({ kind, key, items, count: items.length });
   } catch (err) {
     console.error('[admin/drilldown]', err);

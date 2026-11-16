@@ -24,7 +24,8 @@ const { getBrandCitiesMap } = require("../utils/brandCities");
 const { myClaimedOfferIds, withMyClaim, offerForStudent } = require("../utils/myClaims");
 const { geocodeInBackground } = require("../services/geo/geocoder");
 const RedemptionArchive = require("../models/RedemptionArchive");
-const { brandFigures, TOTAL_KEYS } = require("../services/brandRevenue");
+const { TOTAL_KEYS } = require("../services/brandRevenue");
+const brandSales = require("../services/brandSales"); // one sale per bill (store orders once), deleted / test accounts left out
 const { onlineStoresFor } = require("../services/storeStatus");
 
 // Offers/claims change all the time, never let a phone or proxy cache them
@@ -541,7 +542,8 @@ router.get("/my-total-savings", auth, async (req, res) => {
     const stats = result[0] || { totalSaved: 0, redemptionCount: 0 };
 
     // redemptions at brands whose account was deleted still count
-    const archived = await RedemptionArchive.find({ kind: "redemption", student: uid }).select("savedAmount").lean();
+    // (rows without an offer are a deleted brand's older promo-code sales, kept for revenue only: not counted here, as before)
+    const archived = (await RedemptionArchive.find({ kind: "redemption", student: uid }).select("savedAmount offerId").lean()).filter((r) => r.offerId);
 
     res.json({
       totalSaved: stats.totalSaved + archived.reduce((s, r) => s + (r.savedAmount || 0), 0),
@@ -653,105 +655,31 @@ router.get("/claimed-users", auth, async (req, res) => {
 // REPORT: Brand's total savings/sales report - ENHANCED to include promo codes
 router.get("/savings-report", auth, async (req, res) => {
   try {
-    const PromoCode = require("../models/PromoCode");
-
-    // 1. Get QR / in-store redemptions from offers
-    const offers = await Offer.find({ brand: req.userId })
-      .populate({
-        path: "redemptions.student",
-        select: "name rollNo university email",
-        populate: {
-          path: "university",
-          select: "name",
-        },
-      })
-      .lean()
-      .exec();
-
-    const qrRedemptions = offers.reduce((acc, offer) => {
-      offer.redemptions.forEach(r => {
-        acc.push({
-          name: r.student?.name || "N/A",
-          rollNo: r.student?.rollNo || "N/A",
-          email: r.student?.email || "",
-          university: r.student?.university?.name || "N/A",
-          brand: offer.title || 'Brand',
-          bill: r.billAmount || 0,
-          saved: r.savedAmount || 0,
-          paid: (r.billAmount || 0) - (r.savedAmount || 0),
-          date: r.redeemedAt,
-          redemptionType: "qr",
-          platform: "in-store",
-          promoCode: r.promoCode || null,
-          offerId: offer._id,
-          offerImage: offer.image,
-          discountPercentage: offer.discountPercentage
-        });
-      });
-      return acc;
-    }, []);
-
-    // 2. Get promo code redemptions (online - Shopify/WooCommerce)
-    const usedPromoCodes = await PromoCode.find({
-      brand: req.userId,
-      status: 'used'
-    })
-      .populate({
-        path: 'student',
-        select: 'name rollNo university email',
-        populate: {
-          path: 'university',
-          select: 'name'
-        }
-      })
-      .populate('offer', 'title image discountPercentage')
-      .lean();
-
-    // Get the brand to determine platform
-    const brandUser = await User.findById(req.userId).lean();
+    // the brand's sales (services/brandSales.js): a store order once (not as a promo use and a redemption), each
+    // promo code's own discount, deleted and test students left out
+    const rows = await brandSales.salesRows({ brandIds: [req.userId], populate: true });
+    const brandUser = await User.findById(req.userId).select("platform").lean();
     // where each code was used: the store it was made on, else the brand's platform ("none" = checked by hand)
     const brandPlatform = brandUser?.platform || 'none';
-
-    const promoRedemptions = usedPromoCodes.map(pc => {
-      const bill = pc.externalAmount || 0;
-      const saved = Math.round((bill * (pc.discountPercentage || 0)) / 100);
-      const paid = bill - saved;
-
-      return {
-        name: pc.student?.name || "N/A",
-        rollNo: pc.student?.rollNo || "N/A",
-        email: pc.student?.email || "",
-        university: pc.student?.university?.name || "N/A",
-        brand: pc.offerTitle || pc.offer?.title || 'Brand',
-        bill: bill,
-        saved: saved,
-        paid: paid,
-        date: pc.usedAt || pc.updatedAt,
-        redemptionType: "promo",
-        platform: pc.externalProvider === 'shopify' || pc.externalProvider === 'woocommerce' ? pc.externalProvider : brandPlatform,
-        promoCode: pc.code,
-        offerId: pc.offer?._id,
-        offerImage: pc.offer?.image,
-        discountPercentage: pc.discountPercentage,
-        externalOrderId: pc.externalOrderId || null
-      };
-    });
-
-    // 3. Merge and sort by date (newest first)
-    const combined = [...qrRedemptions, ...promoRedemptions].sort(
-      (a, b) => new Date(b.date) - new Date(a.date)
-    );
-
-    // 4. Remove duplicates
-    const seen = new Set();
-    const deduped = combined.filter(item => {
-      const key = `${item.name}-${item.date}-${item.saved}-${item.promoCode || 'qr'}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-
-    res.json(deduped);
+    const out = rows.sort((a, b) => new Date(b.at) - new Date(a.at)).map((r) => ({
+      name: r.student?.name || "N/A",
+      rollNo: r.student?.rollNo || "N/A",
+      email: r.student?.email || "",
+      university: r.student?.university?.name || "N/A",
+      brand: r.offerTitle || 'Brand',
+      bill: r.bill,
+      saved: r.saved,
+      paid: r.paid,
+      date: r.at,
+      redemptionType: r.redemptionType,
+      platform: r.redemptionType === "qr" ? "in-store" : r.provider || brandPlatform,
+      promoCode: r.promoCode,
+      offerId: r.offerId,
+      offerImage: r.offerImage,
+      discountPercentage: r.discountPercentage,
+      externalOrderId: r.externalOrderId || null,
+    }));
+    res.json(out);
   } catch (err) {
     console.error("Error in savings-report:", err);
     res.status(500).json({ message: err.message });
@@ -1374,7 +1302,6 @@ router.get("/:offerId/promo-info", auth, async (req, res) => {
 // GET: Full redemption list for a specific brand (admin view)
 router.get("/brand/:brandId/redemptions", auth, async (req, res) => {
   try {
-    const PromoCode = require("../models/PromoCode");
     const { brandId } = req.params;
 
     const requester = await User.findById(req.userId).lean().select('role');
@@ -1387,110 +1314,46 @@ router.get("/brand/:brandId/redemptions", auth, async (req, res) => {
     if (requester.role === 'brand' && req.userId !== brandId) {
       return res.status(403).json({ message: "You can only view your own redemptions" });
     }
+    if (!mongoose.Types.ObjectId.isValid(String(brandId))) return res.status(404).json({ message: "Brand not found" });
 
-    const offers = await Offer.find({ brand: brandId })
-      .populate({
-        path: "redemptions.student",
-        select: "name rollNo university email phone",
-        populate: { path: "university", select: "name" }
-      })
-      .lean();
-
-    const qrRedemptions = offers.reduce((acc, offer) => {
-      (offer.redemptions || []).forEach(r => {
-        acc.push({
-          studentName: r.student?.name || "N/A",
-          rollNo: r.student?.rollNo || "N/A",
-          email: r.student?.email || "",
-          phone: r.student?.phone || "",
-          university: r.student?.university?.name || "N/A",
-          offerTitle: offer.title || "Offer",
-          offerImage: offer.image,
-          discountPercentage: offer.discountPercentage || 0,
-          bill: r.billAmount || 0,
-          saved: r.savedAmount || 0,
-          paid: (r.billAmount || 0) - (r.savedAmount || 0),
-          date: r.redeemedAt,
-          redemptionType: "qr",
-          platform: "in-store",
-          promoCode: r.promoCode || null,
-          studentId: r.student?._id
-        });
-      });
-      return acc;
-    }, []);
-
-    const usedPromoCodes = await PromoCode.find({
-      brand: brandId,
-      status: 'used'
-    })
-      .populate({
-        path: 'student',
-        select: 'name rollNo university email phone',
-        populate: { path: 'university', select: 'name' }
-      })
-      .populate('offer', 'title image discountPercentage')
-      .lean();
-
-    const brandUser = await User.findById(brandId).lean();
-    // where each code was used: the store it was made on, else the brand's platform ("none" = checked by hand)
+    // the same sales as the brand's own pages and admin "brand revenue" (services/brandSales.js)
+    const rows = await brandSales.salesRows({ brandIds: [brandId], populate: true });
+    const brandUser = await User.findById(brandId).select("platform").lean();
     const brandPlatform = brandUser?.platform || 'none';
-
-    const promoRedemptions = usedPromoCodes.map(pc => {
-      const bill = pc.externalAmount || 0;
-      const saved = Math.round((bill * (pc.discountPercentage || 0)) / 100);
-
-      return {
-        studentName: pc.student?.name || "N/A",
-        rollNo: pc.student?.rollNo || "N/A",
-        email: pc.student?.email || "",
-        phone: pc.student?.phone || "",
-        university: pc.student?.university?.name || "N/A",
-        offerTitle: pc.offerTitle || pc.offer?.title || "Offer",
-        offerImage: pc.offer?.image,
-        discountPercentage: pc.discountPercentage || 0,
-        bill: bill,
-        saved: saved,
-        paid: bill - saved,
-        date: pc.usedAt || pc.updatedAt,
-        redemptionType: "promo",
-        platform: pc.externalProvider === 'shopify' || pc.externalProvider === 'woocommerce' ? pc.externalProvider : brandPlatform,
-        promoCode: pc.code,
-        studentId: pc.student?._id,
-        externalOrderId: pc.externalOrderId || null
-      };
-    });
-
-    const combined = [...qrRedemptions, ...promoRedemptions].sort(
-      (a, b) => new Date(b.date) - new Date(a.date)
-    );
-
-    const seen = new Set();
-    const deduped = combined.filter(item => {
-      const key = `${item.rollNo}-${item.date}-${item.saved}-${item.promoCode || 'qr'}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-
-    const totalRevenue = deduped.reduce((sum, r) => sum + (r.paid || 0), 0);
-    const totalBill = deduped.reduce((sum, r) => sum + (r.bill || 0), 0);
-    const totalSaved = deduped.reduce((sum, r) => sum + (r.saved || 0), 0);
-    const uniqueStudents = new Set(deduped.map(r => r.studentId?.toString()).filter(Boolean)).size;
+    const list = rows.sort((a, b) => new Date(b.at) - new Date(a.at)).map((r) => ({
+      studentName: r.student?.name || "N/A",
+      rollNo: r.student?.rollNo || "N/A",
+      email: r.student?.email || "",
+      phone: r.student?.phone || "",
+      university: r.student?.university?.name || "N/A",
+      offerTitle: r.offerTitle || "Offer",
+      offerImage: r.offerImage,
+      discountPercentage: r.discountPercentage || 0,
+      bill: r.bill,
+      saved: r.saved,
+      paid: r.paid,
+      date: r.at,
+      redemptionType: r.redemptionType,
+      platform: r.redemptionType === "qr" ? "in-store" : r.provider || brandPlatform,
+      promoCode: r.promoCode,
+      studentId: r.studentId,
+      externalOrderId: r.externalOrderId || null,
+    }));
+    const f = brandSales.figures(rows);
 
     res.json({
       success: true,
-      redemptions: deduped,
+      redemptions: list,
       stats: {
-        totalRedemptions: deduped.length,
-        totalRevenue,
-        totalBill,
-        totalSaved,
-        uniqueStudents,
-        onlineCount: promoRedemptions.length,
-        inStoreCount: qrRedemptions.length,
-        onlineSaved: promoRedemptions.reduce((s, r) => s + r.saved, 0),
-        inStoreSaved: qrRedemptions.reduce((s, r) => s + r.saved, 0)
+        totalRedemptions: f.totalRedemptions,
+        totalRevenue: f.totalRevenue,
+        totalBill: f.totalBill,
+        totalSaved: f.totalSaved,
+        uniqueStudents: f.uniqueStudents,
+        onlineCount: f.promoCount,
+        inStoreCount: f.qrCount,
+        onlineSaved: f.promoSaved,
+        inStoreSaved: f.qrSaved
       }
     });
   } catch (err) {
@@ -1504,50 +1367,32 @@ router.get("/brand/:brandId/redemptions", auth, async (req, res) => {
 // ============================================================
 router.get("/admin/brands-revenue", auth, async (req, res) => {
   try {
-    const PromoCode = require("../models/PromoCode");
-
     const admin = await User.findById(req.userId).lean().select('role');
     if (!admin || admin.role !== 'admin') {
       return res.status(403).json({ message: "Only admins allowed" });
     }
+    const { testRule, realUserFilter, ruleConfigured } = require("../services/analytics/accountRules");
+    const rule = testRule();
 
-    const brands = await User.find({ role: 'brand' })
+    // test brands are left out like test students (services/analytics/accountRules.js)
+    const brands = await User.find({ role: 'brand', ...realUserFilter(rule) })
       .select('name brandName logo category brandApprovalStatus platform address phone email websiteUrl isOnline isInStore createdAt')
       .lean();
 
-    // student ids are only counted, never shown: no populate (a deleted student's placeholder id still counts)
-    const allOffers = await Offer.find({}).lean();
-
-    const allPromoCodes = await PromoCode.find({ status: 'used' })
-      .populate('offer', 'title image discountPercentage')
-      .lean();
-
-    const offersByBrand = {};
-    allOffers.forEach(offer => {
-      const brandId = offer.brand?.toString();
-      if (!brandId) return;
-      if (!offersByBrand[brandId]) offersByBrand[brandId] = [];
-      offersByBrand[brandId].push(offer);
-    });
-
-    const promosByBrand = {};
-    allPromoCodes.forEach(pc => {
-      const brandId = pc.brand?.toString();
-      if (!brandId) return;
-      if (!promosByBrand[brandId]) promosByBrand[brandId] = [];
-      promosByBrand[brandId].push(pc);
-    });
+    // every sale once (services/brandSales.js): store orders once, each promo's own discount, deleted and test
+    // students left out; deleted brands from their archived redemptions
+    const rows = await brandSales.salesRows({ includeArchived: true, rule });
+    const byBrand = new Map();
+    for (const r of rows) { if (!byBrand.has(r.brand)) byBrand.set(r.brand, []); byBrand.get(r.brand).push(r); }
+    const offerCounts = new Map();
+    for (const o of await Offer.find({}).select("brand").lean()) offerCounts.set(String(o.brand), (offerCounts.get(String(o.brand)) || 0) + 1);
 
     // the store each brand really has (platform + connection status), never keys
     const stores = await onlineStoresFor(brands.map((b) => b._id));
 
     const brandsWithRevenue = brands.map(brand => {
       const brandId = brand._id.toString();
-      const brandOffers = offersByBrand[brandId] || [];
-      const brandPromos = promosByBrand[brandId] || [];
-
-      const figures = brandFigures(brandOffers, brandPromos);
-
+      const figures = { ...brandSales.figures(byBrand.get(brandId) || []), offersCount: offerCounts.get(brandId) || 0 };
       return {
         _id: brand._id,
         name: brand.brandName || brand.name || 'Brand',
@@ -1570,33 +1415,33 @@ router.get("/admin/brands-revenue", auth, async (req, res) => {
 
     brandsWithRevenue.sort((a, b) => b.totalRevenue - a.totalRevenue);
 
-    // brands whose account was deleted: their figures as they were, added to the totals
-    const deletedRows = await RedemptionArchive.find({ kind: "brand-totals" }).select("totals").lean();
-    const deletedBrands = { count: deletedRows.length };
-    for (const k of TOTAL_KEYS) deletedBrands[k] = deletedRows.reduce((s, r) => s + (r.totals?.[k] || 0), 0);
+    // brands whose account was deleted: their archived redemptions (by real students), one total
+    const deletedRows = byBrand.get("deleted") || [];
+    const deletedFigures = brandSales.figures(deletedRows);
+    const deletedBrands = { count: new Set(deletedRows.map((r) => r.deletionId)).size };
+    for (const k of TOTAL_KEYS) deletedBrands[k] = deletedFigures[k] || 0;
+    const byDeletion = new Map();
+    for (const r of deletedRows) byDeletion.set(r.deletionId, (byDeletion.get(r.deletionId) || 0) + r.paid);
 
-    const grandTotalRevenue = brandsWithRevenue.reduce((s, b) => s + b.totalRevenue, 0) + deletedBrands.totalRevenue;
-    const grandTotalBill = brandsWithRevenue.reduce((s, b) => s + b.totalBill, 0) + deletedBrands.totalBill;
-    const grandTotalSaved = brandsWithRevenue.reduce((s, b) => s + b.totalSaved, 0) + deletedBrands.totalSaved;
-    const grandTotalRedemptions = brandsWithRevenue.reduce((s, b) => s + b.totalRedemptions, 0) + deletedBrands.totalRedemptions;
-    const grandUniqueStudents = brandsWithRevenue.reduce((s, b) => s + b.uniqueStudents, 0) + deletedBrands.uniqueStudents;
-    const brandsWithRevenueCount = brandsWithRevenue.filter(b => b.totalRevenue > 0).length
-      + deletedRows.filter((r) => (r.totals?.totalRevenue || 0) > 0).length;
+    // the grand totals from the rows themselves: students who used several brands counted once
+    const all = brandSales.figures(rows.filter((r) => r.brand === "deleted" || brandsWithRevenue.some((b) => String(b._id) === r.brand)));
+    const brandsWithRevenueCount = brandsWithRevenue.filter(b => b.totalRevenue > 0).length + [...byDeletion.values()].filter((v) => v > 0).length;
 
     res.json({
       success: true,
       summary: {
         totalBrands: brands.length,
         brandsWithRevenue: brandsWithRevenueCount,
-        totalRevenue: grandTotalRevenue,
-        totalBill: grandTotalBill,
-        totalSaved: grandTotalSaved,
-        totalRedemptions: grandTotalRedemptions,
-        uniqueStudents: grandUniqueStudents,
+        totalRevenue: all.totalRevenue,
+        totalBill: all.totalBill,
+        totalSaved: all.totalSaved,
+        totalRedemptions: all.totalRedemptions,
+        uniqueStudents: all.uniqueStudents,
         averageRevenue: brandsWithRevenueCount > 0
-          ? Math.round(grandTotalRevenue / brandsWithRevenueCount)
+          ? Math.round(all.totalRevenue / brandsWithRevenueCount)
           : 0,
         deletedBrands,
+        excluded: { deleted: "students whose account was deleted", test: ruleConfigured(rule) ? "test accounts (METRICS_TEST_* variables)" : "no test accounts set up" },
       },
       brands: brandsWithRevenue,
     });
