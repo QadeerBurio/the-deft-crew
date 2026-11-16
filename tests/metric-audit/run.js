@@ -160,10 +160,10 @@ const sum = (list, f) => list.reduce((t, x) => t + f(x), 0);
   note("admin.summary.totalRedemptions", S.totalRedemptions); note("admin.summary.uniqueStudents", S.uniqueStudents); note("admin.summary.totalBrands", S.totalBrands);
   for (const [k, id] of [["Alpha", ids.A], ["Beta", ids.B], ["QA", ids.T]]) { const b = brand(id); note(`admin.${k}`, b ? { revenue: b.totalRevenue, bill: b.totalBill, saved: b.totalSaved, redemptions: b.totalRedemptions, students: b.uniqueStudents } : null); }
   note("admin.deletedBrands.totalRevenue", S.deletedBrands?.totalRevenue);
-  check("admin brand revenue: Alpha 3300 (in-store 800 + store order 1600 once + older code 900; deleted and test students out)", brand(ids.A)?.totalRevenue === 3300 && brand(ids.A).totalRedemptions === 3 && brand(ids.A).uniqueStudents === 3, JSON.stringify(N["admin.Alpha"]));
+  check("admin brand revenue: Alpha 3750 (in-store 800 + store order 1600 once + deleted student's 450 kept + older code 900; test student out)", brand(ids.A)?.totalRevenue === 3750 && brand(ids.A).totalRedemptions === 4 && brand(ids.A).uniqueStudents === 4 && brand(ids.A).totalSaved === 750, JSON.stringify(N["admin.Alpha"]));
   check("…Beta: the older code's saved amount uses its own 30% (300), not the first code's 10%", brand(ids.B)?.totalSaved === 390 && brand(ids.B).totalRevenue === 1510, JSON.stringify(N["admin.Beta"]));
   check("…a test brand isn't listed", !brand(ids.T) && S.totalBrands === 2);
-  check("…totals: 5170 revenue, 7 sales, 4 different students (Sana used two brands: once)", S.totalRevenue === 5170 && S.totalRedemptions === 7 && S.uniqueStudents === 4 && S.totalSaved === 1130, JSON.stringify(S));
+  check("…totals: 5620 revenue, 8 sales, 5 different students (Sana used two brands: once; the deleted student counted)", S.totalRevenue === 5620 && S.totalRedemptions === 8 && S.uniqueStudents === 5 && S.totalSaved === 1180, JSON.stringify(S));
   check("…a deleted brand: its archived redemption (360)", S.deletedBrands?.totalRevenue === 360 && S.deletedBrands.count === 1);
 
   // the brand portal (dashboard + savings history) and the admin brand profile
@@ -174,16 +174,21 @@ const sum = (list, f) => list.reduce((t, x) => t + f(x), 0);
     r = await call(`/api/offers/brand/${id}/redemptions`, ADMIN);
     note(`adminProfile.${k}`, r.json?.stats || null);
   }
-  check("brand portal (Alpha): revenue from tdc 3300 and students saved 700 — the same as admin brand revenue", N["brandPortal.Alpha"].revenueFromTdc === 3300 && N["brandPortal.Alpha"].studentsSaved === 700 && N["brandPortal.Alpha"].rows === 3, JSON.stringify(N["brandPortal.Alpha"]));
+  check("brand portal (Alpha): revenue from tdc 3750 and students saved 750 — the same as admin brand revenue", N["brandPortal.Alpha"].revenueFromTdc === 3750 && N["brandPortal.Alpha"].studentsSaved === 750 && N["brandPortal.Alpha"].rows === 4, JSON.stringify(N["brandPortal.Alpha"]));
   check("brand portal (Beta): 1510 / 390", N["brandPortal.Beta"].revenueFromTdc === 1510 && N["brandPortal.Beta"].studentsSaved === 390);
-  check("admin brand profile = brand portal = brand revenue (Alpha 3300, 3 students; online 2, in store 1)", N["adminProfile.Alpha"]?.totalRevenue === 3300 && N["adminProfile.Alpha"].uniqueStudents === 3 && N["adminProfile.Alpha"].onlineCount === 2 && N["adminProfile.Alpha"].inStoreCount === 1, JSON.stringify(N["adminProfile.Alpha"]));
+  check("admin brand profile = brand portal = brand revenue (Alpha 3750, 4 students; online 2, in store 2)", N["adminProfile.Alpha"]?.totalRevenue === 3750 && N["adminProfile.Alpha"].uniqueStudents === 4 && N["adminProfile.Alpha"].onlineCount === 2 && N["adminProfile.Alpha"].inStoreCount === 2, JSON.stringify(N["adminProfile.Alpha"]));
   r = await call("/api/offers/savings-report", BA);
   check("the store order is listed once, as online (Woo)", (r.json || []).filter((x) => x.bill === 2000).length === 1 && (r.json || []).find((x) => x.bill === 2000)?.platform === "woocommerce");
+  const gone = (r.json || []).find((x) => x.bill === 500);
+  check("the deleted student's sale is listed without a name (as before); the test student's isn't listed", gone && gone.name === "N/A" && gone.email === "" && !(r.json || []).some((x) => x.bill === 800), JSON.stringify(gone));
 
   // the metrics page: the same revenue
   r = await call("/api/analytics/admin/metrics?preset=30d", ADMIN);
   note("metrics.revenue", r.json?.data?.groups?.brands?.revenue?.value); note("metrics.redemptions", r.json?.data?.groups?.brands?.redemptions?.value);
-  check("metrics page revenue = brand revenue total (5170, 7 sales): one version", N["metrics.revenue"] === 5170 && N["metrics.redemptions"] === 7);
+  check("metrics page revenue = brand revenue total (5620, 8 sales): one version", N["metrics.revenue"] === 5620 && N["metrics.redemptions"] === 8);
+  r = await call("/api/analytics/admin/metrics?preset=30d", ADMIN);
+  // (deleted accounts in user counts: tests/admin-metrics covers them; here the test account)
+  check("…while user counts still leave out test accounts (active students 2: the test account active yesterday not counted)", r.json?.data?.groups?.students?.active30?.value === 2, String(r.json?.data?.groups?.students?.active30?.value));
 
   // card revenue
   r = await call("/api/admin/card-stats", ADMIN);

@@ -7,13 +7,13 @@
 //          + a used promo code that NO redemption points to (older codes marked used before a redemption was written)
 //   A store-webhook order writes both a used promo code and a redemption (with promoCodeId): it counts once.
 //   bill = what the student was billed; saved = the discount (a promo's own %); paid = bill - saved
-//   Left out: rows of deleted students (their id is a placeholder that no longer exists) and of test accounts
-//   (services/analytics/accountRules.js), and brands that are test accounts.
+//   Left out: test accounts only (students and brands; services/analytics/accountRules.js). Sales by deleted
+//   students are kept (they happened), without a name. User counts elsewhere still leave out deleted accounts.
 //   Deleted brands: their redemptions kept in RedemptionArchive ("redemption" rows), counted once (includeArchived).
 const Offer = require("../models/Offer");
 const PromoCode = require("../models/PromoCode");
 const RedemptionArchive = require("../models/RedemptionArchive");
-const { testRule, liveIds, isId } = require("./analytics/accountRules");
+const { testRule, ruleConfigured, isTestUser, isId } = require("./analytics/accountRules");
 
 const s = (v) => (v == null ? "" : String(v));
 const within = (d, from, to) => (!from || new Date(d) >= from) && (!to || new Date(d) <= to);
@@ -86,11 +86,16 @@ function figures(rows) {
   };
 }
 
-/** drop rows of deleted / test students and of test brands */
+/**
+ * drop rows of test students and test brands. Sales by DELETED students stay (they happened): their id is a
+ * placeholder that no longer exists, so they're kept and shown without a name. Deleted brands ("deleted") stay too.
+ */
 async function keepReal(rows, rule = testRule()) {
-  const students = await liveIds(rows.map((r) => r.studentId), rule);
-  const brands = await liveIds(rows.map((r) => r.brand).filter(isId), rule);
-  return rows.filter((r) => students.has(r.studentId) && (r.brand === "deleted" || brands.has(r.brand)));
+  if (!ruleConfigured(rule)) return rows;
+  const User = require("../models/User");
+  const ids = [...new Set([...rows.map((r) => r.studentId), ...rows.map((r) => r.brand)].filter(isId))];
+  const test = new Set((await User.find({ _id: { $in: ids } }).select("_id email").lean()).filter((u) => isTestUser(u, rule)).map((u) => String(u._id)));
+  return rows.filter((r) => !test.has(r.studentId) && !test.has(r.brand));
 }
 
 /**
@@ -100,22 +105,22 @@ async function keepReal(rows, rule = testRule()) {
 async function salesRows({ brandIds = null, from = null, to = null, includeArchived = false, populate = false, rule = testRule() } = {}) {
   const brandQ = brandIds ? { brand: { $in: brandIds } } : {};
   const promoQ = { ...brandQ, status: "used", ...(from || to ? { $or: [{ usedAt: { ...(from ? { $gte: from } : {}), ...(to ? { $lte: to } : {}) } }, { usedAt: null }] } : {}) };
-  let promos = await PromoCode.find(promoQ).populate("offer", "title image").lean();
+  const promos = await PromoCode.find(promoQ).populate("offer", "title image").lean();
   // offers with a redemption in the range, or one pointing to a promo above (so it isn't counted twice)
   const offerQ = from || to
     ? { ...brandQ, $or: [{ "redemptions.redeemedAt": { ...(from ? { $gte: from } : {}), ...(to ? { $lte: to } : {}) } }, { "redemptions.promoCodeId": { $in: promos.map((p) => p._id) } }] }
     : brandQ;
-  let q = Offer.find(offerQ).select("brand title image discountPercentage redemptions");
-  if (populate) q = q.populate({ path: "redemptions.student", select: "name rollNo university email phone", populate: { path: "university", select: "name" } });
-  const offers = await q.lean();
-  if (populate) {
-    const User = require("../models/User");
-    const ids = promos.map((p) => p.student).filter(Boolean);
-    const users = new Map((await User.find({ _id: { $in: ids } }).select("name rollNo university email phone").populate("university", "name").lean()).map((u) => [s(u._id), u]));
-    promos = promos.map((p) => ({ ...p, student: users.get(s(p.student)) || p.student }));
-  }
+  const offers = await Offer.find(offerQ).select("brand title image discountPercentage redemptions").lean();
   const archived = includeArchived ? await RedemptionArchive.find({ kind: "redemption", ...(from || to ? { redeemedAt: { ...(from ? { $gte: from } : {}), ...(to ? { $lte: to } : {}) } } : {}) }).lean() : [];
-  return keepReal(rowsFrom(offers, promos, archived, { from, to }), rule);
+  const rows = await keepReal(rowsFrom(offers, promos, archived, { from, to }), rule);
+  if (populate) {
+    // names for the brand pages; a deleted student has no record any more: kept without a name (student null),
+    // still counted by id
+    const User = require("../models/User");
+    const users = new Map((await User.find({ _id: { $in: [...new Set(rows.map((r) => r.studentId).filter(isId))] } }).select("name rollNo university email phone").populate("university", "name").lean()).map((u) => [s(u._id), u]));
+    for (const r of rows) r.student = users.get(r.studentId) || null;
+  }
+  return rows;
 }
 
 module.exports = { rowsFrom, figures, keepReal, salesRows };

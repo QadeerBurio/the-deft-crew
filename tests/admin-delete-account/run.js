@@ -440,11 +440,8 @@ const textAnywhere = (needle, skip = []) => [...fake.STORE].filter(([n]) => !ski
   res = await call("DELETE", `/api/admin/users/${ids.S}`, { tok: ADMIN, body: { confirmName: ` ${NAMES.S} ` } });
   check("admin deletes student S (name typed with spaces around) → 200", res.status === 200 && res.json?.role === "student", `${res.status} ${res.text.slice(0, 160)}`);
   const afterS = { s: await summary(), travel: await travel() };
-  // fix/metric-audit: revenue leaves out deleted students (the same rule as the metrics page), so S's sales drop out:
-  // B's archived 500/100, C's 600/120 and S's used code at C (1500 at its own 20% = 300 saved): 2080 paid, 3 sales
-  check("revenue: exactly S's sales leave the totals (2080 paid, 3 sales, 1 student); nothing else changes",
-    afterS.s.totalRevenue === beforeS.s.totalRevenue - 2080 && afterS.s.totalBill === beforeS.s.totalBill - 2600 && afterS.s.totalSaved === beforeS.s.totalSaved - 520 && afterS.s.totalRedemptions === beforeS.s.totalRedemptions - 3 && afterS.s.uniqueStudents === beforeS.s.uniqueStudents - 1,
-    `${figs(beforeS.s)} → ${figs(afterS.s)}`);
+  // a deleted student's sales happened: revenue keeps them (only test accounts are left out of revenue)
+  check("revenue figures unchanged (unique students too)", figs(afterS.s) === figs(beforeS.s), `${figs(beforeS.s)} → ${figs(afterS.s)}`);
   check("travel revenue unchanged", afterS.travel === beforeS.travel && afterS.travel === 50000, `${beforeS.travel} → ${afterS.travel}`);
   const oC = rows(Models.Offer, (o) => same(o._id, ids.oC1))[0];
   check("C's offer: S's redemption kept with a placeholder id, claim removed", oC.redemptions.length === 2 && !oC.redemptions.some((x) => same(x.student, ids.S)) && oC.claimedBy.length === 1 && same(oC.claimedBy[0], ids.T));

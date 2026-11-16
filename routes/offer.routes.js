@@ -656,7 +656,7 @@ router.get("/claimed-users", auth, async (req, res) => {
 router.get("/savings-report", auth, async (req, res) => {
   try {
     // the brand's sales (services/brandSales.js): a store order once (not as a promo use and a redemption), each
-    // promo code's own discount, deleted and test students left out
+    // promo code's own discount, test accounts left out (deleted students kept, without a name)
     const rows = await brandSales.salesRows({ brandIds: [req.userId], populate: true });
     const brandUser = await User.findById(req.userId).select("platform").lean();
     // where each code was used: the store it was made on, else the brand's platform ("none" = checked by hand)
@@ -1379,7 +1379,7 @@ router.get("/admin/brands-revenue", auth, async (req, res) => {
       .select('name brandName logo category brandApprovalStatus platform address phone email websiteUrl isOnline isInStore createdAt')
       .lean();
 
-    // every sale once (services/brandSales.js): store orders once, each promo's own discount, deleted and test
+    // every sale once (services/brandSales.js): store orders once, each promo's own discount, test
     // students left out; deleted brands from their archived redemptions
     const rows = await brandSales.salesRows({ includeArchived: true, rule });
     const byBrand = new Map();
@@ -1441,7 +1441,8 @@ router.get("/admin/brands-revenue", auth, async (req, res) => {
           ? Math.round(all.totalRevenue / brandsWithRevenueCount)
           : 0,
         deletedBrands,
-        excluded: { deleted: "students whose account was deleted", test: ruleConfigured(rule) ? "test accounts (METRICS_TEST_* variables)" : "no test accounts set up" },
+        excluded: { test: ruleConfigured(rule) ? "test accounts (METRICS_TEST_* variables)" : "no test accounts set up" },
+        kept: "sales by deleted students (they happened), shown without a name",
       },
       brands: brandsWithRevenue,
     });

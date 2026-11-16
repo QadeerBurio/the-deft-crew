@@ -76,7 +76,7 @@ async function windowFigures(r, rule) {
   const signups = await User.countDocuments({ role: "student", createdAt: within, ...realUserFilter(rule) });
   // sales (services/brandSales.js, the same list as admin "brand revenue" and the brand portal): brand-confirmed
   // redemptions, older used promo codes no redemption points to, deleted brands' archived redemptions; a store
-  // order once; only existing, real students and brands
+  // order once; test accounts left out, deleted students' sales kept (they happened)
   const rows = (await require("../brandSales").salesRows({ from: r.from, to: r.to, includeArchived: true, rule }))
     .map((x) => ({ brand: x.brand, student: x.studentId, bill: x.bill, saved: x.saved, at: x.at }));
   const newlyApproved = await User.countDocuments({ role: "brand", brandApprovedAt: within, ...realUserFilter(rule) });
@@ -191,7 +191,7 @@ async function adminMetrics(q = {}, { now = new Date() } = {}) {
     approvedBrands: "brand accounts approved now (all time); no history, so no previous period",
     newlyApproved: "brands approved in the range",
     activeOffers: "offers live now (not archived)",
-    redemptions: "bills the brand confirmed in the range (QR / promo verify, store orders — a store order once; deleted brands' redemptions included), by existing, non-test students; claims are not redemptions",
+    redemptions: "bills the brand confirmed in the range (QR / promo verify, store orders — a store order once; deleted brands' and deleted students' redemptions included), not test accounts; claims are not redemptions",
     revenue: "money students paid brands through tdc in the range: bill minus the discount (each promo code's own %), a store order once (tdc takes no commission); the same figure as admin brand revenue and the brand portal",
     members: "student-brand pairs with a counted loyalty visit in the range",
     visits: "loyalty visits counted in the range minus visits reversed",
