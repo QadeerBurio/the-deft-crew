@@ -36,6 +36,7 @@ async function recordWooOrder(brandId, order) {
         { _id: promo.offer },
         { $push: { redemptions: { _id: redemptionId, student: promo.student, billAmount, savedAmount, redeemedAt: new Date(), promoCode: promo.code, promoCodeId: promo._id, source: "webhook", externalOrderId: orderId } } }
       );
+      await require("./loyalty").useCarriedReward({ promoCodeId: promo._id, redemptionId: redemptionId, bill: billAmount, saved: savedAmount }); // a reward the code carries (feat/loyalty-control)
       await creditSafe(redemptionId, { source: "woo-webhook" }); // a loyalty visit (FLAG_LOYALTY_V2)
     }
     try {

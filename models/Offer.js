@@ -79,6 +79,8 @@ const offerSchema = new mongoose.Schema({
       promoCodeId: { type: mongoose.Schema.Types.ObjectId, ref: 'PromoCode' },
       // ✅ ADD THIS — Shopify / Woo order ID, for idempotency
     externalOrderId: { type: String, default: "" },
+      // a loyalty reward applied to this bill (savedAmount then includes it); the breakdown is on the reward
+      loyaltyRewardId: { type: mongoose.Schema.Types.ObjectId, default: undefined },
     }
   ],
   

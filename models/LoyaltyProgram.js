@@ -1,7 +1,8 @@
 // models/LoyaltyProgram.js
 // A brand's loyalty program (one per brand). Only brands that opt in have one; status "active" is the opt-in.
-// Tiers are by qualifying visit number: { minVisit, maxVisit (null = and up), discountPct }. The discount
-// applied is capped by maxDiscountPct (set by the brand) and adminMaxDiscountPct (admin override, if set).
+// Tiers are by qualifying visit number: { minVisit, maxVisit (null = and up), discountPct }. The only cap on a
+// discount is adminMaxDiscountPct (an admin sets it per brand; none by default). maxDiscountPct is kept for programs
+// saved before (it no longer limits anything).
 // Every rule change bumps `version` and keeps the previous rules in `history`; ledger rows store the
 // version they were credited under. Visits: services/loyalty.js, from LoyaltyLedger.
 // mode: "tiers" (the discount grows with visits; the default, and what a program without a mode is) or "reward"
@@ -25,7 +26,10 @@ const loyaltyProgramSchema = new mongoose.Schema(
     mode: { type: String, enum: ["tiers", "reward"], default: "tiers" },
     // reward mode only ("kind", not "type": Mongoose reads "type" as a type declaration)
     reward: {
-      visitsNeeded: { type: Number, default: null, min: 2, max: 20 },
+      // new or edited programs: 1 to 10 (services/loyalty.js); programs saved before keep their value (up to 20)
+      visitsNeeded: { type: Number, default: null, min: 1, max: 20 },
+      // how the reward works with the offer's discount: "stack" (on top, the default) or "replace" (the bigger one)
+      combine: { type: String, enum: ["stack", "replace"], default: "stack" },
       kind: { type: String, enum: ["percent", "amount", "item", null], default: null },
       value: { type: Number, default: null, min: 0 }, // percent 1-100, or PKR
       item: { type: String, default: "", trim: true, maxlength: 80 }, // the free item

@@ -322,7 +322,21 @@ router.post('/redeem-payment', auth, async (req, res) => {
     // Server computes the saved amount (B7)
     const discount = quote.applies ? quote.discountPct : Number(offer.discountPercentage) || 0;
     const bill = Number(billAmount);
-    const computedSaved = Math.round((bill * discount) / 100);
+    // a waiting loyalty reward the brand chose to apply to this bill (feat/loyalty-control): the discount is the
+    // breakdown on the original bill (offer + reward, or the bigger one); a retry / second tap gets the first answer
+    let rewardPlan = null;
+    if (req.body.applyRewardId) {
+      try {
+        rewardPlan = await loyalty.planReward({ rewardId: req.body.applyRewardId, brandId: offer.brand, studentId: userId, bill, offerPct: discount });
+      } catch (err) {
+        if (err.code === 'ALREADY_USED' && err.earlier && String(err.earlier.student) === String(userId)) {
+          return res.json({ message: 'Already recorded: this reward was applied to that bill.', duplicate: true, redemptionId: err.earlier.redemptionId, savedAmount: err.earlier.savedAmount, breakdown: err.earlier.breakdown });
+        }
+        if (err instanceof loyalty.LoyaltyError) return res.status(err.status).json({ message: err.message, code: err.code });
+        throw err;
+      }
+    }
+    const computedSaved = rewardPlan ? rewardPlan.breakdown.totalDiscount : Math.round((bill * discount) / 100);
 
     // Daily cap (Karachi day)
     const { dayKey } = require('../utils/karachiTime');
@@ -347,14 +361,26 @@ router.post('/redeem-payment', auth, async (req, res) => {
     // atomic $push (a read-modify-save could drop a redemption written at the same moment)
     const redemptionId = new mongoose.Types.ObjectId();
     let updated;
+    let usedReward = null;
     try {
-      updated = await Offer.findByIdAndUpdate(
-        offer._id,
-        { $push: { redemptions: { _id: redemptionId, student: userId, billAmount: bill, savedAmount: computedSaved, redeemedAt: new Date() } } },
-        { new: true }
-      );
+      if (rewardPlan) {
+        // the reward used and the redemption written together (services/loyalty.js redeemWithReward)
+        usedReward = await loyalty.redeemWithReward(rewardPlan, { offerId: offer._id, redemption: { _id: redemptionId, student: userId, billAmount: bill, savedAmount: computedSaved, redeemedAt: new Date() }, actor: req.userId });
+        updated = await Offer.findById(offer._id);
+      } else {
+        updated = await Offer.findByIdAndUpdate(
+          offer._id,
+          { $push: { redemptions: { _id: redemptionId, student: userId, billAmount: bill, savedAmount: computedSaved, redeemedAt: new Date() } } },
+          { new: true }
+        );
+      }
     } catch (err) {
       await RedemptionGuard.releaseSlot(capKey);
+      // two taps at once: the other one used the reward; answer with its redemption
+      if (err.code === 'ALREADY_USED' && err.earlier && String(err.earlier.student) === String(userId)) {
+        return res.json({ message: 'Already recorded: this reward was applied to that bill.', duplicate: true, redemptionId: err.earlier.redemptionId, savedAmount: err.earlier.savedAmount, breakdown: err.earlier.breakdown });
+      }
+      if (err instanceof loyalty.LoyaltyError) return res.status(err.status).json({ message: err.message, code: err.code });
       throw err;
     }
 
@@ -373,6 +399,7 @@ router.post('/redeem-payment', auth, async (req, res) => {
     // every verified redemption goes to the counter (it decides: daily limit, offer / branch outside the program, ...)
     const loyaltyResult = await loyalty.creditSafe(redemptionId, { source: 'redeem-payment', branchId, actor: req.userId, discountPct: quote.applies ? discount : null });
     const loyaltyOutcome = loyalty.outcomeOf(loyaltyResult);
+    if (usedReward) await loyalty.afterRewardUsed(usedReward, rewardPlan.breakdown, req.userId);
 
     // Redemption changes claimedBy + redemptions → clear every list that shows them
     await clearBrandCaches(offer.brand, userId);
@@ -402,7 +429,9 @@ router.post('/redeem-payment', auth, async (req, res) => {
     await Notification.create({
       recipient: userId,
       title: 'payment successful.',
-      description: `you saved rs ${computedSaved} at ${offer.title}.`,
+      description: rewardPlan
+        ? `you saved rs ${computedSaved} at ${offer.title}. ${loyalty.breakdownText(rewardPlan.breakdown)}.`
+        : `you saved rs ${computedSaved} at ${offer.title}.`,
       type: 'System',
       icon: 'checkmark-circle',
       // push data: lets the student's app report this redemption once (ids only)
@@ -410,6 +439,7 @@ router.post('/redeem-payment', auth, async (req, res) => {
         pushType: 'redemption',
         redemptionId: redemptionId ? String(redemptionId) : undefined,
         offerId: String(offer._id),
+        ...(rewardPlan ? { breakdown: rewardPlan.breakdown, rewardId: String(usedReward._id) } : {}),
       },
     }).catch(() => {});
 
@@ -419,6 +449,10 @@ router.post('/redeem-payment', auth, async (req, res) => {
       redemptionsUsed: totalRedemptions.length,
       redemptionsRemaining: 2 - totalRedemptions.length,
       savedAmount: computedSaved,
+      redemptionId: String(redemptionId),
+      // the discount on the original bill: offer, reward, total, pay (and "give: <item>" for a free item)
+      breakdown: rewardPlan ? rewardPlan.breakdown : loyalty.breakdownOf({ bill, offerPct: discount }),
+      ...(usedReward ? { rewardUsed: { id: String(usedReward._id), label: usedReward.label, kind: usedReward.kind } } : {}),
       // loyalty: what this redemption did ({ credited, reason, message: "visit counted" / "visit already counted today" / ...})
       ...(quote.applies ? { loyalty: { ...loyaltyOutcome, discountPct: discount, tierName: quote.tierName } }
         : loyaltyOutcome && loyaltyResult?.reason !== 'no-program' && loyaltyResult?.reason !== 'not-enabled' ? { loyalty: { ...loyaltyOutcome, mode: quote.mode || null } } : {}),
