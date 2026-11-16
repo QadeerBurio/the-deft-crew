@@ -106,9 +106,18 @@ function extractSkills(title, department, audience) {
  * Skills: the row's skills column (split like a paste: commas, semicolons, new lines, " - ", bullets; never inside
  * brackets), else tags found in the title / department. A row whose skills break the rules (more than 15, or one over
  * 40 characters) is NOT saved: it's listed in "rejected" with its spreadsheet row number and the reason.
+ * @param {object} [opts]
+ * @param {{ userId, email, companyName }} [opts.owner] an employer's upload: the jobs are theirs (postedBy, their e-mail,
+ *   in-app applications, a missing Company column = their company) and only their own jobs are updated. Without an
+ *   owner (tdc's own upload) only jobs without an owner are updated: an employer's job is never touched.
+ * @param {() => Promise<boolean>} [opts.beforeCreate] asked before each new job; false = the row isn't saved and is
+ *   listed in "rejected" with opts.limitReason
+ * @param {boolean} [opts.extendDeadline=true] false: an updated job keeps its deadline and active state
  * @returns {Promise<{ created: number, updated: number, skipped: number, rejected: Array<{ row, title, company, reason }> }>}
  */
-async function importJobsFromFile(filePathOrBuffer, originalFilename = '') {
+async function importJobsFromFile(filePathOrBuffer, originalFilename = '', opts = {}) {
+  const owner = opts.owner && opts.owner.userId ? opts.owner : null;
+  const extendDeadline = opts.extendDeadline !== false;
   let workbook;
 
   if (Buffer.isBuffer(filePathOrBuffer)) {
@@ -138,7 +147,7 @@ async function importJobsFromFile(filePathOrBuffer, originalFilename = '') {
     const rowNumber = index + 2; // the header is row 1
     // Flexible column-name fallback matching
     const companyName = (
-      row['Company'] || row['company'] || row['Company Name'] || row['company_name'] || ''
+      row['Company'] || row['company'] || row['Company Name'] || row['company_name'] || (owner && owner.companyName) || ''
     ).toString().trim();
 
     const title = (
@@ -208,12 +217,14 @@ async function importJobsFromFile(filePathOrBuffer, originalFilename = '') {
       locationType,
       type: jobType,
       salary: 'Competitive',
-      email: 'careers@deftcrew.com',
+      email: (owner && owner.email) || 'careers@deftcrew.com',
       description: description.trim(),
       skills,
       requirements: audience ? [audience] : ['Relevant qualification or experience'],
-      isExternal: true,
+      // an employer's own jobs take applications in the app (their pipeline); tdc's uploads link out
+      isExternal: !owner,
       externalUrl: applyLink,
+      ...(owner ? { postedBy: owner.userId } : {}),
       source: 'manual',
       active: true,
       // Default application deadline set to 60 days from upload date
@@ -221,10 +232,13 @@ async function importJobsFromFile(filePathOrBuffer, originalFilename = '') {
     };
 
     // Database duplicate check (upsert matching title + companyName + location)
+    // only the uploader's own jobs (an employer's) or jobs without an owner (tdc's upload); never a deleted one
     const existingJob = await Job.findOne({
       title: jobData.title,
       companyName: jobData.companyName,
-      location: jobData.location
+      location: jobData.location,
+      postedBy: owner ? owner.userId : null,
+      archivedAt: null
     });
 
     let savedJob;
@@ -237,13 +251,19 @@ async function importJobsFromFile(filePathOrBuffer, originalFilename = '') {
       existingJob.skills = jobData.skills;
       existingJob.requirements = jobData.requirements;
       existingJob.externalUrl = jobData.externalUrl;
-      existingJob.active = true;
-      existingJob.applicationDeadline = jobData.applicationDeadline;
+      if (extendDeadline) {
+        existingJob.active = true;
+        existingJob.applicationDeadline = jobData.applicationDeadline;
+      }
       existingJob.updatedAt = Date.now();
 
       savedJob = await existingJob.save();
       updatedCount++;
     } else {
+      if (opts.beforeCreate && !(await opts.beforeCreate())) {
+        rejected.push({ row: rowNumber, title, company: companyName, reason: opts.limitReason || 'posting limit reached' });
+        continue;
+      }
       const newJob = new Job(jobData);
       savedJob = await newJob.save();
       createdCount++;
