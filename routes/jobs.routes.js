@@ -18,6 +18,20 @@ const jobSkills = require("../services/jobs/skills");
 const badSkills = (res, errors) => res.status(400).json({ error: jobSkills.skillsMessage(errors), code: "INVALID_SKILLS", limits: { maxSkills: jobSkills.MAX_SKILLS, maxLength: jobSkills.MAX_SKILL_LENGTH } });
 const { track } = require('../services/engagement');
 const careerLegacy = require('../services/career/legacyAdapter'); // FLAG_CAREER_TIMELINE pilot
+// free trial and hiring plans: after the trial, an employer posts only within a plan (403 POSTING_LOCKED)
+const hiringAccess = require('../services/career/hiringAccessService');
+const lockReply = (res, e) => res.status(e.status || 403).json({ error: e.message, message: e.message, code: e.code, ...(e.extra || {}) });
+const isEmployer = (req) => req.user?.role === "employee";
+// an employer may post n jobs now (trial, or counted against their plan); null reply = refused (already sent)
+async function postingHold(req, res, n = 1) {
+    if (!isEmployer(req)) return { via: "admin", release: async () => {} };
+    try {
+        return await hiringAccess.reserve(req.userId, n);
+    } catch (e) {
+        if (e.code === "POSTING_LOCKED") { lockReply(res, e); return null; }
+        throw e;
+    }
+}
 // may this user manage this job's applicants? an admin, or the job's own poster. An imported job has no
 // poster: only an admin (before, job.postedBy.toString() crashed with a 500 on those)
 const ownsJob = (req, job) => req.user?.role === "admin" || (!!job?.postedBy && String(job.postedBy) === String(req.userId));
@@ -92,6 +106,8 @@ router.post("/add", authMiddleware, isAdminOrEmployee, async (req, res) => {
         }
         const sk = jobSkills.cleanSkills(skills);
         if (sk.errors.length) return badSkills(res, sk.errors);
+        const hold = await postingHold(req, res);
+        if (!hold) return;
 
         const newJob = new Job({
             title, department, category, location, locationType, type, salary,
@@ -111,7 +127,13 @@ router.post("/add", authMiddleware, isAdminOrEmployee, async (req, res) => {
             source: 'manual'
         });
 
-        await newJob.save();
+        try {
+            await newJob.save();
+        } catch (e) {
+            await hold.release();
+            throw e;
+        }
+        if (isEmployer(req)) await hiringAccess.afterPost(req.userId);
         
         const admins = await User.find({ role: "admin" });
         for (const admin of admins) {
@@ -161,7 +183,18 @@ router.get("/admin/skills-report", authMiddleware, async (req, res) => {
 });
 
 // Admin CSV/XLSX Job Importer Endpoint
-router.post('/admin/import-csv', authMiddleware, isAdminOrEmployee, (req, res, next) => {
+router.post('/admin/import-csv', authMiddleware, isAdminOrEmployee, async (req, res, next) => {
+  // an employer after the trial: refused before the file is read (within a plan, each new job is counted below)
+  if (isEmployer(req)) {
+    try {
+      const st = await hiringAccess.status(req.userId);
+      if (!st.canPost) return lockReply(res, hiringAccess.lockError(st));
+    } catch (e) {
+      return res.status(500).json({ success: false, message: 'Something went wrong' });
+    }
+  }
+  next();
+}, (req, res, next) => {
   uploadJobCsvMulter.single('file')(req, res, (err) => {
     if (err) {
       if (err.message === 'INVALID_FILE_TYPE' || err.code === 'LIMIT_UNEXPECTED_FILE') {
@@ -179,7 +212,21 @@ router.post('/admin/import-csv', authMiddleware, isAdminOrEmployee, (req, res, n
 
     // an employer's upload: the jobs are theirs (they manage them and get the applicants); tdc's upload: unowned
     const owner = req.user?.role === "admin" ? null : { userId: req.userId, email: req.user?.email || "", companyName: req.user?.companyName || req.user?.brandName || "" };
-    const result = await importJobsFromFile(req.file.buffer, req.file.originalname, { owner });
+    // on the trial: as many rows as the file has; within a plan: each new job is counted, rows past the plan's
+    // limit aren't saved (listed in "rejected"); an updated job keeps its deadline unless on the trial
+    let opts = { owner };
+    if (owner) {
+      const st = await hiringAccess.status(req.userId);
+      if (!st.canPost) return lockReply(res, hiringAccess.lockError(st));
+      if (st.enforced && st.trial.status !== "active") {
+        opts = {
+          owner, extendDeadline: false, limitReason: "your plan's job posts are used: not saved",
+          beforeCreate: async () => { try { await hiringAccess.reserve(req.userId, 1); return true; } catch (e) { if (e.code === "POSTING_LOCKED") return false; throw e; } },
+        };
+      }
+    }
+    const result = await importJobsFromFile(req.file.buffer, req.file.originalname, opts);
+    if (owner && result.created > 0) await hiringAccess.afterPost(req.userId);
 
     return res.status(200).json({
       success: true,
@@ -264,6 +311,14 @@ router.put("/update/:id", authMiddleware, isAdminOrEmployee, async (req, res) =>
         // only the job's own fields: never its owner, archive state, counters or the import pipeline's fields
         const changes = { ...(req.body || {}) };
         for (const k of Object.keys(changes)) if (k.startsWith("$") || PROTECTED_JOB_FIELDS.has(k) || (req.user?.role !== "admin" && ADMIN_ONLY_JOB_FIELDS.has(k))) delete changes[k];
+        // after the trial (and without a plan), an employer can't extend a deadline: that would be a new posting
+        if (isEmployer(req) && changes.applicationDeadline) {
+            const next = new Date(changes.applicationDeadline);
+            const cur = job.applicationDeadline ? new Date(job.applicationDeadline) : null;
+            if (!Number.isNaN(next.getTime()) && (!cur || next > cur)) {
+                try { await hiringAccess.canRepost(req.userId); } catch (e) { if (e.code === "POSTING_LOCKED") return lockReply(res, e); throw e; }
+            }
+        }
         if (Object.prototype.hasOwnProperty.call(changes, "skills")) {
             const sk = jobSkills.cleanSkills(changes.skills);
             if (sk.errors.length) return badSkills(res, sk.errors);
@@ -292,6 +347,10 @@ router.patch("/toggle/:id", authMiddleware, isAdminOrEmployee, async (req, res) 
         }
         if (job.archivedAt) return res.status(410).json({ message: "This job was deleted" });
 
+        // switching on a job past its deadline after the trial (and without a plan): refused, like a new posting
+        if (!job.active && isEmployer(req) && job.applicationDeadline && new Date(job.applicationDeadline) < new Date()) {
+            try { await hiringAccess.canRepost(req.userId); } catch (e) { if (e.code === "POSTING_LOCKED") return lockReply(res, e); throw e; }
+        }
         job.active = !job.active;
         await job.save();
         // switched on: pilot students whose skills strongly match hear about it (never twice for the same job)
@@ -309,6 +368,8 @@ router.post("/duplicate/:id", authMiddleware, isAdminOrEmployee, async (req, res
         if (!mongoose.Types.ObjectId.isValid(String(req.params.id))) return res.status(404).json({ message: "Job not found" });
         const job = await Job.findById(req.params.id).lean();
         if (!job || !ownsJob(req, job) || (req.user?.role !== "admin" && job.isExternal)) return res.status(404).json({ message: "Job not found" });
+        const hold = await postingHold(req, res);
+        if (!hold) return;
         const copy = Object.fromEntries(DUPLICATE_FIELDS.filter((k) => job[k] !== undefined).map((k) => [k, job[k]]));
         const newJob = new Job({
             ...copy,
@@ -318,7 +379,13 @@ router.post("/duplicate/:id", authMiddleware, isAdminOrEmployee, async (req, res
             postedBy: req.user?.role === "admin" ? job.postedBy || null : req.userId,
             isExternal: false, source: "manual",
         });
-        await newJob.save();
+        try {
+            await newJob.save();
+        } catch (e) {
+            await hold.release();
+            throw e;
+        }
+        if (isEmployer(req)) await hiringAccess.afterPost(req.userId);
         setImmediate(() => generateJobEmbedding(newJob._id.toString()));
         require("../services/career/jobAlerts").onJobLive(newJob.toObject());
         res.status(201).json({ message: "Job duplicated", data: newJob });
