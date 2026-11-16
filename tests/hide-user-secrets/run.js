@@ -223,9 +223,9 @@ async function main() {
     return { ok: r.status === 200 && b?.brandName === "Seed Cafe" && b?.logo && b?.category && extra.length === 0, detail: `${r.status}${extra.length ? " has " + extra.join(",") : ""}` };
   });
   await check("brands/:id as a guest (no login)", async () => { const r = await call("GET", `/api/brands/${ids.brand}`); return { ok: r.status === 200 && r.json?.brand?.brandName === "Seed Cafe", detail: `${r.status}` }; });
-  // GET /brand-approval/approved is declared after GET /:id, so /:id answers it and the handler never runs
+  // GET /brand-approval/approved is now declared before GET /:id (it used to be shadowed); tests/admin-metrics checks the live reply
   // (true before this change too). Check the handler's field list in the source instead.
-  await check("brand-approval/approved: field list has no email or phone (route itself unreachable)", async () => {
+  await check("brand-approval/approved: public list with no email or phone (reachable again: declared before /:id)", async () => {
     const src = fs.readFileSync(path.join(SERVER, "routes", "brandApproval.routes.js"), "utf8");
     const block = src.slice(src.indexOf('router.get("/approved"'), src.indexOf('router.get("/stats"'));
     const sel = (block.match(/\.select\("([^"]+)"\)/) || [])[1] || "";
