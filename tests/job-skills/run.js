@@ -123,7 +123,7 @@ const jobOf = (id) => rows("Job").find((j) => String(j._id) === String(id));
   check("problems: too long, unbalanced brackets; clean ones none", sk.skillProblems(LONG).some((r) => /over 40/.test(r)) && eq(sk.skillProblems("Python (pandas"), ["unbalanced brackets"]) && eq(sk.skillProblems(")("), ["unbalanced brackets"]) && sk.skillProblems("Python (pandas)").length === 0);
 
   console.log("── 3. job create / update");
-  const base = { title: "Backend intern", department: "Eng", location: "Karachi", type: "Internship", salary: "PKR 40,000", email: "hr@hireco.test", description: "Build APIs" };
+  const base = { title: "Backend intern", department: "Eng", location: "Karachi", type: "Internship", salary: "PKR 40,000", email: "hr@hireco.test", description: "Build APIs", companyName: "HireCo" };
   let r = await call("POST", "/api/jobs/add", T.E, { ...base, skills: ["  React ", "Node.js", "react", ""] });
   const created = r.json?.data;
   check("create: skills trimmed, empty and repeated dropped", r.status === 201 && eq(created?.skills, ["React", "Node.js"]), r.text.slice(0, 200));

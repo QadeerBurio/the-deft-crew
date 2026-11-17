@@ -400,6 +400,11 @@ async function reviewVerification(adminId, id, { action, reason, separateGroup =
   ).lean();
   if (!updated) throw new CareerError(409, "STALE", "This changed meanwhile; reload and try again");
   await audit(adminId, `verification.${action}`, "EmployerCompanyVerification", v, r, { status: v.status, companyGroupKey: v.companyGroupKey }, { status: updated.status, companyGroupKey: updated.companyGroupKey });
+  // approved: the employer's jobs waiting for verification go live (services/jobs/jobStatus.js; never fails this)
+  if (updated.status === "approved") {
+    updated.publishedJobs = await require("../jobs/jobStatus").publishPending(updated.employerUserId, now)
+      .catch((e) => { console.error(`[trial] publishing pending jobs failed: ${e.message}`); return 0; });
+  }
   return updated;
 }
 

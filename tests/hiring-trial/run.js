@@ -52,6 +52,12 @@ const inHours = (x) => new Date(Date.now() + x * 3600e3).toISOString();
   d = await me("E1");
   check("new employer: free trial, can post, the 60 days haven't started (no job yet), the policy text", d.canPost && d.trial.status === "active" && d.trial.clockStarted === false && d.trial.daysLeft === null && /60 days after your first job/.test(d.policy.text) && !d.plan, JSON.stringify(d.trial));
 
+  // First Hire Free: the company is verified by an admin and before its first job (an unverified company's job waits)
+  r = await call("POST", `${B}/employers/me/verification`, { tok: T.E1, body: { companyName: "Bright Labs (Pvt) Ltd", registrationType: "ntn", ntnOrSecp: "1234567-8", businessEmailDomain: "brightlabs.pk", website: "brightlabs.pk" } });
+  const V1 = r.json?.data?.verification?.id;
+  r = await call("POST", `${B}/admin/verifications/${V1}/review`, { tok: T.admin, body: { action: "approve", reason: "NTN checked on FBR" } });
+  check("admin verifies the company (First Hire Free)", r.status === 200 && r.json.data.status === "approved", r.text.slice(0, 150));
+
   // ---------- post ----------
   r = await post(T.E1, "Backend Engineer");
   const J1 = r.json?.data?._id;
@@ -84,11 +90,7 @@ const inHours = (x) => new Date(Date.now() + x * 3600e3).toISOString();
   r = await call("POST", `${B}/offers/${OF._id}/respond`, { tok: T.S1, body: { version: await ver(T.S1), response: "accept" } });
   check("student accepts the offer", r.status === 201 || r.status === 200, r.text.slice(0, 150));
 
-  // First Hire Free: the company is verified by an admin and the free hire activated before the hire
-  r = await call("POST", `${B}/employers/me/verification`, { tok: T.E1, body: { companyName: "Bright Labs (Pvt) Ltd", registrationType: "ntn", ntnOrSecp: "1234567-8", businessEmailDomain: "brightlabs.pk", website: "brightlabs.pk" } });
-  const V1 = r.json?.data?.verification?.id;
-  r = await call("POST", `${B}/admin/verifications/${V1}/review`, { tok: T.admin, body: { action: "approve", reason: "NTN checked on FBR" } });
-  check("admin verifies the company (First Hire Free)", r.status === 200 && r.json.data.status === "approved", r.text.slice(0, 150));
+  // (the company was verified at the start: a job goes live only for a verified company)
   r = await call("POST", `${B}/employers/me/trial/activate`, { tok: T.E1 });
   check("free hire activated", r.status === 201 || r.status === 200);
   d = await me("E1");
@@ -115,7 +117,7 @@ const inHours = (x) => new Date(Date.now() + x * 3600e3).toISOString();
   fake.seed(coll("Job"), [jobDoc(closedJ, ids.E1, { title: "Closed role", active: false, applicationDeadline: new Date(now - DAY) })]);
   r = await call("PATCH", `/api/jobs/toggle/${closedJ}`, { tok: T.E1 });
   check("switching a closed (past deadline) job back on after the trial: 403", r.status === 403 && r.json.code === "POSTING_LOCKED");
-  r = await call("POST", "/api/jobs/add", { tok: T.admin, body: { title: "tdc role", department: "Ops", location: "Karachi", type: "Full-time", salary: "1", email: "a@tdc.pk", description: "x" } });
+  r = await call("POST", "/api/jobs/add", { tok: T.admin, body: { title: "tdc role", companyName: "tdc", department: "Ops", location: "Karachi", type: "Full-time", salary: "1", email: "a@tdc.pk", description: "x" } });
   check("an admin still posts (never locked)", r.status === 201);
 
   // ---------- the existing job keeps working ----------

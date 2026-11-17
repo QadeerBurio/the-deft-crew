@@ -70,7 +70,8 @@ function startFrom(firstJobAt) {
 async function load(employerId, now = new Date()) {
   let a = await EmployerHiringAccess.findOne({ employerUserId: employerId }).lean();
   if (a && a.trialStartedAt) return a;
-  const first = await Job.findOne({ postedBy: employerId }).sort({ createdAt: 1 }).select("createdAt").lean();
+  // the first job that went live (one waiting for company verification doesn't start the 60 days)
+  const first = await Job.findOne({ postedBy: employerId, pendingVerification: { $ne: true } }).sort({ createdAt: 1 }).select("createdAt").lean();
   const startedAt = first ? startFrom(first.createdAt || now) : null;
   if (!a) {
     const why = !first ? "no job yet: the 60 days start with the first job" : new Date(first.createdAt) < policyStart() ? "existing employer: a fresh trial from the policy date" : "the 60 days started with the first job";
@@ -302,7 +303,7 @@ async function adminOverview(now = new Date()) {
   const ids = employers.map((u) => u._id);
   const [accesses, jobs, verifs, requests] = await Promise.all([
     EmployerHiringAccess.find({ employerUserId: { $in: ids } }).lean(),
-    Job.find({ postedBy: { $in: ids } }).select("postedBy createdAt active applicationDeadline archivedAt").lean(),
+    Job.find({ postedBy: { $in: ids }, pendingVerification: { $ne: true } }).select("postedBy createdAt active applicationDeadline archivedAt").lean(),
     EmployerCompanyVerification.find({ employerUserId: { $in: ids }, status: "approved" }).select("employerUserId companyGroupKey").lean(),
     EmployerPlanRequest.find({}).sort({ createdAt: -1 }).limit(300).lean(),
   ]);

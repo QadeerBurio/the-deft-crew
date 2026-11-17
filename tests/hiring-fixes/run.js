@@ -15,6 +15,8 @@ fake.seed(coll("User"), [
   user(ids.E2, "employee", "Ali Nova", { companyName: "Nova Systems", email: "ali@novasystems.com" }),
   user(ids.S1, "student", "Student One"), user(ids.admin, "admin", "Admin"),
 ]);
+// both companies are verified (an unverified company's job waits: tests/hiring-followups)
+fake.seed(coll("EmployerCompanyVerification"), ["E1", "E2"].map((k, i) => ({ _id: oid(), employerUserId: ids[k], companyName: k, ntnOrSecp: `7654321${i}`, companyGroupKey: `reg:${k}`, status: "approved", history: [], duplicateOf: [] })));
 const T = { E1: token(ids.E1, "employee"), E2: token(ids.E2, "employee"), S1: token(ids.S1, "student"), admin: token(ids.admin, "admin") };
 const DAY = 864e5;
 const jobDoc = (id, by, extra = {}) => ({ _id: id, title: "Backend Engineer", department: "Engineering", location: "Karachi", type: "Full-time", salary: "100k", email: "jobs@brightlabs.pk", description: "build things", companyName: "Bright Labs", postedBy: by, isExternal: false, active: true, archivedAt: null, totalApplications: 0, views: 0, applicationDeadline: new Date(Date.now() + 10 * DAY), createdAt: new Date(), ...extra });
