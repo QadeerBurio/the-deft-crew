@@ -47,7 +47,7 @@ const JobSchema = new mongoose.Schema({
     },
     currency: {
         type: String,
-        default: "USD"
+        default: "PKR"
     },
     email: { 
         type: String, 
@@ -167,6 +167,14 @@ const JobSchema = new mongoose.Schema({
     archivedAt: { type: Date, default: null },
     archivedReason: { type: String, default: "" },
     archivedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+    // an employer's job posted before tdc verified their company: not live (active: false) until the company is
+    // approved, then published (services/jobs/jobStatus.js). Jobs live before this field existed stay live.
+    pendingVerification: { type: Boolean, default: false },
+    publishedAt: { type: Date, default: null },
+    // closed by the expiry job when its deadline passed (closedReason "deadline") or its import batch expired
+    // ("batch_expired"); reopening clears it (and follows the trial / plan lock)
+    closedAt: { type: Date, default: null },
+    closedReason: { type: String, default: "" },
     createdAt: { 
         type: Date, 
         default: Date.now 

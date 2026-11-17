@@ -61,7 +61,7 @@ require(path.join(SERVER, "tests", "hide-user-secrets", "defaults-off"))(reqS(".
 const express = reqS("express");
 const jwt = reqS("jsonwebtoken");
 const coll = (name) => reqS(`./models/${name}`).collection.collectionName;
-for (const m of ["User", "Job", "JobApplication", "Resume", "CareerJobAlert", "Notification", "EngagementProfile", "PushLog"]) reqS(`./models/${m}`);
+for (const m of ["User", "Job", "JobApplication", "Resume", "CareerJobAlert", "Notification", "EngagementProfile", "PushLog", "EmployerCompanyVerification"]) reqS(`./models/${m}`);
 const alerts = reqS("./services/career/jobAlerts");
 const outboxJob = reqS("./services/career/careerOutboxJob");
 const { dayKey } = reqS("./utils/karachiTime");
@@ -82,6 +82,8 @@ fake.seed(coll("User"), [
   { _id: ids.ADM, name: "admin", email: "adm@test.local", role: "admin", createdAt: new Date() },
   student("S1"), student("S2"), student("S3"), student("S4"), student("S5"), student("S6"), student("S7", { pushTokens: [] }), student("SOUT"),
 ]);
+// both employers' companies are verified (an unverified company's job waits and isn't live: tests/hiring-followups)
+fake.seed(coll("EmployerCompanyVerification"), ["E", "EOUT"].map((k, i) => ({ _id: oid(), employerUserId: ids[k], companyName: `Co ${k}`, ntnOrSecp: `1234567${i}`, companyGroupKey: `reg:${k}`, status: "approved", history: [], duplicateOf: [] })));
 const blank = () => ({ personalInfo: {}, professionalSummary: { summary: "" }, workExperience: [], education: [], projects: [], skills: [], certifications: [], languages: [] });
 function person(skills, { name = "Ayesha Khan", city = "Karachi", university = "NED University", degree = "BS" } = {}) {
   const c = blank();

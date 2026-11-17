@@ -150,4 +150,7 @@ router.get("/admin/employers/company-status", ...admin, handle(async (req, res) 
   ok(req, res, Object.fromEntries(list.map((v) => [String(v.employerUserId), { status: v.status, companyName: v.companyName }])));
 }));
 
+// shared with routes/hiringAccess.routes.js (company verification for every employer)
+router.verificationView = verificationView;
+router.usersById = usersById;
 module.exports = router;

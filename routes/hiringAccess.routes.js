@@ -48,6 +48,56 @@ router.post("/employers/me/plan-requests", ...employer, handle(async (req, res) 
   ok(req, res, await access.viewFor(req.userId), created ? 201 : 200);
 }));
 
+// ---------- company verification (every employer; jobs posted before it wait) ----------
+const trialService = require("../services/career/trialService");
+const EmployerCompanyVerification = require("../models/EmployerCompanyVerification");
+const Job = require("../models/Job");
+const AdminLog = require("../services/adminActionLog");
+const pendingJobsOf = async (employerIds) => {
+  const jobs = await Job.find({ postedBy: { $in: employerIds }, pendingVerification: true, archivedAt: null }).select("postedBy title createdAt").sort({ createdAt: 1 }).lean();
+  const by = new Map();
+  for (const j of jobs) {
+    const k = String(j.postedBy);
+    if (!by.has(k)) by.set(k, []);
+    by.get(k).push({ id: String(j._id), title: j.title, postedAt: j.createdAt });
+  }
+  return by;
+};
+async function myVerification(employerId) {
+  const v = await EmployerCompanyVerification.findOne({ employerUserId: employerId }).lean();
+  const pending = (await pendingJobsOf([employerId])).get(String(employerId)) || [];
+  return {
+    verified: v?.status === "approved",
+    verification: v ? { id: String(v._id), status: v.status, companyName: v.companyName, registrationType: v.registrationType, ntnOrSecp: v.ntnOrSecp, businessEmailDomain: v.businessEmailDomain, website: v.website, reason: v.reason || "", reviewedAt: v.reviewedAt, submittedAt: v.createdAt } : null,
+    pendingJobs: pending,
+    message: v?.status === "approved" ? null : "Your jobs go live once your company is verified by tdc.",
+  };
+}
+//   GET  /employers/me/company-verification   { verified, verification, pendingJobs, message }
+//   POST /employers/me/company-verification   { companyName, registrationType, ntnOrSecp, businessEmailDomain, website }
+router.get("/employers/me/company-verification", ...employer, handle(async (req, res) => ok(req, res, await myVerification(req.userId))));
+router.post("/employers/me/company-verification", ...employer, handle(async (req, res) => {
+  const { created } = await trialService.submitVerification(req.userId, req.body || {});
+  ok(req, res, await myVerification(req.userId), created ? 201 : 200);
+}));
+//   GET  /admin/company-verifications?status   each with the employer's jobs waiting for it
+//   POST /admin/company-verifications/:id/review  { action: approve|reject|mark_duplicate, reason, separateGroup? };
+//                                              approve publishes the waiting jobs
+router.get("/admin/company-verifications", ...admin, handle(async (req, res) => {
+  const st = String(req.query.status || "pending");
+  const list = await EmployerCompanyVerification.find(st === "all" ? {} : { status: st }).sort({ createdAt: -1 }).limit(300).lean();
+  const trialRoutes = require("./careerTrial.routes");
+  const users = await trialRoutes.usersById(list.flatMap((v) => [v.employerUserId, ...(v.duplicateOf || []).map((d) => d.employerUserId)]));
+  const pending = await pendingJobsOf(list.map((v) => v.employerUserId));
+  ok(req, res, list.map((v) => ({ ...trialRoutes.verificationView(v, users), pendingJobs: pending.get(String(v.employerUserId)) || [] })));
+}));
+router.post("/admin/company-verifications/:id/review", ...admin, handle(async (req, res) => {
+  const { action, reason, separateGroup } = req.body || {};
+  const v = await trialService.reviewVerification(req.userId, req.params.id, { action, reason, separateGroup: separateGroup === true });
+  await AdminLog.recordSafe({ adminId: req.userId, action: "employer.verification.review", targetType: "EmployerCompanyVerification", targetId: String(req.params.id), before: null, after: { action: String(action || ""), status: v.status, publishedJobs: v.publishedJobs || 0 }, reason, requestId: req.id });
+  ok(req, res, { id: String(v._id), status: v.status, publishedJobs: v.publishedJobs || 0 });
+}));
+
 router.get("/admin/hiring-plans", ...admin, handle(async (req, res) => ok(req, res, await access.adminOverview())));
 
 router.post("/admin/hiring-plans/:employerId/grant", ...admin, handle(async (req, res) => {

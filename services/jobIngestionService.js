@@ -160,23 +160,10 @@ class JobIngestionService {
   /**
    * Automatically deactivates listings whose applicationDeadline has passed.
    */
+  // closed with closedAt / closedReason and an in-app note to the employer (services/jobs/jobStatus.js)
   async cleanupExpiredJobs() {
     try {
-      const now = new Date();
-      const result = await Job.updateMany(
-        {
-          active: true,
-          $or: [
-            { applicationDeadline: { $lt: now } },
-            { batchExpiresAt: { $lt: now } }
-          ]
-        },
-        { $set: { active: false, updatedAt: now } }
-      );
-      if (result.modifiedCount > 0) {
-        console.log(`⏰ [Expired Jobs Cleanup] Deactivated ${result.modifiedCount} expired job/internship listings.`);
-      }
-      return result.modifiedCount;
+      return await require('./jobs/jobStatus').closeExpired(new Date());
     } catch (err) {
       console.error('⚠️ [Expired Jobs Cleanup] Error during cleanup:', err.message);
       return 0;

@@ -113,6 +113,8 @@ function extractSkills(title, department, audience) {
  * @param {() => Promise<boolean>} [opts.beforeCreate] asked before each new job; false = the row isn't saved and is
  *   listed in "rejected" with opts.limitReason
  * @param {boolean} [opts.extendDeadline=true] false: an updated job keeps its deadline and active state
+ * @param {boolean} [opts.pendingVerification=false] the employer's company isn't verified yet: new jobs wait (not
+ *   live) until tdc approves it (services/jobs/jobStatus.js publishPending); a waiting job is never switched on here
  * @returns {Promise<{ created: number, updated: number, skipped: number, rejected: Array<{ row, title, company, reason }> }>}
  */
 async function importJobsFromFile(filePathOrBuffer, originalFilename = '', opts = {}) {
@@ -224,9 +226,10 @@ async function importJobsFromFile(filePathOrBuffer, originalFilename = '', opts 
       // an employer's own jobs take applications in the app (their pipeline); tdc's uploads link out
       isExternal: !owner,
       externalUrl: applyLink,
-      ...(owner ? { postedBy: owner.userId } : {}),
+      ...(owner ? { postedBy: owner.userId, companyLogo: owner.companyLogo || '' } : {}),
       source: 'manual',
-      active: true,
+      active: !opts.pendingVerification,
+      pendingVerification: !!opts.pendingVerification,
       // Default application deadline set to 60 days from upload date
       applicationDeadline: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000)
     };
@@ -251,8 +254,10 @@ async function importJobsFromFile(filePathOrBuffer, originalFilename = '', opts 
       existingJob.skills = jobData.skills;
       existingJob.requirements = jobData.requirements;
       existingJob.externalUrl = jobData.externalUrl;
-      if (extendDeadline) {
+      if (extendDeadline && !existingJob.pendingVerification) {
         existingJob.active = true;
+        existingJob.closedAt = null;
+        existingJob.closedReason = '';
         existingJob.applicationDeadline = jobData.applicationDeadline;
       }
       existingJob.updatedAt = Date.now();

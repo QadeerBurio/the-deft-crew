@@ -22,6 +22,31 @@ const careerLegacy = require('../services/career/legacyAdapter'); // FLAG_CAREER
 const hiringAccess = require('../services/career/hiringAccessService');
 const lockReply = (res, e) => res.status(e.status || 403).json({ error: e.message, message: e.message, code: e.code, ...(e.extra || {}) });
 const isEmployer = (req) => req.user?.role === "employee";
+// company verification before posting: an unverified company's new job waits (not live) until tdc approves it
+const jobStatus = require('../services/jobs/jobStatus');
+const PENDING_MESSAGE = "Your job goes live once your company is verified by tdc.";
+// what a new job by this user starts as: live, or waiting for verification (admins never wait)
+async function liveOrPending(req) {
+    if (!isEmployer(req)) return { active: true, pendingVerification: false };
+    return (await jobStatus.companyVerified(req.userId)) ? { active: true, pendingVerification: false } : { active: false, pendingVerification: true };
+}
+// the company on a new job: what the form says, else the poster's own profile
+const profileCompany = (req) => String(req.user?.companyName || req.user?.brandName || "").trim();
+const profileLogo = (req) => String(req.user?.logo || "").trim();
+async function tellAdmins(req, job) {
+    const admins = await User.find({ role: "admin" }).select("_id").lean();
+    for (const admin of admins) {
+        await Notification.create({
+            recipient: admin._id,
+            title: job.pendingVerification ? "New job waiting for company verification" : "New Job Posted! 🎯",
+            description: job.pendingVerification ? `${req.user.name} posted: ${job.title}. It goes live once their company is verified.` : `${req.user.name} posted: ${job.title}`,
+            type: "Job Posting",
+            icon: "briefcase",
+            metadata: { jobId: job._id, pendingVerification: !!job.pendingVerification }
+        });
+    }
+}
+const DAY_MS = 24 * 60 * 60 * 1000;
 // an employer may post n jobs now (trial, or counted against their plan); null reply = refused (already sent)
 async function postingHold(req, res, n = 1) {
     if (!isEmployer(req)) return { via: "admin", release: async () => {} };
@@ -36,7 +61,7 @@ async function postingHold(req, res, n = 1) {
 // poster: only an admin (before, job.postedBy.toString() crashed with a 500 on those)
 const ownsJob = (req, job) => req.user?.role === "admin" || (!!job?.postedBy && String(job.postedBy) === String(req.userId));
 // PUT /update never changes these (owner, archive state, counters, ids); employers also can't change the import fields
-const PROTECTED_JOB_FIELDS = new Set(["_id", "id", "__v", "postedBy", "archivedAt", "archivedReason", "archivedBy", "totalApplications", "views", "createdAt", "updatedAt", "embedding", "embeddingUpdatedAt"]);
+const PROTECTED_JOB_FIELDS = new Set(["_id", "id", "__v", "postedBy", "archivedAt", "archivedReason", "archivedBy", "totalApplications", "views", "createdAt", "updatedAt", "embedding", "embeddingUpdatedAt", "pendingVerification", "publishedAt", "closedAt", "closedReason"]);
 const ADMIN_ONLY_JOB_FIELDS = new Set(["isExternal", "externalUrl", "externalId", "source", "sourceFile", "importBatch", "batchExpiresAt", "lastFetchedAt", "featured"]);
 // the fields a duplicate copies (a new posting: new deadline, no counters, active)
 const DUPLICATE_FIELDS = ["title", "department", "category", "location", "locationType", "type", "salary", "salaryMin", "salaryMax", "currency", "email", "description", "requirements", "responsibilities", "benefits", "experienceLevel", "minExperience", "education", "skills", "urgent", "companyName", "companyLogo", "companyWebsite"];
@@ -98,7 +123,7 @@ router.post("/add", authMiddleware, isAdminOrEmployee, async (req, res) => {
             salaryMin, salaryMax, currency, email, description, requirements,
             responsibilities, benefits, experienceLevel, minExperience,
             education, skills, active, featured, urgent, applicationDeadline,
-            companyName, companyWebsite
+            companyName, companyWebsite, companyLogo
         } = req.body || {}; // Express 5: no body = undefined
 
         if (!title || !department || !location || !type || !salary || !email || !description) {
@@ -106,21 +131,26 @@ router.post("/add", authMiddleware, isAdminOrEmployee, async (req, res) => {
         }
         const sk = jobSkills.cleanSkills(skills);
         if (sk.errors.length) return badSkills(res, sk.errors);
+        const company = String(companyName || "").trim() || profileCompany(req);
+        if (!company) return res.status(400).json({ error: "Enter the company name", code: "COMPANY_NAME_REQUIRED", field: "companyName" });
         const hold = await postingHold(req, res);
         if (!hold) return;
+        const start = await liveOrPending(req);
 
         const newJob = new Job({
             title, department, category, location, locationType, type, salary,
-            salaryMin: salaryMin || 0, salaryMax: salaryMax || 0, currency: currency || "USD",
+            salaryMin: salaryMin || 0, salaryMax: salaryMax || 0, currency: currency || "PKR",
             email, description, requirements: requirements || [],
             responsibilities: responsibilities || [], benefits: benefits || [],
             experienceLevel: experienceLevel || "Mid Level",
             minExperience: minExperience || 0, education: education || "Bachelor's Degree",
-            skills: sk.skills, active: active !== undefined ? active : true,
+            skills: sk.skills, active: start.pendingVerification ? false : active !== undefined ? active : true,
+            pendingVerification: start.pendingVerification,
             featured: req.user?.role === "admin" ? !!featured : false, urgent: urgent || false, // featuring is tdc's call
             applicationDeadline: applicationDeadline || new Date(+new Date() + 30*24*60*60*1000),
             postedBy: req.userId,
-            companyName: companyName || 'The Deft Crew',
+            companyName: company,
+            companyLogo: String(companyLogo || "").trim() || profileLogo(req),
             companyWebsite: companyWebsite || '',
             // TDC internal jobs are NEVER from the external pipeline
             isExternal: false,
@@ -133,26 +163,20 @@ router.post("/add", authMiddleware, isAdminOrEmployee, async (req, res) => {
             await hold.release();
             throw e;
         }
-        if (isEmployer(req)) await hiringAccess.afterPost(req.userId);
-        
-        const admins = await User.find({ role: "admin" });
-        for (const admin of admins) {
-            await Notification.create({
-                recipient: admin._id,
-                title: "New Job Posted! 🎯",
-                description: `${req.user.name} posted: ${title}`,
-                type: "Job Posting",
-                icon: "briefcase",
-                metadata: { jobId: newJob._id }
-            });
-        }
+        // the trial's 60 days start with the first job that goes live
+        if (isEmployer(req) && !newJob.pendingVerification) await hiringAccess.afterPost(req.userId);
+        await tellAdmins(req, newJob);
 
         // 🧠 Fire-and-forget: generate embedding for semantic search
         setImmediate(() => generateJobEmbedding(newJob._id.toString()));
         // FLAG_CAREER_MATCHING: tell pilot students whose skills strongly match (services/career/jobAlerts.js; never throws)
         if (newJob.active) require("../services/career/jobAlerts").onJobLive(newJob.toObject());
         
-        res.status(201).json({ message: "Job posted successfully", data: newJob });
+        res.status(201).json({
+            message: newJob.pendingVerification ? `Job saved. ${PENDING_MESSAGE}` : "Job posted successfully",
+            data: { ...newJob.toObject(), status: jobStatus.statusOf(newJob) },
+            ...(newJob.pendingVerification ? { pendingVerification: true, code: "PENDING_COMPANY_VERIFICATION" } : {}),
+        });
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: err.message });
@@ -211,22 +235,23 @@ router.post('/admin/import-csv', authMiddleware, isAdminOrEmployee, async (req, 
     }
 
     // an employer's upload: the jobs are theirs (they manage them and get the applicants); tdc's upload: unowned
-    const owner = req.user?.role === "admin" ? null : { userId: req.userId, email: req.user?.email || "", companyName: req.user?.companyName || req.user?.brandName || "" };
+    const owner = req.user?.role === "admin" ? null : { userId: req.userId, email: req.user?.email || "", companyName: profileCompany(req), companyLogo: profileLogo(req) };
+    const pending = owner ? !(await jobStatus.companyVerified(req.userId)) : false;
     // on the trial: as many rows as the file has; within a plan: each new job is counted, rows past the plan's
     // limit aren't saved (listed in "rejected"); an updated job keeps its deadline unless on the trial
-    let opts = { owner };
+    let opts = { owner, pendingVerification: pending };
     if (owner) {
       const st = await hiringAccess.status(req.userId);
       if (!st.canPost) return lockReply(res, hiringAccess.lockError(st));
       if (st.enforced && st.trial.status !== "active") {
         opts = {
-          owner, extendDeadline: false, limitReason: "your plan's job posts are used: not saved",
+          owner, pendingVerification: pending, extendDeadline: false, limitReason: "your plan's job posts are used: not saved",
           beforeCreate: async () => { try { await hiringAccess.reserve(req.userId, 1); return true; } catch (e) { if (e.code === "POSTING_LOCKED") return false; throw e; } },
         };
       }
     }
     const result = await importJobsFromFile(req.file.buffer, req.file.originalname, opts);
-    if (owner && result.created > 0) await hiringAccess.afterPost(req.userId);
+    if (owner && result.created > 0 && !pending) await hiringAccess.afterPost(req.userId);
 
     return res.status(200).json({
       success: true,
@@ -234,7 +259,9 @@ router.post('/admin/import-csv', authMiddleware, isAdminOrEmployee, async (req, 
       updated: result.updated,
       skipped: result.skipped,
       // rows not saved because of their skills: { row (spreadsheet row number), title, company, reason }
-      rejected: result.rejected || []
+      rejected: result.rejected || [],
+      // an unverified company: the new jobs wait until tdc verifies it
+      ...(pending ? { pendingVerification: true, message: PENDING_MESSAGE } : {})
     });
   } catch (err) {
     console.error('❌ Error in /admin/import-csv endpoint:', err);
@@ -274,7 +301,7 @@ router.get("/all", authMiddleware, isAdminOrEmployee, async (req, res) => {
         
         const jobsWithCounts = await Promise.all(jobs.map(async (job) => {
             const appCount = await JobApplication.countDocuments({ jobId: job._id });
-            return { ...job.toObject(), totalApplications: appCount };
+            return { ...job.toObject(), totalApplications: appCount, status: jobStatus.statusOf(job) };
         }));
 
         res.json(jobsWithCounts);
@@ -289,7 +316,7 @@ router.get("/my-jobs", authMiddleware, async (req, res) => {
         const jobs = await Job.find({ postedBy: req.userId, archivedAt: null }).sort({ createdAt: -1 }); // archived = deleted
         const jobsWithCounts = await Promise.all(jobs.map(async (job) => {
             const appCount = await JobApplication.countDocuments({ jobId: job._id });
-            return { ...job.toObject(), totalApplications: appCount };
+            return { ...job.toObject(), totalApplications: appCount, status: jobStatus.statusOf(job) };
         }));
         res.json(jobsWithCounts);
     } catch (err) {
@@ -311,8 +338,18 @@ router.put("/update/:id", authMiddleware, isAdminOrEmployee, async (req, res) =>
         // only the job's own fields: never its owner, archive state, counters or the import pipeline's fields
         const changes = { ...(req.body || {}) };
         for (const k of Object.keys(changes)) if (k.startsWith("$") || PROTECTED_JOB_FIELDS.has(k) || (req.user?.role !== "admin" && ADMIN_ONLY_JOB_FIELDS.has(k))) delete changes[k];
+        if (isEmployer(req) && job.pendingVerification) delete changes.active; // goes live once the company is verified
+        // switching a closed job on through the form = reopening: the trial / plan lock, a fresh deadline if needed
+        const closedNow = jobStatus.statusOf(job) === "closed";
+        const reopen = closedNow && changes.active === true && !job.active;
+        if (reopen) {
+            if (isEmployer(req)) { try { await hiringAccess.canRepost(req.userId); } catch (e) { if (e.code === "POSTING_LOCKED") return lockReply(res, e); throw e; } }
+            const next = changes.applicationDeadline ? new Date(changes.applicationDeadline) : job.applicationDeadline;
+            if (!next || Number.isNaN(new Date(next).getTime()) || new Date(next) < new Date()) changes.applicationDeadline = new Date(Date.now() + 30 * DAY_MS);
+            changes.closedAt = null; changes.closedReason = "";
+        }
         // after the trial (and without a plan), an employer can't extend a deadline: that would be a new posting
-        if (isEmployer(req) && changes.applicationDeadline) {
+        if (isEmployer(req) && changes.applicationDeadline && !reopen) {
             const next = new Date(changes.applicationDeadline);
             const cur = job.applicationDeadline ? new Date(job.applicationDeadline) : null;
             if (!Number.isNaN(next.getTime()) && (!cur || next > cur)) {
@@ -347,16 +384,24 @@ router.patch("/toggle/:id", authMiddleware, isAdminOrEmployee, async (req, res) 
         }
         if (job.archivedAt) return res.status(410).json({ message: "This job was deleted" });
 
-        // switching on a job past its deadline after the trial (and without a plan): refused, like a new posting
-        if (!job.active && isEmployer(req) && job.applicationDeadline && new Date(job.applicationDeadline) < new Date()) {
+        // waiting for company verification: it goes live when tdc approves the company
+        if (!job.active && job.pendingVerification) return res.status(409).json({ error: PENDING_MESSAGE, message: PENDING_MESSAGE, code: "PENDING_COMPANY_VERIFICATION" });
+        // reopening a closed job (past its deadline): follows the trial / plan lock, and gets 30 more days
+        const reopening = !job.active && jobStatus.statusOf(job) === "closed";
+        if (reopening && isEmployer(req)) {
             try { await hiringAccess.canRepost(req.userId); } catch (e) { if (e.code === "POSTING_LOCKED") return lockReply(res, e); throw e; }
         }
         job.active = !job.active;
+        if (reopening) {
+            if (!job.applicationDeadline || new Date(job.applicationDeadline) < new Date()) job.applicationDeadline = new Date(Date.now() + 30 * DAY_MS);
+            job.closedAt = null;
+            job.closedReason = "";
+        }
         await job.save();
         // switched on: pilot students whose skills strongly match hear about it (never twice for the same job)
         if (job.active) require("../services/career/jobAlerts").onJobLive(job.toObject());
         
-        res.json({ message: `Job ${job.active ? 'activated' : 'deactivated'}`, active: job.active });
+        res.json({ message: reopening ? "Job reopened for 30 days" : `Job ${job.active ? 'activated' : 'deactivated'}`, active: job.active, status: jobStatus.statusOf(job), applicationDeadline: job.applicationDeadline });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -371,10 +416,11 @@ router.post("/duplicate/:id", authMiddleware, isAdminOrEmployee, async (req, res
         const hold = await postingHold(req, res);
         if (!hold) return;
         const copy = Object.fromEntries(DUPLICATE_FIELDS.filter((k) => job[k] !== undefined).map((k) => [k, job[k]]));
+        const start = await liveOrPending(req);
         const newJob = new Job({
             ...copy,
             title: String(req.body?.title || job.title).slice(0, 200),
-            active: true, featured: false,
+            active: start.active, pendingVerification: start.pendingVerification, featured: false,
             applicationDeadline: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
             postedBy: req.user?.role === "admin" ? job.postedBy || null : req.userId,
             isExternal: false, source: "manual",
@@ -385,10 +431,14 @@ router.post("/duplicate/:id", authMiddleware, isAdminOrEmployee, async (req, res
             await hold.release();
             throw e;
         }
-        if (isEmployer(req)) await hiringAccess.afterPost(req.userId);
         setImmediate(() => generateJobEmbedding(newJob._id.toString()));
-        require("../services/career/jobAlerts").onJobLive(newJob.toObject());
-        res.status(201).json({ message: "Job duplicated", data: newJob });
+        if (newJob.pendingVerification) {
+            await tellAdmins(req, newJob);
+        } else {
+            if (isEmployer(req)) await hiringAccess.afterPost(req.userId);
+            require("../services/career/jobAlerts").onJobLive(newJob.toObject());
+        }
+        res.status(201).json({ message: newJob.pendingVerification ? `Job duplicated. ${PENDING_MESSAGE}` : "Job duplicated", data: { ...newJob.toObject(), status: jobStatus.statusOf(newJob) }, ...(newJob.pendingVerification ? { pendingVerification: true, code: "PENDING_COMPANY_VERIFICATION" } : {}) });
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: err.message });
@@ -499,7 +549,7 @@ router.get("/public/all", async (req, res) => {
 router.get("/public/job/:id", async (req, res) => {
     try {
         const job = await Job.findById(req.params.id).select("-email");
-        if (!job || job.archivedAt) return res.status(404).json({ message: "Job not found" });
+        if (!job || job.archivedAt || job.pendingVerification) return res.status(404).json({ message: "Job not found" });
 
         const now = new Date();
         const isExpired = !job.active || (job.applicationDeadline && new Date(job.applicationDeadline) < now);
@@ -880,12 +930,27 @@ router.get("/interviews/upcoming", authMiddleware, async (req, res) => {
             query.jobId = { $in: jobIds };
         }
         
-        const upcomingInterviews = await JobApplication.find(query)
+        const classic = await JobApplication.find(query)
             .populate('jobId', 'title department location companyName')
             .sort({ interviewDate: 1 })
-            .limit(10);
-        
-        res.json(upcomingInterviews);
+            .limit(10)
+            .lean();
+        // the hiring timeline's interviews (invited, accepted, new time asked), in the same shape
+        const CareerInterview = require('../models/CareerInterview');
+        const tq = { active: true, startsAt: { $gte: new Date() }, status: { $in: ["invited", "accepted", "reschedule_requested"] } };
+        if (req.user.role !== "admin") tq.employer = req.userId;
+        const timeline = await CareerInterview.find(tq).sort({ startsAt: 1 }).limit(10).lean();
+        const tApps = new Map((await JobApplication.find({ _id: { $in: timeline.map((i) => i.application) } }).select("fullName jobId").populate('jobId', 'title department location companyName').lean()).map((a) => [String(a._id), a]));
+        const fromTimeline = timeline.map((i) => {
+            const a = tApps.get(String(i.application)) || {};
+            return { _id: a._id || i.application, applicationId: String(i.application), interviewId: String(i._id), fullName: a.fullName || "", jobId: a.jobId || null, interviewDate: i.startsAt, meetingLink: i.mode === "online" ? i.meetingLink : "", location: i.mode === "in-person" ? i.location : "", mode: i.mode, interviewStatus: i.status, source: "timeline" };
+        });
+        // once each: an application with a timeline interview shows that one
+        const seen = new Set(fromTimeline.map((x) => x.applicationId));
+        const merged = [...fromTimeline, ...classic.filter((c) => !seen.has(String(c._id))).map((c) => ({ ...c, applicationId: String(c._id), source: "classic" }))]
+            .sort((a, b) => new Date(a.interviewDate) - new Date(b.interviewDate))
+            .slice(0, 10);
+        res.json(merged);
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: err.message });
@@ -1268,8 +1333,14 @@ router.get("/stats", authMiddleware, async (req, res) => {
             query = { jobId: { $in: jobIds } };
         }
         
-        const totalJobs = req.user.role === "admin" ? await Job.countDocuments() : await Job.countDocuments({ postedBy: req.userId });
-        const activeJobs = req.user.role === "admin" ? await Job.countDocuments({ active: true }) : await Job.countDocuments({ postedBy: req.userId, active: true });
+        // jobs (not deleted): live = active and not past its deadline; closed = past its deadline or closed by the
+        // expiry job; pending = waiting for company verification
+        const mine = req.user.role === "admin" ? { archivedAt: null } : { postedBy: req.userId, archivedAt: null };
+        const nowStats = new Date();
+        const totalJobs = await Job.countDocuments(mine);
+        const activeJobs = await Job.countDocuments({ ...mine, active: true, $or: [{ applicationDeadline: null }, { applicationDeadline: { $gte: nowStats } }] });
+        const closedJobs = await Job.countDocuments({ ...mine, pendingVerification: { $ne: true }, $or: [{ closedAt: { $ne: null }, active: false }, { applicationDeadline: { $lt: nowStats } }] });
+        const pendingJobs = await Job.countDocuments({ ...mine, pendingVerification: true });
         const totalApplications = await JobApplication.countDocuments(query);
         const pendingApplications = await JobApplication.countDocuments({ ...query, status: "pending" });
         const shortlistedApplications = await JobApplication.countDocuments({ ...query, status: "shortlisted" });
@@ -1309,7 +1380,9 @@ router.get("/stats", authMiddleware, async (req, res) => {
         
         res.json({
             totalJobs, 
-            activeJobs, 
+            activeJobs,
+            closedJobs,
+            pendingJobs,
             totalApplications, 
             pendingApplications,
             shortlistedApplications, 
