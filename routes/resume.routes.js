@@ -18,7 +18,6 @@ const path = require('path');
 const fs = require('fs');
 const { uploadResume, deleteFromCloudinary } = require('../config/cloudinary');
 const { track } = require('../services/engagement');
-const { parseResumePDF } = require('../services/resumeParser');
 const { triggerCareerProfileEnrichment } = require('../services/careerProfileService');
 const { invalidateCacheForResume }        = require('../services/skillGapService');
 const { tailorResume }                   = require('../services/resumeTailorService');
@@ -26,6 +25,8 @@ const { generateResumePDF }              = require('../services/pdfService');
 const { optimizeParsedResume, withoutVerdicts } = require('../services/resumeIntelligenceService');
 const { isEnabled: flagEnabled } = require('../config/featureFlags');
 const OpenAI = require('openai');
+const axios = require('axios');
+const { importResume } = require('../services/resumeImport');
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
   timeout: 45000,
@@ -253,7 +254,15 @@ router.post('/', auth, rejectGuest, checkResumeLimit, async (req, res) => {
       };
     }
 
-    const arrayFields = ['education', 'skills', 'workExperience', 'certifications', 'projects', 'languages', 'references', 'interests'];
+    // the resume's name: the student's own, or (empty) "<Full name> – <title>" from the model's pre-save
+    if (typeof req.body.name === 'string') {
+      const name = req.body.name.replace(/\s+/g, ' ').trim().slice(0, 120);
+      cleanData.name = name;
+      cleanData.nameCustom = !!name;
+    }
+    if (typeof req.body.otherNotes === 'string') cleanData.otherNotes = req.body.otherNotes.slice(0, 5000);
+
+    const arrayFields = ['education', 'skills', 'workExperience', 'certifications', 'projects', 'languages', 'references', 'interests', 'achievements'];
     arrayFields.forEach(field => {
       if (req.body[field] && Array.isArray(req.body[field])) {
         cleanData[field] = req.body[field].filter(item => item && Object.keys(item).length > 0);
@@ -454,69 +463,34 @@ router.post('/upload',
     const countBefore = await Resume.countDocuments({ user: req.user._id });
     const isFirstResume = countBefore === 0;
 
-    // Parse the resume
-    let parsedData = {};
-    let parseError = null;
-    const parseStart = Date.now();
-    try {
-      console.log(`[${new Date().toISOString()}] 🔍 Starting PDF/Word text extraction & parsing...`);
-      parsedData = await parseResumePDF(req.file.path, req.file.originalname);
-      console.log(`[${new Date().toISOString()}] 🟢 PDF text extracted and parsed successfully in ${Date.now() - parseStart}ms`);
-    } catch (parsingErr) {
-      console.error(`[${new Date().toISOString()}] ❌ Resume parse error after ${Date.now() - parseStart}ms:`, parsingErr);
-      parseError = parsingErr.message || 'Parsing failed';
+    // read the file (local disk or Cloudinary), then text -> AI (90 s limit) -> checked fields
+    const buffer = req.file.path.startsWith('http')
+      ? Buffer.from((await axios.get(req.file.path, { responseType: 'arraybuffer', timeout: 30000 })).data)
+      : fs.readFileSync(req.file.path);
+    const imported = await importResume({ buffer, fileName: req.file.originalname });
+    console.log(`[${new Date().toISOString()}] 🔍 Resume import: ${imported.status} in ${Date.now() - startTime}ms`);
+
+    // a scan, an old .doc or a file without text: nothing is created (no creation used), the app says why
+    if (!imported.fields) {
+      if (req.file && req.file.filename) await deleteFromCloudinary(req.file.filename, 'raw').catch(() => {});
+      const code = { scan: 'RESUME_SCAN', unsupported: 'RESUME_UNSUPPORTED', unreadable: 'RESUME_UNREADABLE' }[imported.status] || 'RESUME_UNREADABLE';
+      return res.status(422).json({ success: false, code, error: imported.message });
     }
 
-    // Run AI Resume Intelligence Engine Optimization
-    let optimizedData = {};
-    const optStart = Date.now();
-    try {
-      console.log(`[${new Date().toISOString()}] 🧠 AI processing started: optimizing parsed resume...`);
-      optimizedData = await optimizeParsedResume(parsedData, { honest: studioOn(req) });
-      console.log(`[${new Date().toISOString()}] 🟢 AI optimization completed in ${Date.now() - optStart}ms`);
-    } catch (optErr) {
-      console.error(`[${new Date().toISOString()}] ❌ Resume optimization error after ${Date.now() - optStart}ms:`, optErr);
-      optimizedData = parsedData; // Fallback to raw parsed data
-    }
-
-    // Generate a unique filename based on original name and timestamp
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const baseName = req.file.originalname.replace(/\.[^/.]+$/, "");
-    const uniqueFileName = `${baseName}_${timestamp}`;
-
-    console.log('💾 Creating new resume document...');
-
+    const f = imported.fields;
     const resumeData = {
       user: req.user._id,
-      personalInfo: {
-        firstName: parsedData.personalInfo?.firstName || '',
-        lastName: parsedData.personalInfo?.lastName || '',
-        title: parsedData.personalInfo?.title || parsedData.professionalSummary?.title || optimizedData.targetRole || '',
-        email: parsedData.personalInfo?.email || '',
-        phone: parsedData.personalInfo?.phone || '',
-        location: parsedData.personalInfo?.location || (parsedData.personalInfo?.city ? `${parsedData.personalInfo.city}${parsedData.personalInfo.country ? ', ' + parsedData.personalInfo.country : ''}` : ''),
-        address: parsedData.personalInfo?.address || '',
-        city: parsedData.personalInfo?.city || '',
-        state: parsedData.personalInfo?.state || '',
-        country: parsedData.personalInfo?.country || '',
-        postalCode: parsedData.personalInfo?.postalCode || '',
-        linkedin: parsedData.personalInfo?.linkedin || '',
-        github: parsedData.personalInfo?.github || '',
-        portfolio: parsedData.personalInfo?.portfolio || ''
-      },
-      professionalSummary: {
-        title: optimizedData.targetRole || parsedData.professionalSummary?.title ||
-                (parsedData.personalInfo?.firstName ?
-                  `${parsedData.personalInfo.firstName} ${parsedData.personalInfo.lastName || ''}`.trim() : 'Professional'),
-        summary: optimizedData.optimizedSummary || parsedData.professionalSummary?.summary || '',
-        experienceLevel: optimizedData.careerLevel || parsedData.professionalSummary?.experienceLevel || 'Mid Level'
-      },
-      education: parsedData.education || [],
-      skills: optimizedData.optimizedSkills || parsedData.skills || [],
-      workExperience: optimizedData.optimizedExperience || parsedData.workExperience || [],
-      certifications: parsedData.certifications || [],
-      projects: optimizedData.optimizedProjects || parsedData.projects || [],
-      languages: parsedData.languages || [],
+      personalInfo: f.personalInfo,
+      professionalSummary: { title: f.professionalSummary.title, summary: f.professionalSummary.summary, experienceLevel: f.workExperience.length >= 3 ? 'Mid Level' : 'Entry Level' },
+      education: f.education,
+      skills: f.skills,
+      workExperience: f.workExperience,
+      certifications: f.certifications,
+      projects: f.projects,
+      languages: f.languages,
+      achievements: f.achievements,
+      otherNotes: f.otherNotes,
+      ...(f.professionalSummary.title ? { targetRole: f.professionalSummary.title } : {}),
       uploadedResume: {
         fileName: req.file.originalname,
         fileUrl: req.file.path.startsWith('http')
@@ -524,114 +498,26 @@ router.post('/upload',
           : `${req.protocol}://${req.get('host')}/uploads/resumes/${req.file.filename}`,
         publicId: req.file.filename,
         uploadDate: new Date(),
-        parsedData: parsedData,
-        parseError: parseError
+        parsedData: { status: imported.status }
       },
-      // Set version tag based on content
-      versionTag: determineVersionTag(parsedData),
-      versionNotes: `Uploaded from ${req.file.originalname} on ${new Date().toLocaleDateString()}`,
-
-      // AI Intelligence Layer fields
-      careerLevel: optimizedData.careerLevel || 'Mid Level',
-      industry: optimizedData.industry || 'General',
-      targetRole: optimizedData.targetRole || parsedData.professionalSummary?.title || 'Professional',
-      professionalBrand: optimizedData.professionalBrand || '',
-      personalBranding: optimizedData.personalBranding || {
-        professionalHeadline: '',
-        personalBrandStatement: '',
-        coreValueProposition: '',
-        professionalIdentity: ''
-      },
-      careerHighlights: optimizedData.careerHighlights || [],
-      coreCompetencies: optimizedData.coreCompetencies || [],
-      atsKeywords: optimizedData.atsKeywords || [],
-      missingKeywords: optimizedData.missingKeywords || [],
-      keywordMatchPercentage: optimizedData.keywordMatchPercentage || 0,
-      resumeScores: optimizedData.resumeScores || {
-        atsScore: 50,
-        recruiterScore: 50,
-        contentQuality: 50,
-        keywordStrength: 50,
-        formattingScore: 50,
-        impactScore: 50,
-        overallHiringScore: 50
-      },
-      hrScorecard: optimizedData.hrScorecard || {
-        professionalSummaryScore: 5,
-        experienceScore: 15,
-        projectsScore: 8,
-        educationScore: 5,
-        skillsScore: 5,
-        achievementsScore: 5,
-        atsScore: 5,
-        formattingScore: 3,
-        professionalBrandingScore: 2,
-        overallScore: 50
-      },
-      hiringDecision: optimizedData.hiringDecision || {
-        hrShortlist: { status: 'MAYBE', reason: '' },
-        hiringManagerInterview: { status: 'MAYBE', reason: '' },
-        departmentHeadApprove: { status: 'MAYBE', reason: '' }
-      },
-      industryBenchmarking: optimizedData.industryBenchmarking || {
-        percentileRank: 'Average',
-        rankExplanation: ''
-      },
-      prioritizedImprovementPlan: optimizedData.prioritizedImprovementPlan || [],
-      missingSkills: optimizedData.missingSkills || [],
-      strengths: optimizedData.strengths || [],
-      weaknesses: optimizedData.weaknesses || [],
-      optimizedSummary: optimizedData.optimizedSummary || '',
-      optimizedExperience: optimizedData.optimizedExperience || parsedData.workExperience || [],
-      optimizedProjects: optimizedData.optimizedProjects || parsedData.projects || [],
-      optimizedSkills: optimizedData.optimizedSkills || parsedData.skills || [],
-      hrRecommendations: optimizedData.hrRecommendations || []
+      importReport: { status: imported.status, message: imported.message, ...imported.report, at: new Date() },
+      versionTag: determineVersionTag(f),
+      versionNotes: `Uploaded on ${new Date().toLocaleDateString()}`,
     };
 
-    const dbStart = Date.now();
     const resume = new Resume(resumeData);
     await resume.save();
 
     // Increment lifetime creation count for user
     await User.findByIdAndUpdate(req.user._id, { $inc: { resumeCreationCount: 1 } });
-    console.log(`[${new Date().toISOString()}] 💾 Database updated: Resume saved successfully in ${Date.now() - dbStart}ms (ID: ${resume._id})`);
 
-    // Calculate AI parsing confidence score (0-100)
-    let scoreCount = 0;
-    let maxScore = 0;
-    const personalCheck = ['firstName', 'lastName', 'email', 'phone', 'linkedin', 'github'];
-    personalCheck.forEach(field => {
-      maxScore += 10;
-      if (parsedData.personalInfo?.[field]) scoreCount += 10;
-    });
-    maxScore += 30;
-    if (parsedData.professionalSummary?.summary) scoreCount += 10;
-    if (parsedData.skills?.length > 0) scoreCount += 10;
-    if (parsedData.workExperience?.length > 0) scoreCount += 10;
-
-    const confidenceScore = maxScore > 0 ? Math.round((scoreCount / maxScore) * 100) : 100;
-
-    // Prepare response data
     const responseData = {
       success: true,
       data: resume,
-      confidenceScore: confidenceScore,
-      message: 'Resume uploaded and parsed successfully'
+      import: { status: imported.status, message: imported.message, ...imported.report },
+      message: imported.message
     };
-
-    // Add parsing warnings if any
-    const warnings = [];
-    if (parseError) {
-      warnings.push(`Parsing completed with some issues: ${parseError}`);
-    }
-    if (confidenceScore < 50) {
-      warnings.push('Resume parsing had low confidence. Please review and update the extracted information.');
-    }
-    if (warnings.length > 0) {
-      responseData.warning = warnings.join(' | ');
-    }
-
-    console.log(`[${new Date().toISOString()}] 📊 Parsing confidence score: ${confidenceScore}%`);
+    if (imported.status === 'partial') responseData.warning = imported.message;
 
     // 🎯 Fire engagement events
     let engagement = null;
@@ -820,7 +706,15 @@ router.put('/:id', auth, rejectGuest, async (req, res) => {
       };
     }
 
-    const arrayFields = ['education', 'skills', 'workExperience', 'certifications', 'projects', 'languages', 'references', 'interests'];
+    // the resume's name: the student's own; empty goes back to "<Full name> – <title>" (model pre-save)
+    if (typeof req.body.name === 'string') {
+      const name = req.body.name.replace(/\s+/g, ' ').trim().slice(0, 120);
+      resume.name = name;
+      resume.nameCustom = !!name;
+    }
+    if (typeof req.body.otherNotes === 'string') resume.otherNotes = req.body.otherNotes.slice(0, 5000);
+
+    const arrayFields = ['education', 'skills', 'workExperience', 'certifications', 'projects', 'languages', 'references', 'interests', 'achievements'];
     arrayFields.forEach(field => {
       if (req.body[field] !== undefined) {
         resume[field] = req.body[field];

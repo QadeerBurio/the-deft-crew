@@ -1,5 +1,6 @@
 // models/Resume.js
 const mongoose = require('mongoose');
+const { resumeStrength, defaultResumeName } = require('../utils/resumeRules');
 
 const resumeSchema = new mongoose.Schema({
   user: {
@@ -39,6 +40,7 @@ const resumeSchema = new mongoose.Schema({
     endDate: { type: Date },
     current: { type: Boolean, default: false },
     gpa: { type: Number },
+    grade: { type: String, default: '' }, // as written ("3.5/4", "A", "First Division")
     description: { type: String, default: '' }
   }],
   skills: [{
@@ -88,6 +90,12 @@ const resumeSchema = new mongoose.Schema({
     }
   }],
   interests: [String],
+  achievements: [String],
+  otherNotes: { type: String, default: '' }, // resume text an upload couldn't place in a section
+  // the resume's name: the student's own when nameCustom, else "<Full name> – <title>" (utils/resumeRules)
+  name: { type: String, default: '' },
+  nameCustom: { type: Boolean, default: false },
+  importReport: { type: mongoose.Schema.Types.Mixed }, // what an upload filled in (status per section)
   references: [{
     name: { type: String, default: '' },
     position: { type: String, default: '' },
@@ -318,8 +326,10 @@ resumeSchema.index({ createdAt: -1 });
 resumeSchema.pre('save', function () {
   this.updatedAt = new Date();
   try {
-    this.completionPercentage = this.calculateCompletionPercentage();
+    // "resume strength": the same calculation the app shows (utils/resumeRules)
+    this.completionPercentage = resumeStrength(this).score;
     this.isComplete = this.completionPercentage >= 85;
+    if (!this.nameCustom || !String(this.name || '').trim()) { this.nameCustom = false; this.name = defaultResumeName(this); }
   } catch (error) {
     console.error('Error calculating completion:', error);
   }
