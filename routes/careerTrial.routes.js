@@ -77,6 +77,9 @@ const verificationView = (v, users) => {
     companyName: v.companyName, registrationType: v.registrationType, ntnOrSecp: v.ntnOrSecp, businessEmailDomain: v.businessEmailDomain, website: v.website,
     companyGroupKey: v.companyGroupKey, status: v.status, reason: v.reason, reviewedAt: v.reviewedAt, submittedAt: v.createdAt,
     hints: { signInEmailMatchesDomain: v.signInEmailMatchesDomain, websiteMatchesDomain: v.websiteMatchesDomain },
+    // the proof given: own e-mail domain, website, uploaded documents (opened through the admin document route)
+    proof: { emailDomain: !!v.businessEmailDomain, website: !!v.website, documents: (v.documents || []).length },
+    documents: (v.documents || []).map((x) => ({ id: String(x.documentId), kind: x.kind, fileName: x.fileName, mimeType: x.mimeType, size: x.size, uploadedAt: x.uploadedAt })),
     duplicateOf: (v.duplicateOf || []).map((d) => ({ verificationId: String(d.verificationId), employer: { id: String(d.employerUserId), name: users.get(String(d.employerUserId))?.name || "" }, matchedOn: d.matchedOn })),
     history: v.history,
   };

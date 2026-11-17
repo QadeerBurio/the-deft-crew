@@ -4,6 +4,9 @@
 // account (unique employerUserId). companyGroupKey groups accounts of the same company: same registration
 // number, same e-mail domain or same website = the same company group, and a group gets one trial.
 // A submission matching another account goes to duplicate_review. The User schema is unchanged.
+// Proof: at least one of the company's own e-mail domain, its website, or an uploaded document (NTN certificate,
+// SECP certificate, business registration or letterhead: models/EmployerVerificationDocument.js, admins only).
+// status needs_info: an admin asked for more (the reason says what); the employer sends again.
 const mongoose = require("mongoose");
 const { ObjectId } = mongoose.Schema.Types;
 
@@ -13,11 +16,13 @@ const schema = new mongoose.Schema({
   companyName: { type: String, required: true, trim: true, maxlength: 120 },
   registrationType: { type: String, enum: ["ntn", "secp"], required: true },
   ntnOrSecp: { type: String, required: true }, // normalized: upper case, letters and digits only
-  businessEmailDomain: { type: String, required: true }, // e.g. "brightlabs.pk"
-  website: { type: String, required: true }, // host only, e.g. "brightlabs.pk"
+  businessEmailDomain: { type: String, default: "" }, // e.g. "brightlabs.pk"; optional when a document is uploaded
+  website: { type: String, default: "" }, // host only, e.g. "brightlabs.pk"; optional when a document is uploaded
+  // uploaded proof (the files themselves are in EmployerVerificationDocument; only admins can open them)
+  documents: [{ _id: false, documentId: { type: ObjectId, ref: "EmployerVerificationDocument" }, kind: String, fileName: String, mimeType: String, size: Number, uploadedAt: Date }],
   signInEmailMatchesDomain: { type: Boolean, default: false }, // a hint for the admin
   websiteMatchesDomain: { type: Boolean, default: false },
-  status: { type: String, enum: ["pending", "approved", "rejected", "duplicate_review"], default: "pending" },
+  status: { type: String, enum: ["pending", "approved", "rejected", "duplicate_review", "needs_info"], default: "pending" },
   duplicateOf: [{ _id: false, verificationId: { type: ObjectId, ref: "EmployerCompanyVerification" }, employerUserId: { type: ObjectId, ref: "User" }, matchedOn: [String] }],
   reviewedBy: { type: ObjectId, ref: "User", default: null },
   reviewedAt: { type: Date, default: null },
