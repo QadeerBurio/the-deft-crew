@@ -28,7 +28,7 @@ const server = http.createServer(app);
 app.use(logSafety.requestId());
 
 const io = new Server(server, {
-  cors: { origin: "*" }
+  cors: { origin: require("./config/corsOrigins").corsOptions.origin } // the website, the portal, the server itself (config/corsOrigins.js)
 });
 
 // Make io available to routes
@@ -42,7 +42,7 @@ eventSocket.init(io);
 dns.setServers(["1.1.1.1", "8.8.8.8"]);
 
 // ---------------- MIDDLEWARE ----------------
-app.use(cors());
+app.use(cors(require("./config/corsOrigins").corsOptions)); // the website, the portal, the server itself; no Origin (the app, webhooks) allowed
 app.use(express.json({
   limit: "5mb",
   verify: (req, res, buf) => {
