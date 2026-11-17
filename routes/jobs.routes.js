@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const multer = require("multer");
 const path = require("path");
+const mongoose = require("mongoose");
 const Job = require("../models/Job");
 const { archiveJob } = require('../services/jobArchive');
 const JobApplication = require("../models/JobApplication");
@@ -20,6 +21,11 @@ const careerLegacy = require('../services/career/legacyAdapter'); // FLAG_CAREER
 // may this user manage this job's applicants? an admin, or the job's own poster. An imported job has no
 // poster: only an admin (before, job.postedBy.toString() crashed with a 500 on those)
 const ownsJob = (req, job) => req.user?.role === "admin" || (!!job?.postedBy && String(job.postedBy) === String(req.userId));
+// PUT /update never changes these (owner, archive state, counters, ids); employers also can't change the import fields
+const PROTECTED_JOB_FIELDS = new Set(["_id", "id", "__v", "postedBy", "archivedAt", "archivedReason", "archivedBy", "totalApplications", "views", "createdAt", "updatedAt", "embedding", "embeddingUpdatedAt"]);
+const ADMIN_ONLY_JOB_FIELDS = new Set(["isExternal", "externalUrl", "externalId", "source", "sourceFile", "importBatch", "batchExpiresAt", "lastFetchedAt", "featured"]);
+// the fields a duplicate copies (a new posting: new deadline, no counters, active)
+const DUPLICATE_FIELDS = ["title", "department", "category", "location", "locationType", "type", "salary", "salaryMin", "salaryMax", "currency", "email", "description", "requirements", "responsibilities", "benefits", "experienceLevel", "minExperience", "education", "skills", "urgent", "companyName", "companyLogo", "companyWebsite"];
 
 // Configure Multer for Job CSV & XLSX files
 const uploadJobCsvMulter = multer({
@@ -95,7 +101,7 @@ router.post("/add", authMiddleware, isAdminOrEmployee, async (req, res) => {
             experienceLevel: experienceLevel || "Mid Level",
             minExperience: minExperience || 0, education: education || "Bachelor's Degree",
             skills: sk.skills, active: active !== undefined ? active : true,
-            featured: featured || false, urgent: urgent || false,
+            featured: req.user?.role === "admin" ? !!featured : false, urgent: urgent || false, // featuring is tdc's call
             applicationDeadline: applicationDeadline || new Date(+new Date() + 30*24*60*60*1000),
             postedBy: req.userId,
             companyName: companyName || 'The Deft Crew',
@@ -171,7 +177,9 @@ router.post('/admin/import-csv', authMiddleware, isAdminOrEmployee, (req, res, n
       return res.status(400).json({ success: false, message: 'No file uploaded. Please attach a .csv or .xlsx file.' });
     }
 
-    const result = await importJobsFromFile(req.file.buffer, req.file.originalname);
+    // an employer's upload: the jobs are theirs (they manage them and get the applicants); tdc's upload: unowned
+    const owner = req.user?.role === "admin" ? null : { userId: req.userId, email: req.user?.email || "", companyName: req.user?.companyName || req.user?.brandName || "" };
+    const result = await importJobsFromFile(req.file.buffer, req.file.originalname, { owner });
 
     return res.status(200).json({
       success: true,
@@ -253,7 +261,9 @@ router.put("/update/:id", authMiddleware, isAdminOrEmployee, async (req, res) =>
         }
         if (job.archivedAt) return res.status(410).json({ message: "This job was deleted" });
 
+        // only the job's own fields: never its owner, archive state, counters or the import pipeline's fields
         const changes = { ...(req.body || {}) };
+        for (const k of Object.keys(changes)) if (k.startsWith("$") || PROTECTED_JOB_FIELDS.has(k) || (req.user?.role !== "admin" && ADMIN_ONLY_JOB_FIELDS.has(k))) delete changes[k];
         if (Object.prototype.hasOwnProperty.call(changes, "skills")) {
             const sk = jobSkills.cleanSkills(changes.skills);
             if (sk.errors.length) return badSkills(res, sk.errors);
@@ -289,6 +299,31 @@ router.patch("/toggle/:id", authMiddleware, isAdminOrEmployee, async (req, res) 
         
         res.json({ message: `Job ${job.active ? 'activated' : 'deactivated'}`, active: job.active });
     } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Duplicate a job: a new posting from one of your jobs (also a deleted or closed one), live for 30 days
+router.post("/duplicate/:id", authMiddleware, isAdminOrEmployee, async (req, res) => {
+    try {
+        if (!mongoose.Types.ObjectId.isValid(String(req.params.id))) return res.status(404).json({ message: "Job not found" });
+        const job = await Job.findById(req.params.id).lean();
+        if (!job || !ownsJob(req, job) || (req.user?.role !== "admin" && job.isExternal)) return res.status(404).json({ message: "Job not found" });
+        const copy = Object.fromEntries(DUPLICATE_FIELDS.filter((k) => job[k] !== undefined).map((k) => [k, job[k]]));
+        const newJob = new Job({
+            ...copy,
+            title: String(req.body?.title || job.title).slice(0, 200),
+            active: true, featured: false,
+            applicationDeadline: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+            postedBy: req.user?.role === "admin" ? job.postedBy || null : req.userId,
+            isExternal: false, source: "manual",
+        });
+        await newJob.save();
+        setImmediate(() => generateJobEmbedding(newJob._id.toString()));
+        require("../services/career/jobAlerts").onJobLive(newJob.toObject());
+        res.status(201).json({ message: "Job duplicated", data: newJob });
+    } catch (err) {
+        console.error(err);
         res.status(500).json({ error: err.message });
     }
 });
@@ -502,6 +537,10 @@ router.post("/apply/:jobId", authMiddleware, uploadResume.single('resume'), asyn
 
         const job = await Job.findOne({ _id: jobId, active: true });
         if (!job) return res.status(404).json({ message: "Job not found" });
+        // past its deadline: closed (the public list already hides it; the app shows "Closed")
+        if (job.applicationDeadline && new Date(job.applicationDeadline).getTime() < Date.now()) {
+            return res.status(410).json({ message: "This job is closed: its application deadline has passed", code: "JOB_CLOSED" });
+        }
 
         const existingApplication = await JobApplication.findOne({ jobId, userId: req.userId });
         if (existingApplication) {
