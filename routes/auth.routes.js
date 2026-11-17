@@ -25,6 +25,7 @@ const crypto = require("crypto");
 const { sendMail, logMailerStatus } = require("../utils/mailer");
 const OtpCode = require("../models/OtpCode");
 const accountDeletion = require("../services/accountDeletion");
+const loginGuard = require("../services/loginGuard"); // brute-force protection for /login
 
 logMailerStatus();
 
@@ -525,16 +526,21 @@ if (referrer) {
 // ==========================================
 router.post("/login", async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password } = req.body || {};
+
+    // brute-force protection (services/loginGuard.js): a locked email or address gets 429 before any check
+    const lock = loginGuard.check(req, email);
+    if (lock.locked) return loginGuard.reply(res, lock);
 
     // password is hidden by default; login needs it for the bcrypt check (the response strips it)
     const user = await User.findOne({ email }).select("+password").populate("university");
 
-    if (!user) return res.status(404).json({ message: "User not found" });
+    if (!user) { loginGuard.fail(req, email); return res.status(404).json({ message: "User not found" }); }
 
-    const match = await bcrypt.compare(password, user.password);
+    const match = await bcrypt.compare(String(password || ""), user.password);
 
-    if (!match) return res.status(401).json({ message: "Invalid password" });
+    if (!match) { loginGuard.fail(req, email); return res.status(401).json({ message: "Invalid password" }); }
+    loginGuard.success(req, email);
 
     // Signed up but never confirmed the email: send a code, app opens the code screen
     if (user.emailVerified === false) {
