@@ -16,6 +16,7 @@ const schema = new mongoose.Schema({
     kind: { type: String, default: "" },
     jobId: { type: ObjectId, ref: "Job", default: null },
     title: { type: String, default: "" },
+    company: { type: String, default: "" },
   },
   contentSnapshot: { type: Mixed, required: true },
   contentHash: { type: String, required: true },

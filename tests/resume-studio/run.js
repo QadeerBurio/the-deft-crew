@@ -297,6 +297,8 @@ const adversarial = JSON.stringify({
     { suggestionId: id("workExperience[0].description"), decision: "rejected" },
     { suggestionId: id("workExperience[0].achievements[1]"), decision: "edited", editedText: "Found and fixed 12 layout bugs across the dashboard", confirmTrue: false },
     { suggestionId: id("order.skills"), decision: "accepted" },
+    // v3: orders by relevance the model left out (entries / bullets / sections): kept as they were here
+    ...d.suggestions.filter((s) => s.decision === "pending" && s.kind === "reorder" && s.fieldPath !== "order.skills").map((s) => ({ suggestionId: s.suggestionId, decision: "rejected" })),
   ] } });
   check("decide the rest (reject the claims, edit honestly, accept the reorder)", r.status === 200 && r.json.data.unresolved === 0, r.text.slice(0, 200));
   d = r.json.data;

@@ -92,6 +92,8 @@ function buildVerifiedFacts(resume, confirmation = null) {
 
   // the text fields the model may reword (and the lists it may reorder)
   const editable = [];
+  // the headline under the name (may be empty: the tailoring can write one from the facts)
+  editable.push({ fieldPath: "personalInfo.title", text: content.personalInfo.title });
   if (content.professionalSummary.summary) editable.push({ fieldPath: "professionalSummary.summary", text: content.professionalSummary.summary });
   content.workExperience.forEach((w, i) => {
     if (w.description) editable.push({ fieldPath: `workExperience[${i}].description`, text: w.description });

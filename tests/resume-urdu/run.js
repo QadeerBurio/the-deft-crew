@@ -83,7 +83,7 @@ const urduWords = (s) => s.split(/\s+/).filter((w) => urdu.hasArabic(w));
   const buf = await renderer.render(content());
   const t = textOf(buf);
   const tl = textOf(buf, ["-layout"]);
-  check(`renderer version bumped (output changed): ${renderer.RENDERER_VERSION}`, renderer.RENDERER_VERSION === "ats-classic-2");
+  check(`renderer version bumped (output changed): ${renderer.RENDERER_VERSION}`, renderer.RENDERER_VERSION === "ats-classic-3");
   check("an Urdu-only sentence extracts exactly, in order", lines(tl).some((l) => l.includes(URDU_LINE)), lines(tl).filter((l) => urdu.hasArabic(l)).join(" / "));
   const allWords = urduWords(WORDS);
   const missing = allWords.filter((w) => !tl.includes(w.normalize("NFC")));

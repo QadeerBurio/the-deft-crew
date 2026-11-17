@@ -9,7 +9,7 @@ const { ObjectId, Mixed } = mongoose.Schema.Types;
 
 const suggestionSchema = new mongoose.Schema({
   suggestionId: { type: String, required: true },
-  kind: { type: String, enum: ["reword", "reorder"], required: true },
+  kind: { type: String, enum: ["reword", "reorder", "condense"], required: true },
   fieldPath: { type: String, required: true },
   original: { type: String, default: "" },
   proposed: { type: String, default: "" },
@@ -32,6 +32,7 @@ const schema = new mongoose.Schema({
     kind: { type: String, enum: ["tdc_job", "pasted"], required: true },
     jobId: { type: ObjectId, ref: "Job", default: null },
     title: { type: String, default: "" },
+    company: { type: String, default: "" },
     excerpt: { type: String, default: "" },
     descriptionHash: { type: String, default: "" },
   },

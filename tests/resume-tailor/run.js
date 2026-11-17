@@ -227,7 +227,7 @@ const count = (c) => ({ workExperience: c.workExperience.length, achievements: c
   ai.setCaller(async () => { throw Object.assign(new Error("the model's answer was cut off"), { code: "truncated" }); });
   const r2 = await ai.completeJson([], () => ({ ok: true, value: {} }));
   check("a reply cut off by the length limit (finish_reason length) counts as a failure", r2.ok === false && r2.error === "model_truncated");
-  check("at most 90 s of AI time: 2 attempts × 45 s, no hidden SDK retries", ai.ATTEMPT_MS === 45000 && /maxRetries: 0/.test(fs.readFileSync(path.join(SERVER, "services/resumeStudio/ai.js"), "utf8")));
+  check("at most 110 s of AI time: 2 attempts × 55 s, no hidden SDK retries", ai.ATTEMPT_MS === 55000 && /maxRetries: 0/.test(fs.readFileSync(path.join(SERVER, "services/resumeStudio/ai.js"), "utf8")));
 
   console.log("── 3. skills the resume shows in projects / experience go into the skills section");
   ai.setCaller(async () => JSON.stringify({ suggestions: [] }));
@@ -237,7 +237,9 @@ const count = (c) => ({ workExperience: c.workExperience.length, achievements: c
   check("React (shown as React.js in a job and a project) and Docker (a project) are added to skills, in the job's wording, with where they're shown", names.includes("React") && names.includes("Docker") && d.surfacedSkills.some((s) => s.skill === "React" && s.evidence.length) && d.surfacedSkills.some((s) => s.skill === "Docker"), JSON.stringify({ names, surfaced: d.surfacedSkills }));
   check("…the resume's own skills stay (JavaScript, Python)", names.includes("JavaScript") && names.includes("Python"));
   check("…TypeScript (nowhere in the resume) is NOT added", !names.includes("TypeScript") && d.missingSkills.includes("TypeScript"), JSON.stringify(d.missingSkills));
-  check("the % is computed on the tailored version: before 75% → after 75% (React and Docker were already counted from the projects, so moving them doesn't change it)", d.scores.before === 75 && d.scores.after === 75, JSON.stringify(d.scores));
+  // v3: the % is the skills matcher and the job's keywords averaged (the skills part stays 75: React and Docker were already counted from the projects)
+  const kwPct = (k) => Math.round((k.covered.length / k.total) * 100);
+  check("the % is computed on the tailored version: skills 75% averaged with the keywords covered, before → after", d.scores.before === Math.round((75 + kwPct(d.keywords.before)) / 2) && d.scores.after === Math.round((75 + kwPct(d.keywords.after)) / 2) && d.scores.after >= d.scores.before, JSON.stringify({ s: d.scores, k: d.keywords }));
   check("…'what changed' shows the skills before and after, side by side", d.changes.some((c) => c.section === "skills" && !/React/.test(c.before) && /React/.test(c.after)), JSON.stringify(d.changes));
 
   console.log("── 4. a skill the resume doesn't show: only after the student confirms it with a proof line");
@@ -257,7 +259,7 @@ const count = (c) => ({ workExperience: c.workExperience.length, achievements: c
   check("…a link in the proof: refused", r.status === 400 && r.json.error.code === "PROOF_INVALID");
   r = await call("POST", `${B}/drafts/${d.id}/skills`, { tok, body: { revision: d.revision, skill: "TypeScript", proof: "Campus Market's admin panel is written in TypeScript", confirmTrue: true } });
   const d2 = r.json?.data;
-  check("ticked + a proof line: TypeScript added to skills, the % recalculates 75% → 100%", r.status === 200 && d2.content.skills.some((x) => x.name === "TypeScript") && d2.scores.before === 75 && d2.scores.after === 100 && !d2.missingSkills.includes("TypeScript") && d2.confirmedSkills[0].proof.includes("Campus Market"), JSON.stringify(d2 && { scores: d2.scores, missing: d2.missingSkills }));
+  check("ticked + a proof line: TypeScript added to skills, the % recalculates (skills 75% → 100%)", r.status === 200 && d2.content.skills.some((x) => x.name === "TypeScript") && d2.scores.before === Math.round((75 + kwPct(d2.keywords.before)) / 2) && d2.scores.after === Math.round((100 + kwPct(d2.keywords.after)) / 2) && !d2.missingSkills.includes("TypeScript") && d2.confirmedSkills[0].proof.includes("Campus Market"), JSON.stringify(d2 && { scores: d2.scores, missing: d2.missingSkills }));
   r = await call("POST", `${B}/drafts/${d.id}/skills`, { tok, body: { revision: d.revision, skill: "TypeScript", proof: "x".repeat(20), confirmTrue: true } });
   check("…sent with an old revision: 409 (two devices can't overwrite each other)", r.status === 409);
 

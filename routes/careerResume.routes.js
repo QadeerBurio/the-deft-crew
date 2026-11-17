@@ -119,7 +119,7 @@ const jobView = (j) => ({ id: String(j._id), status: j.status, draftId: j.draftI
   ...(j.status === "failed" ? { errorMessage: FAILED_MESSAGE[j.errorCode] || "Tailoring didn't work. Nothing was saved. Please try again.", retryable: !["RESUME_NOT_FOUND", "SOURCE_UNVERIFIED"].includes(j.errorCode) } : {}), target: { kind: j.target?.kind, jobId: j.target?.jobId ? String(j.target.jobId) : null, title: j.target?.title || "" }, pollAfterMs: ["queued", "running"].includes(j.status) ? 1500 : null, createdAt: j.createdAt });
 
 router.post("/tailor-jobs", ...student, handle(async (req, res) => {
-  const { resumeId, jobId, jobTitle, jobDescription, idempotencyKey } = req.body || {};
+  const { resumeId, jobId, jobTitle, jobDescription, jobCompany, idempotencyKey } = req.body || {};
   const key = String(idempotencyKey || "").trim();
   if (!/^[A-Za-z0-9_-]{8,80}$/.test(key)) return fail(req, res, 400, "IDEMPOTENCY_KEY_REQUIRED", "idempotencyKey (8-80 letters, digits, - or _) is required");
   const existing = await CareerResumeTailorJob.findOne({ userId: req.userId, idempotencyKey: key }).lean();
@@ -134,17 +134,17 @@ router.post("/tailor-jobs", ...student, handle(async (req, res) => {
   let jobSnapshot;
   if (jobId) {
     if (!isId(jobId)) return fail(req, res, 400, "INVALID_JOB", "Invalid job");
-    const job = await Job.findById(jobId).select("title description requirements responsibilities skills active archivedAt").lean();
+    const job = await Job.findById(jobId).select("title companyName description requirements responsibilities skills active archivedAt").lean();
     if (!job || job.active === false || job.archivedAt) return fail(req, res, 404, "JOB_NOT_FOUND", "This job is no longer open");
     const text = [job.description, ...(job.requirements || []), ...(job.responsibilities || []), ...(job.skills || [])].filter((x) => typeof x === "string").join("\n");
-    jobSnapshot = await requirementsFor({ title: job.title || "", description: text });
-    target = { kind: "tdc_job", jobId: job._id, title: String(job.title || "").slice(0, 200), descriptionHash: jobSnapshot.hash };
+    jobSnapshot = await requirementsFor({ title: job.title || "", description: text, company: job.companyName || "" });
+    target = { kind: "tdc_job", jobId: job._id, title: String(job.title || "").slice(0, 200), company: jobSnapshot.company, descriptionHash: jobSnapshot.hash };
   } else {
     const text = String(jobDescription || "");
     if (text.trim().length < 80) return fail(req, res, 400, "JOB_DESCRIPTION_REQUIRED", "Paste the full job description (at least a few sentences)");
     if (text.length > injection.MAX_JOB_CHARS) return fail(req, res, 400, "JOB_DESCRIPTION_TOO_LONG", `Job descriptions can be up to ${injection.MAX_JOB_CHARS} characters`);
-    jobSnapshot = await requirementsFor({ title: String(jobTitle || "").slice(0, 200), description: text });
-    target = { kind: "pasted", jobId: null, title: String(jobTitle || "").replace(/\s+/g, " ").trim().slice(0, 200), descriptionHash: jobSnapshot.hash };
+    jobSnapshot = await requirementsFor({ title: String(jobTitle || "").slice(0, 200), description: text, company: String(jobCompany || "") });
+    target = { kind: "pasted", jobId: null, title: String(jobTitle || "").replace(/\s+/g, " ").trim().slice(0, 200), company: jobSnapshot.company, descriptionHash: jobSnapshot.hash };
   }
   delete jobSnapshot.cached;
 

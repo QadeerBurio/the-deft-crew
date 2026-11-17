@@ -3,9 +3,11 @@
 // ids the model made up are dropped; field paths must be ones we offered. A reply that isn't valid JSON
 // (or isn't an object) is "malformed": the caller retries once, then falls back to no suggestions.
 
-const TEXT_PATH = /^(professionalSummary\.summary|workExperience\[\d+\]\.description|workExperience\[\d+\]\.achievements\[\d+\]|projects\[\d+\]\.description|education\[\d+\]\.description)$/;
-const ORDER_PATH = /^order\.(skills|projects|workExperience\[\d+\]\.achievements)$/;
-const MAX_SUGGESTIONS = 60;
+const TEXT_PATH = /^(personalInfo\.title|professionalSummary\.summary|workExperience\[\d+\]\.description|workExperience\[\d+\]\.achievements\[\d+\]|projects\[\d+\]\.description|education\[\d+\]\.description)$/;
+const ORDER_PATH = /^order\.(skills|projects|workExperience|education|sections|workExperience\[\d+\]\.achievements)$/;
+// a less relevant entry kept as one line (its description and bullets become that line)
+const CONDENSE_PATH = /^condense\.(workExperience|projects)\[\d+\]$/;
+const MAX_SUGGESTIONS = 90;
 const str = (v, max) => (typeof v === "string" ? v.slice(0, max) : "");
 
 function stripFences(raw) {
@@ -40,15 +42,16 @@ function parseModelOutput(raw, ctx) {
     const fieldPath = str(s.fieldPath, 120);
     const isText = TEXT_PATH.test(fieldPath) && ctx.editablePaths.has(fieldPath);
     const isOrder = ORDER_PATH.test(fieldPath);
-    if (!isText && !isOrder) {
+    const isCondense = CONDENSE_PATH.test(fieldPath);
+    if (!isText && !isOrder && !isCondense) {
       warnings.push(`ignored a change to a field that can't be tailored (${fieldPath || "none"})`);
       continue;
     }
     suggestions.push({
-      kind: isOrder ? "reorder" : "reword",
+      kind: isOrder ? "reorder" : isCondense ? "condense" : "reword",
       fieldPath,
       original: str(s.original, 4000),
-      proposed: str(s.proposed, 1500),
+      proposed: typeof s.proposed === "string" ? s.proposed.slice(0, 1500) : Array.isArray(s.proposed) ? JSON.stringify(s.proposed).slice(0, 1500) : "",
       reason: str(s.reason, 300),
       sourceFactIds: knownFacts(s.sourceFactIds),
     });
@@ -63,4 +66,4 @@ function parseModelOutput(raw, ctx) {
   return { ok: true, value: { suggestions, matchedRequirements, missingRequirements, warnings } };
 }
 
-module.exports = { parseModelOutput, TEXT_PATH, ORDER_PATH, stripFences };
+module.exports = { parseModelOutput, TEXT_PATH, ORDER_PATH, CONDENSE_PATH, stripFences };

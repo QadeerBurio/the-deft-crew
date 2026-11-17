@@ -13,6 +13,7 @@ const schema = new mongoose.Schema({
     kind: { type: String, enum: ["tdc_job", "pasted"], required: true },
     jobId: { type: ObjectId, ref: "Job", default: null },   // tdc_job only
     title: { type: String, default: "" },
+    company: { type: String, default: "" },
     descriptionHash: { type: String, default: "" },
   },
   // the job's requirements, read once when the request is made (jobRequirements.requirementsFor):
