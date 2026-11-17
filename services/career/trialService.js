@@ -1,7 +1,7 @@
 // services/career/trialService.js
 // First Hire Free (FLAG_EMPLOYER_FIRST_HIRE_FREE): one fee-waived verified hire per verified company group.
-//   1. The employer submits company details (name, NTN or SECP number, business e-mail domain, website).
-//      Free-mail domains are refused. Same registration number, domain or website as another account =
+//   1. The employer submits company details (name, NTN or SECP number, and proof: the business e-mail domain,
+//      the website and/or an uploaded document; at least one). Free-mail domains are refused. Same registration number, domain or website as another account =
 //      the same company group -> duplicate_review. An admin approves, rejects or marks a duplicate.
 //   2. Approved: the employer activates the trial (idempotent; one per company group, shared by its
 //      approved accounts).
@@ -26,6 +26,8 @@ const CareerApplicationEvent = require("../../models/CareerApplicationEvent");
 const CareerInterview = require("../../models/CareerInterview");
 const CareerOutcome = require("../../models/CareerOutcome");
 const EmployerCompanyVerification = require("../../models/EmployerCompanyVerification");
+const EmployerVerificationDocument = require("../../models/EmployerVerificationDocument");
+const MAX_DOCUMENTS = 5;
 const EmployerHiringTrial = require("../../models/EmployerHiringTrial");
 const EmployerHiringBillingEvent = require("../../models/EmployerHiringBillingEvent");
 const CareerAdminAudit = require("../../models/CareerAdminAudit");
@@ -68,46 +70,67 @@ function cleanDetails(body) {
   const registrationType = body?.registrationType === "secp" ? "secp" : "ntn";
   const ntnOrSecp = normalizeRegistration(body?.ntnOrSecp);
   if (!ntnOrSecp) throw new CareerError(400, "INVALID_REGISTRATION", "Enter the NTN (e.g. 1234567-8) or the SECP incorporation number", { field: "ntnOrSecp" });
+  // both optional (a document can be the proof instead); when given, they must be the company's own
   const businessEmailDomain = hostOf(String(body?.businessEmailDomain || "").replace(/^.*@/, ""));
-  if (!validHost(businessEmailDomain)) throw new CareerError(400, "INVALID_DOMAIN", "Enter your company's e-mail domain, e.g. yourcompany.pk", { field: "businessEmailDomain" });
-  if (freeMail(businessEmailDomain)) throw new CareerError(400, "FREE_MAIL_DOMAIN", "Use your company's own e-mail domain, not a free e-mail service (Gmail, Yahoo, Outlook, Hotmail ...)", { field: "businessEmailDomain" });
+  if (businessEmailDomain && !validHost(businessEmailDomain)) throw new CareerError(400, "INVALID_DOMAIN", "Enter your company's e-mail domain, e.g. yourcompany.pk, or leave it empty", { field: "businessEmailDomain" });
+  if (businessEmailDomain && freeMail(businessEmailDomain)) throw new CareerError(400, "FREE_MAIL_DOMAIN", "Use your company's own e-mail domain, not a free e-mail service (Gmail, Yahoo, Outlook, Hotmail ...). No own domain? Leave it empty and upload a document instead.", { field: "businessEmailDomain" });
   const website = hostOf(body?.website);
-  if (!validHost(website)) throw new CareerError(400, "INVALID_WEBSITE", "Enter the company's website, e.g. yourcompany.pk", { field: "website" });
-  if (freeMail(website)) throw new CareerError(400, "INVALID_WEBSITE", "Enter the company's own website", { field: "website" });
+  if (website && !validHost(website)) throw new CareerError(400, "INVALID_WEBSITE", "Enter the company's website, e.g. yourcompany.pk, or leave it empty", { field: "website" });
+  if (website && freeMail(website)) throw new CareerError(400, "INVALID_WEBSITE", "Enter the company's own website", { field: "website" });
   return { companyName, registrationType, ntnOrSecp, businessEmailDomain, website };
 }
 
 const endsWithDomain = (host, domain) => host === domain || host.endsWith(`.${domain}`);
 
-/** Submit (or update before approval) the employer's company details */
+/**
+ * Submit (or update before approval, or send again after "needs info" / a rejection) the employer's company details.
+ * Proof: at least one of the company's own e-mail domain, its website, or an uploaded document (body.documentIds:
+ * the employer's own uploads; left out = keep the attached ones).
+ */
 async function submitVerification(employerId, body, now = new Date()) {
   const d = cleanDetails(body);
   const existing = await EmployerCompanyVerification.findOne({ employerUserId: employerId }).lean();
+  let documents = existing?.documents || [];
+  if (Array.isArray(body?.documentIds)) {
+    const wanted = [...new Set(body.documentIds.map(String))];
+    if (wanted.length > MAX_DOCUMENTS) throw new CareerError(400, "TOO_MANY_DOCUMENTS", `Attach at most ${MAX_DOCUMENTS} documents`, { field: "documents" });
+    if (!wanted.every(isId)) throw new CareerError(400, "INVALID_DOCUMENT", "A document isn't yours or doesn't exist", { field: "documents" });
+    const docs = wanted.length ? await EmployerVerificationDocument.find({ _id: { $in: wanted }, employerUserId: employerId }).lean() : [];
+    if (docs.length !== wanted.length) throw new CareerError(400, "INVALID_DOCUMENT", "A document isn't yours or doesn't exist", { field: "documents" });
+    const byId = new Map(docs.map((x) => [String(x._id), x]));
+    documents = wanted.map((id) => byId.get(id)).map((x) => ({ documentId: x._id, kind: x.kind, fileName: x.fileName, mimeType: x.mimeType, size: x.size, uploadedAt: x.createdAt }));
+  }
+  if (!d.businessEmailDomain && !d.website && !documents.length) {
+    throw new CareerError(400, "PROOF_REQUIRED", "Add at least one: your company's own e-mail domain, its website, or a document (NTN or SECP certificate, business registration or letterhead)", { field: "proof" });
+  }
+  const sameDocs = (x = [], y = []) => x.length === y.length && x.every((v, i) => String(v.documentId) === String(y[i]?.documentId));
+  const sameDetails = (v) => ["companyName", "registrationType", "ntnOrSecp", "businessEmailDomain", "website"].every((k) => (v[k] || "") === (d[k] || "")) && sameDocs(v.documents || [], documents);
   if (existing?.status === "approved") {
-    const unchanged = ["companyName", "ntnOrSecp", "businessEmailDomain", "website"].every((k) => existing[k] === d[k]);
-    if (unchanged) return { verification: existing, created: false };
+    if (sameDetails(existing)) return { verification: existing, created: false };
     throw new CareerError(409, "ALREADY_APPROVED", "Your company is verified; contact tdc to change its details");
   }
-  if (existing && ["companyName", "registrationType", "ntnOrSecp", "businessEmailDomain", "website"].every((k) => existing[k] === d[k]) && existing.status !== "rejected") {
-    return { verification: existing, created: false }; // the same details again
+  // the same details again while tdc is checking them: nothing new (after a rejection or "needs info" it's sent again)
+  if (existing && sameDetails(existing) && ["pending", "duplicate_review"].includes(existing.status)) {
+    return { verification: existing, created: false };
   }
   const me = await User.findById(employerId).select("email").lean();
   const signInDomain = hostOf(String(me?.email || "").split("@")[1] || "");
-  // another account of the same company? same registration number, e-mail domain or website
+  // another account of the same company? same registration number, e-mail domain or website (only what was given)
+  const match = [{ ntnOrSecp: d.ntnOrSecp }, ...(d.businessEmailDomain ? [{ businessEmailDomain: d.businessEmailDomain }] : []), ...(d.website ? [{ website: d.website }] : [])];
   const others = await EmployerCompanyVerification.find({
     employerUserId: { $ne: employerId },
-    status: { $in: ["pending", "approved", "duplicate_review"] },
-    $or: [{ ntnOrSecp: d.ntnOrSecp }, { businessEmailDomain: d.businessEmailDomain }, { website: d.website }],
+    status: { $in: ["pending", "approved", "duplicate_review", "needs_info"] },
+    $or: match,
   }).select("_id employerUserId companyGroupKey ntnOrSecp businessEmailDomain website status").lean();
   const duplicateOf = others.map((o) => ({
     verificationId: o._id, employerUserId: o.employerUserId,
-    matchedOn: [o.ntnOrSecp === d.ntnOrSecp && "registration number", o.businessEmailDomain === d.businessEmailDomain && "e-mail domain", o.website === d.website && "website"].filter(Boolean),
+    matchedOn: [o.ntnOrSecp === d.ntnOrSecp && "registration number", !!d.businessEmailDomain && o.businessEmailDomain === d.businessEmailDomain && "e-mail domain", !!d.website && o.website === d.website && "website"].filter(Boolean),
   }));
   const groupFrom = others.find((o) => o.status === "approved") || others[0];
   const fields = {
-    ...d, companyGroupKey: groupFrom ? groupFrom.companyGroupKey : `reg:${d.ntnOrSecp}`,
-    signInEmailMatchesDomain: !!signInDomain && endsWithDomain(signInDomain, d.businessEmailDomain),
-    websiteMatchesDomain: endsWithDomain(d.website, d.businessEmailDomain) || endsWithDomain(d.businessEmailDomain, d.website),
+    ...d, documents, companyGroupKey: groupFrom ? groupFrom.companyGroupKey : `reg:${d.ntnOrSecp}`,
+    signInEmailMatchesDomain: !!signInDomain && !!d.businessEmailDomain && endsWithDomain(signInDomain, d.businessEmailDomain),
+    websiteMatchesDomain: !!d.website && !!d.businessEmailDomain && (endsWithDomain(d.website, d.businessEmailDomain) || endsWithDomain(d.businessEmailDomain, d.website)),
     status: duplicateOf.length ? "duplicate_review" : "pending", duplicateOf, reviewedBy: null, reviewedAt: null, reason: "",
   };
   const entry = { action: existing ? "resubmitted" : "submitted", status: fields.status, by: employerId, byRole: "employer", reason: duplicateOf.length ? `matches another account on ${[...new Set(duplicateOf.flatMap((x) => x.matchedOn))].join(", ")}` : "", at: now };
@@ -117,7 +140,7 @@ async function submitVerification(employerId, body, now = new Date()) {
       { $set: fields, $push: { history: entry } },
       { upsert: true, returnDocument: "after" }
     ).lean();
-    recordSafe("career.company_verification_submitted", `${v._id}:${v.history.length}`, { actor: employerId, subject: { kind: "EmployerCompanyVerification", id: v._id }, data: { status: v.status } });
+    recordSafe("career.company_verification_submitted", `${v._id}:${v.history.length}`, { actor: employerId, subject: { kind: "EmployerCompanyVerification", id: v._id }, data: { status: v.status, documents: documents.length } });
     return { verification: v, created: !existing };
   } catch (err) {
     if (err?.code === 11000) return { verification: await EmployerCompanyVerification.findOne({ employerUserId: employerId }).lean(), created: false };
@@ -152,7 +175,7 @@ async function activate(employerId, now = new Date()) {
 
 const remainingOf = (t) => (t && t.eligibilityStatus === "active" ? Math.max(0, t.entitlementCount - t.consumedCount) : 0);
 function nextActionOf(v, t) {
-  if (!v || v.status === "rejected") return { action: "verify_company", label: v ? "fix your company details" : "verify your company" };
+  if (!v || v.status === "rejected" || v.status === "needs_info") return { action: "verify_company", label: !v ? "verify your company" : v.status === "needs_info" ? "tdc needs more information about your company" : "fix your company details" };
   if (v.status !== "approved") return { action: "wait_for_review", label: "tdc is checking your company details" };
   if (!t) return { action: "activate", label: "activate your free hire" };
   if (t.eligibilityStatus === "active") return { action: "post_job", label: "post a job and hire through tdc" };
@@ -380,13 +403,13 @@ const needReason = (reason) => {
   return r.slice(0, 500);
 };
 
-/** approve | reject | mark_duplicate (reason required). approve with separateGroup: its own company group */
+/** approve | reject | request_info | mark_duplicate (reason required, shown to the employer). approve with separateGroup: its own company group */
 async function reviewVerification(adminId, id, { action, reason, separateGroup = false }, now = new Date()) {
   const r = needReason(reason);
-  if (!["approve", "reject", "mark_duplicate"].includes(action)) throw new CareerError(400, "INVALID_ACTION", "action must be approve, reject or mark_duplicate");
+  if (!["approve", "reject", "request_info", "mark_duplicate"].includes(action)) throw new CareerError(400, "INVALID_ACTION", "action must be approve, reject, request_info or mark_duplicate");
   const v = isId(id) ? await EmployerCompanyVerification.findById(id).lean() : null;
   if (!v) throw new CareerError(404, "NOT_FOUND", "Verification not found");
-  const status = action === "approve" ? "approved" : action === "reject" ? "rejected" : "duplicate_review";
+  const status = action === "approve" ? "approved" : action === "reject" ? "rejected" : action === "request_info" ? "needs_info" : "duplicate_review";
   const set = { status, reviewedBy: adminId, reviewedAt: now, reason: r };
   if (action === "approve" && separateGroup) {
     const sameReg = await EmployerCompanyVerification.exists({ _id: { $ne: v._id }, ntnOrSecp: v.ntnOrSecp, status: "approved" });
@@ -437,5 +460,5 @@ async function reviewTrial(adminId, id, { action, reason }, now = new Date()) {
 
 module.exports = {
   POLICY_VERSION, POLICY_TEXT, RESTORE_DAYS, flagOn, pilotConfigured, cleanDetails, normalizeRegistration, freeMail, hostOf,
-  submitVerification, activate, viewFor, summaryFor, onVerifiedHire, onHireRevoked, onHireRestored, reconcile, reviewVerification, reviewTrial, trialOfGroup,
+  MAX_DOCUMENTS, submitVerification, activate, viewFor, summaryFor, onVerifiedHire, onHireRevoked, onHireRestored, reconcile, reviewVerification, reviewTrial, trialOfGroup,
 };
