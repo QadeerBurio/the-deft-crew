@@ -252,6 +252,7 @@ app.post("/webhooks/app/scopes_update", async (req, res) => {
 // ---------------- ROUTES ----------------
 // IMPORTANT: Register webhook routes FIRST
 app.use("/api", featureAccess.waitReady); // until admin feature access has loaded once (at most 5 s after start)
+app.use("/api", require("./middleware/rejectGuestWrites")); // signed-out callers can't write (an allowlist of public routes: login, sign-up, webhooks ...)
 app.use("/api/webhooks/woocommerce", require("./routes/storeWebhook.routes")); // connected WooCommerce stores
 app.use("/api/webhooks", require("./routes/webhook.routes"));
 
