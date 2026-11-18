@@ -647,7 +647,7 @@ router.get("/claimed-users", auth, async (req, res) => {
     const offers = await Offer.find({ brand: req.userId })
       .populate({
         path: "claimedBy",
-        select: "name email rollNo university",
+        select: "name email rollNo university universityName",
         populate: {
           path: "university",
           select: "name",
@@ -667,7 +667,7 @@ router.get("/claimed-users", auth, async (req, res) => {
           name: student.name || 'Student',
           email: student.email || '',
           rollNo: student.rollNo || "N/A",
-          universityName: student.university?.name || "N/A",
+          universityName: student.university?.name || student.universityName || "N/A",
           offerId: offer._id.toString(),
           offerTitle: offer.title || 'Offer',
           discountPercentage: offer.discountPercentage || 0,
@@ -699,7 +699,7 @@ router.get("/savings-report", auth, async (req, res) => {
       name: r.student?.name || "N/A",
       rollNo: r.student?.rollNo || "N/A",
       email: r.student?.email || "",
-      university: r.student?.university?.name || "N/A",
+      university: r.student?.university?.name || r.student?.universityName || "N/A",
       brand: r.offerTitle || 'Brand',
       bill: r.bill,
       saved: r.saved,
@@ -836,7 +836,7 @@ router.post("/scan-verify", auth, async (req, res) => {
     if (!offerId || !mongoose.Types.ObjectId.isValid(String(offerId))) {
       return res.status(400).json({ success: false, message: "Missing required student information" });
     }
-    const me = await User.findById(req.userId).select("name rollNo email university role").populate("university", "name").lean();
+    const me = await User.findById(req.userId).select("name rollNo email university universityName role").populate("university", "name").lean();
     if (!me || me.role !== "student") {
       return res.status(403).json({ success: false, message: "Only students can scan a discount" });
     }
@@ -879,7 +879,7 @@ router.post("/scan-verify", auth, async (req, res) => {
     if (typeof university === 'string') {
       universityName = university;
     } else if (university && typeof university === 'object') {
-      universityName = university.name || String(university._id || '') || 'University';
+      universityName = university.name || me.universityName || 'University';
     } else {
       universityName = 'University';
     }
@@ -1359,7 +1359,7 @@ router.get("/brand/:brandId/redemptions", auth, async (req, res) => {
       rollNo: r.student?.rollNo || "N/A",
       email: r.student?.email || "",
       phone: r.student?.phone || "",
-      university: r.student?.university?.name || "N/A",
+      university: r.student?.university?.name || r.student?.universityName || "N/A",
       offerTitle: r.offerTitle || "Offer",
       offerImage: r.offerImage,
       discountPercentage: r.discountPercentage || 0,

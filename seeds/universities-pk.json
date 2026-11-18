@@ -1,0 +1,4124 @@
+{
+ "source": "Higher Education Commission of Pakistan, Recognised Universities & Degree Awarding Institutions",
+ "sourceUrl": "https://www.hec.gov.pk/english/universities/pages/recognised.aspx",
+ "fetchedAt": "2026-11-18",
+ "notes": [
+  "Names, city, province, sector, discipline and chartering body are HEC's, as published.",
+  "Short names and aliases are tdc's (common names students type, and the old signup / seed names).",
+  "Two HEC entries share the name 'University of Engineering & Technology': the city is added to each name.",
+  "cityOverrides: where HEC's city is clearly not the main campus.",
+  "Global Institute, Lahore is seeded hidden (HEC: NOC suspended)."
+ ],
+ "cityOverrides": [
+  {
+   "name": "Ghulam Ishaq Khan Institute of Engineering Sciences & Technology",
+   "hecCity": "Abbottabad",
+   "city": "Topi"
+  },
+  {
+   "name": "Karachi Metropolitan University, Karachi",
+   "hecCity": "Abbottabad",
+   "city": "Karachi"
+  },
+  {
+   "name": "Mehran University of Engineering & Technology",
+   "hecCity": "Khairpur",
+   "city": "Jamshoro"
+  },
+  {
+   "name": "University of Engineering & Technology, Taxila",
+   "hecCity": "Rawalpindi",
+   "city": "Taxila"
+  }
+ ],
+ "count": 285,
+ "universities": [
+  {
+   "name": "Abasyn University",
+   "shortName": "",
+   "aliases": [],
+   "city": "Peshawar",
+   "province": "Khyber Pakhtunkhwa",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/KPK/Abasyn-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Khyber Pakhtunkhwa"
+   }
+  },
+  {
+   "name": "Abbottabad University of Science and Technology (AUST)",
+   "shortName": "",
+   "aliases": [],
+   "city": "Abbottabad",
+   "province": "Khyber Pakhtunkhwa",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/KPK/AUST.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Khyber Pakhtunkhwa"
+   }
+  },
+  {
+   "name": "Abdul Wali Khan University",
+   "shortName": "",
+   "aliases": [],
+   "city": "Mardan",
+   "province": "Khyber Pakhtunkhwa",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/KPK/Abdul-Wali-Khan-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Khyber Pakhtunkhwa"
+   }
+  },
+  {
+   "name": "Adam Institute of Social & Management Science (AISMS), Karachi",
+   "shortName": "",
+   "aliases": [],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Adam-Institute-of-Social-&-Management-Science-(AISMS),-Karachi.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Aga Khan University",
+   "shortName": "AKU",
+   "aliases": [],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Aga-Khan-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Pakistan"
+   }
+  },
+  {
+   "name": "Air University",
+   "shortName": "AU",
+   "aliases": [
+    "Air University Islamabad"
+   ],
+   "city": "Islamabad",
+   "province": "Islamabad Capital Territory",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Islamabad/Air-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Pakistan"
+   }
+  },
+  {
+   "name": "Al-Ghazali University",
+   "shortName": "",
+   "aliases": [],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Al-Ghazali University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Al-Hamd Islamic University",
+   "shortName": "",
+   "aliases": [],
+   "city": "Quetta",
+   "province": "Balochistan",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Balochistan/Al-Hamd-Islamic-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Balochistan"
+   }
+  },
+  {
+   "name": "Al-Karam International Institute, Bhera",
+   "shortName": "",
+   "aliases": [],
+   "city": "Bhera",
+   "province": "Punjab",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Al-Karam-International-Institute,-Bhera.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Pakistan"
+   }
+  },
+  {
+   "name": "Al-Kawthar University, Karachi",
+   "shortName": "",
+   "aliases": [],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Al-Kawthar-University,-Karachi.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Al-Khair University",
+   "shortName": "",
+   "aliases": [],
+   "city": "Bhimber",
+   "province": "Azad Jammu & Kashmir",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/AJK/Al-Khair-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of AJK"
+   }
+  },
+  {
+   "name": "Ali Bin Usman Institute, Multan",
+   "shortName": "",
+   "aliases": [],
+   "city": "Multan",
+   "province": "Punjab",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Ali-Bin-Usman-Institute-Multan.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "Ali Institute of Education",
+   "shortName": "",
+   "aliases": [],
+   "city": "Lahore",
+   "province": "Punjab",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Ali-Institute-of-Education.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "Allama Iqbal Open University",
+   "shortName": "AIOU",
+   "aliases": [],
+   "city": "Islamabad",
+   "province": "Islamabad Capital Territory",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Islamabad/Allama-Iqbal-Open-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Pakistan"
+   }
+  },
+  {
+   "name": "Aror University of Art, Architecture, Design and Heritage, Sukkur",
+   "shortName": "",
+   "aliases": [],
+   "city": "Sukkur",
+   "province": "Sindh",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Islamabad/Aror-University-of-Art,-Arch.aspx",
+    "discipline": "Arts & Design",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Baba Guru Nanak University, Nankana Sahib",
+   "shortName": "",
+   "aliases": [],
+   "city": "Nankana Sahib",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Baba-Guru-Nanak-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "Bacha Khan University",
+   "shortName": "",
+   "aliases": [],
+   "city": "Charsada",
+   "province": "Khyber Pakhtunkhwa",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/KPK/Bacha-Khan-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Khyber Pakhtunkhwa"
+   }
+  },
+  {
+   "name": "Bahauddin Zakariya University",
+   "shortName": "BZU",
+   "aliases": [],
+   "city": "Multan",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Bahauddin-Zakariya-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "Bahria University",
+   "shortName": "BU",
+   "aliases": [
+    "Bahria University Karachi",
+    "Bahria University Islamabad",
+    "Bahria University Lahore",
+    "BUKC"
+   ],
+   "city": "Islamabad",
+   "province": "Islamabad Capital Territory",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Islamabad/Bahria-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Pakistan"
+   }
+  },
+  {
+   "name": "Balochistan University of Engineering & Technology",
+   "shortName": "",
+   "aliases": [],
+   "city": "Khuzdar",
+   "province": "Balochistan",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Balochistan/Balochistan-University-of-Engineering-and-Technology.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Balochistan"
+   }
+  },
+  {
+   "name": "Balochistan University of Information Technology, Engineering & Management Sciences (BUITEMS)",
+   "shortName": "BUITEMS",
+   "aliases": [],
+   "city": "Quetta",
+   "province": "Balochistan",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Balochistan/Balochistan-University-of-Information-Technology--Management-Sciences.aspx",
+    "discipline": "Engineering & Technology",
+    "charteredBy": "Government of Balochistan"
+   }
+  },
+  {
+   "name": "Baqai Medical University",
+   "shortName": "",
+   "aliases": [],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Baqai-Medical-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Beaconhouse National University",
+   "shortName": "BNU",
+   "aliases": [],
+   "city": "Lahore",
+   "province": "Punjab",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Beaconhouse-National-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "Begum Nustrat Bhutto Women University, Sukkur",
+   "shortName": "",
+   "aliases": [],
+   "city": "Sukkur",
+   "province": "Sindh",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Begum-Nustrat-Bhutto-Women-University-Sukkur.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Benazir Bhutto Shaheed University Lyari",
+   "shortName": "",
+   "aliases": [],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Benazir-Bhutto-Shaheed-University-Lyari.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Benazir Bhutto Shaheed University of Technology & Skill Development, Khairpur Mirs",
+   "shortName": "",
+   "aliases": [],
+   "city": "Khairpur",
+   "province": "Sindh",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Benazir-Bhutto-Shaheed-University-of-Technology--Skill-Development,-Khairpur-Mirs.aspx",
+    "discipline": "Engineering & Technology",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Brains Institute Peshawar",
+   "shortName": "",
+   "aliases": [],
+   "city": "Peshawar",
+   "province": "Khyber Pakhtunkhwa",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/KPK/Brains-Institute-Peshawar.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Khyber Pakhtunkhwa"
+   }
+  },
+  {
+   "name": "Capital University of Science & Technology",
+   "shortName": "CUST",
+   "aliases": [],
+   "city": "Islamabad",
+   "province": "Islamabad Capital Territory",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Islamabad/Capital-University-of-Science-and-Technology.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Pakistan"
+   }
+  },
+  {
+   "name": "CECOS University of Information Technology & Emerging Sciences",
+   "shortName": "",
+   "aliases": [],
+   "city": "Peshawar",
+   "province": "Khyber Pakhtunkhwa",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/KPK/CECOS-University-of-Information-Technology-and-Emerging-Sciences.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Khyber Pakhtunkhwa"
+   }
+  },
+  {
+   "name": "Cholistan University of Veterinary and Animal Sciences, Bahawalpur",
+   "shortName": "",
+   "aliases": [],
+   "city": "Bahawalpur",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Cholistan-University-of-Veterinary-and-Animal-Sciences,-Bahawalpur.aspx",
+    "discipline": "Agriculture & Veterinary",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "City University of Science and Information Technology",
+   "shortName": "",
+   "aliases": [],
+   "city": "Peshawar",
+   "province": "Khyber Pakhtunkhwa",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/KPK/City-University-of-Science-and-Information-Technology.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Khyber Pakhtunkhwa"
+   }
+  },
+  {
+   "name": "Commecs Institute of Business & Emerging Sciences",
+   "shortName": "",
+   "aliases": [],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Commecs-Institute-of-Business--Emerging-Sciences.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "COMSATS University, Islamabad",
+   "shortName": "CUI",
+   "aliases": [
+    "COMSATS",
+    "COMSATS University",
+    "COMSATS University Lahore Campus",
+    "COMSATS University Islamabad",
+    "CIIT"
+   ],
+   "city": "Islamabad",
+   "province": "Islamabad Capital Territory",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Islamabad/COMSATS.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Pakistan"
+   }
+  },
+  {
+   "name": "Dadabhoy Institute of Higher Education",
+   "shortName": "",
+   "aliases": [],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Dadabhoy-Institute-of-Higher-Education.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Dar-ul-Madina International University, Islamabad",
+   "shortName": "",
+   "aliases": [],
+   "city": "Islamabad",
+   "province": "Islamabad Capital Territory",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Islamabad/Dar-ul-Madina-International-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Pakistan"
+   }
+  },
+  {
+   "name": "Dawood University of Engineering & Technology",
+   "shortName": "DUET",
+   "aliases": [
+    "Dawood University"
+   ],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Dawood-University-of-Engineering--Technology.aspx",
+    "discipline": "Engineering & Technology",
+    "charteredBy": "Government of Pakistan"
+   }
+  },
+  {
+   "name": "Denning Institute of Technology and Entrepreneurship, Karachi",
+   "shortName": "",
+   "aliases": [],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Denning-Institute-of-Technology-and-Entrepreneurship,-Karachi.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "DHA Suffa University",
+   "shortName": "DSU",
+   "aliases": [],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/DHA-Suffa-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "DOW University of Health Sciences",
+   "shortName": "DUHS",
+   "aliases": [
+    "Dow University",
+    "Dow Medical College"
+   ],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/DOW-University-of-Health-Sciences.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Emaan Institute of Management & Sciences, Karachi",
+   "shortName": "",
+   "aliases": [],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Eman-Institute-of-Management-and-Sciences-Karachi.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Emerson University, Multan",
+   "shortName": "",
+   "aliases": [],
+   "city": "Multan",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Emerson-University-Multan.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "Faisalabad Medical University, Faisalabad",
+   "shortName": "",
+   "aliases": [],
+   "city": "Faisalabad",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Faisalabad-Medical-Unviersity,-Faisalabad.aspx",
+    "discipline": "Medical",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "Fatima Jinnah Medical University, Lahore",
+   "shortName": "",
+   "aliases": [],
+   "city": "Lahore",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Fatima-Jinnah-medical-University,-Lahore.aspx",
+    "discipline": "Medical",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "Fatima Jinnah Women University, Rawalpindi",
+   "shortName": "",
+   "aliases": [],
+   "city": "Rawalpindi",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Fatima-Jinnah-Women-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "Federal Urdu University of Arts, Sciences & Technology",
+   "shortName": "",
+   "aliases": [],
+   "city": "Islamabad",
+   "province": "Islamabad Capital Territory",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Islamabad/Federal-Urdu-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Pakistan"
+   }
+  },
+  {
+   "name": "Forman Christian College",
+   "shortName": "FCCU",
+   "aliases": [
+    "FCC",
+    "Forman Christian College University"
+   ],
+   "city": "Lahore",
+   "province": "Punjab",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Forman-Christian-College.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "Foundation University",
+   "shortName": "",
+   "aliases": [],
+   "city": "Islamabad",
+   "province": "Islamabad Capital Territory",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Islamabad/Foundation-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Pakistan"
+   }
+  },
+  {
+   "name": "Gambat Institute of Medical Sciences",
+   "shortName": "",
+   "aliases": [],
+   "city": "Khairpur",
+   "province": "Sindh",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Gambat-Institute-of-Medical-Sciences.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Gandhara University",
+   "shortName": "",
+   "aliases": [],
+   "city": "Peshawar",
+   "province": "Khyber Pakhtunkhwa",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/KPK/Gandhara-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Khyber Pakhtunkhwa"
+   }
+  },
+  {
+   "name": "Ghazi National Institute of Engineering and Sciences, Dera Ghazi Khan",
+   "shortName": "",
+   "aliases": [],
+   "city": "Dera Ghazi Khan",
+   "province": "Punjab",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/GNIES-DGKHAN.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "Ghazi University, Dera Ghazi Khan",
+   "shortName": "",
+   "aliases": [],
+   "city": "Dera Ghazi Khan",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Ghazi-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "Ghulam Ishaq Khan Institute of Engineering Sciences & Technology",
+   "shortName": "GIKI",
+   "aliases": [
+    "GIK"
+   ],
+   "city": "Topi",
+   "province": "Khyber Pakhtunkhwa",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/KPK/Ghulam-Ishaq-Khan-Institute-of-Engineering-Sciences--Technology.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Khyber Pakhtunkhwa"
+   }
+  },
+  {
+   "name": "GIFT University",
+   "shortName": "",
+   "aliases": [],
+   "city": "Gujranwala",
+   "province": "Punjab",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/GIFT-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "Global Institute, Lahore",
+   "shortName": "",
+   "aliases": [],
+   "city": "Lahore",
+   "province": "Punjab",
+   "sector": "Private",
+   "status": "hidden",
+   "note": "HEC: NOC suspended, admissions stopped from Fall 2016",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Global-Institute.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "Gomal University",
+   "shortName": "",
+   "aliases": [],
+   "city": "Dera Ismail Khan",
+   "province": "Khyber Pakhtunkhwa",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/KPK/Gomal-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Khyber Pakhtunkhwa"
+   }
+  },
+  {
+   "name": "Government College for Women University, Sialkot",
+   "shortName": "",
+   "aliases": [],
+   "city": "Sialkot",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Government-College-for-Women-University,-Sialkot.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "Government College University, Faisalabad",
+   "shortName": "GCUF",
+   "aliases": [],
+   "city": "Faisalabad",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Government-College-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "Government College University, Hyderabad",
+   "shortName": "",
+   "aliases": [],
+   "city": "Hyderabad",
+   "province": "Sindh",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Government-College-University,-Hyderabad.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Government College University, Lahore",
+   "shortName": "GCU",
+   "aliases": [
+    "GCU Lahore",
+    "GC University",
+    "Government College University Lahore"
+   ],
+   "city": "Lahore",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Government-College-University,-Lahore.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "Government College Women University, Faisalabad",
+   "shortName": "",
+   "aliases": [],
+   "city": "Faisalabad",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Government-College-Women-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "Government Sadiq College Women University",
+   "shortName": "",
+   "aliases": [],
+   "city": "Bahawalpur",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Government-Sadiq-College-Women-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "Grand Asian University, Sialkot",
+   "shortName": "",
+   "aliases": [],
+   "city": "Sialkot",
+   "province": "Punjab",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Grand-Asian-University-Sialkot.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "Greenwich University",
+   "shortName": "Greenwich University Karachi",
+   "aliases": [],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Greenwich-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Habib University",
+   "shortName": "HU",
+   "aliases": [
+    "Habib University Karachi"
+   ],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Habib-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Hajvery University",
+   "shortName": "",
+   "aliases": [],
+   "city": "Lahore",
+   "province": "Punjab",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Hajvery-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "Hamdard University",
+   "shortName": "Hamdard University Karachi",
+   "aliases": [],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Hamdard-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Hands-Institute of Development Studies, Karachi",
+   "shortName": "",
+   "aliases": [],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Hands-Institute-of--Development-Studies,-Karachi.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Hazara University",
+   "shortName": "",
+   "aliases": [],
+   "city": "Mansehra",
+   "province": "Khyber Pakhtunkhwa",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/KPK/Hazara-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Khyber Pakhtunkhwa"
+   }
+  },
+  {
+   "name": "Health Services Academy (HSA), Islamabad",
+   "shortName": "",
+   "aliases": [],
+   "city": "Islamabad",
+   "province": "Islamabad Capital Territory",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Islamabad/Health-Services-Academy.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Pakistan"
+   }
+  },
+  {
+   "name": "HITEC University",
+   "shortName": "",
+   "aliases": [],
+   "city": "Rawalpindi",
+   "province": "Punjab",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/HITEC-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "Hyderabad Institute for Technology & Management Sciences",
+   "shortName": "",
+   "aliases": [],
+   "city": "Hyderabad",
+   "province": "Sindh",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Hyderabad-Institute-for-Technology-&-Management-Sciences.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Pakistan"
+   }
+  },
+  {
+   "name": "Ibadat International University, Islamabad",
+   "shortName": "",
+   "aliases": [],
+   "city": "Islamabad",
+   "province": "Islamabad Capital Territory",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Islamabad/Ibadat-International-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Pakistan"
+   }
+  },
+  {
+   "name": "Ibn-e-Sina University, Mirpurkhas",
+   "shortName": "",
+   "aliases": [],
+   "city": "Mirpur Khas",
+   "province": "Sindh",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Ibn-e-Sina-University,-Mirpurkhas.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "ILMA University",
+   "shortName": "",
+   "aliases": [],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/ILMA.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Imperial College of Business Studies",
+   "shortName": "",
+   "aliases": [],
+   "city": "Lahore",
+   "province": "Punjab",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Imperial-College-of-Business-Studies.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "Indus University",
+   "shortName": "",
+   "aliases": [],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Indus-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Indus Valley School of Art & Architecture",
+   "shortName": "",
+   "aliases": [],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Indus-Valley-School-of-Art-and-Architecture.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Information Technology University of the Punjab",
+   "shortName": "ITU",
+   "aliases": [],
+   "city": "Lahore",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Information-Technology-University-of-the-Punjab.aspx",
+    "discipline": "Engineering & Technology",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "Institute for Art and Culture",
+   "shortName": "",
+   "aliases": [],
+   "city": "Lahore",
+   "province": "Punjab",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Institute-for-Art-and-Culture.aspx",
+    "discipline": "Arts & Design",
+    "charteredBy": "Government of Pakistan"
+   }
+  },
+  {
+   "name": "Institute of Business Administration",
+   "shortName": "IBA",
+   "aliases": [
+    "IBA Karachi"
+   ],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Institute-of-Business-Administration.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Institute of Business Management",
+   "shortName": "IoBM",
+   "aliases": [
+    "IOBM",
+    "CBM"
+   ],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Institute-of-Business-Management.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Institute of Management Science",
+   "shortName": "",
+   "aliases": [],
+   "city": "Peshawar",
+   "province": "Khyber Pakhtunkhwa",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/KPK/Institute-of-Management-Science.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Khyber Pakhtunkhwa"
+   }
+  },
+  {
+   "name": "Institute of Management Sciences",
+   "shortName": "",
+   "aliases": [],
+   "city": "Lahore",
+   "province": "Punjab",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Institute-of-Management-Sciences.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "Institute of Space Technology",
+   "shortName": "IST",
+   "aliases": [],
+   "city": "Islamabad",
+   "province": "Islamabad Capital Territory",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Islamabad/Institute-of-Space-Technology.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Pakistan"
+   }
+  },
+  {
+   "name": "International Institute of Science, Arts and Technology, Gujranwala",
+   "shortName": "",
+   "aliases": [],
+   "city": "Gujranwala",
+   "province": "Punjab",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/International-Institute-of-Science,-Arts-and-Technology,-Gujranwala.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Pakistan"
+   }
+  },
+  {
+   "name": "International Islamic University",
+   "shortName": "IIUI",
+   "aliases": [
+    "IIU",
+    "International Islamic University Islamabad"
+   ],
+   "city": "Islamabad",
+   "province": "Islamabad Capital Territory",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Islamabad/International-Islamic-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Pakistan"
+   }
+  },
+  {
+   "name": "Iqra National University",
+   "shortName": "",
+   "aliases": [],
+   "city": "Peshawar",
+   "province": "Khyber Pakhtunkhwa",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/KPK/Iqra-National-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Khyber Pakhtunkhwa"
+   }
+  },
+  {
+   "name": "Iqra University",
+   "shortName": "IU",
+   "aliases": [
+    "Iqra University Karachi"
+   ],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Iqra-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Islamabad University of Health Sciences and Emerging Technologies (IUHT) ,Islamabad",
+   "shortName": "",
+   "aliases": [],
+   "city": "Islamabad",
+   "province": "Islamabad Capital Territory",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Islamabad/Islamabad-University-of-Health-Sciences-and-Emerging-Technologies-(IUHT)-,Islamabad.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Pakistan"
+   }
+  },
+  {
+   "name": "Islamia College Peshawar",
+   "shortName": "",
+   "aliases": [],
+   "city": "Peshawar",
+   "province": "Khyber Pakhtunkhwa",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/KPK/Islamia-College-Peshawar.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Khyber Pakhtunkhwa"
+   }
+  },
+  {
+   "name": "Islamia University",
+   "shortName": "",
+   "aliases": [],
+   "city": "Bahawalpur",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Islamia-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "Isra University",
+   "shortName": "",
+   "aliases": [],
+   "city": "Hyderabad",
+   "province": "Sindh",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Isra-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Jinnah Sindh Medical University",
+   "shortName": "JSMU",
+   "aliases": [],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Jinnah-Sindh-Medical-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Jinnah University for Women",
+   "shortName": "JUW",
+   "aliases": [],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Jinnah-University-for-Women.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Kalam Bibi International Women Institute, Bannu",
+   "shortName": "",
+   "aliases": [],
+   "city": "Bannu",
+   "province": "Khyber Pakhtunkhwa",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/KPK/Kalam-Bibi-International-Institute-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Pakistan"
+   }
+  },
+  {
+   "name": "Karachi Institute of Economics & Technology",
+   "shortName": "KIET",
+   "aliases": [],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Karachi-Institute-of-Economics--Technology.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Karachi Institute of Technology and Entrepreneurship (KITE), Karachi",
+   "shortName": "",
+   "aliases": [],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Karachi-Institute-of-Technology-and-Entrepreneurship.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Karachi Metropolitan University, Karachi",
+   "shortName": "",
+   "aliases": [],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Karachi-Metropolitan-University,-Karachi.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Karachi School of Business and Leadership",
+   "shortName": "",
+   "aliases": [],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Karachi-School-of-Business--Leadership.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Karakurum International University",
+   "shortName": "",
+   "aliases": [],
+   "city": "Gilgit",
+   "province": "Gilgit Baltistan",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Gilgit Baltistan/Karakurum-International-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Pakistan"
+   }
+  },
+  {
+   "name": "KASB Institute of Technology",
+   "shortName": "",
+   "aliases": [],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/KASB-Institute-of-Technology.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Khawaja Freed University of Engineering & Information Technology, Rahim Yar Khan",
+   "shortName": "",
+   "aliases": [],
+   "city": "Rahim Yar Khan",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Khawaja-Freed-University-of-Engineering--Information-Technology.aspx",
+    "discipline": "Engineering & Technology",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "Khushal Khan Khattak University",
+   "shortName": "",
+   "aliases": [],
+   "city": "Karak",
+   "province": "Khyber Pakhtunkhwa",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/KPK/Khushal-Khan-Khattak-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Khyber Pakhtunkhwa"
+   }
+  },
+  {
+   "name": "Khyber Medical University",
+   "shortName": "KMU",
+   "aliases": [],
+   "city": "Peshawar",
+   "province": "Khyber Pakhtunkhwa",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/KPK/Khyber-Medical-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Khyber Pakhtunkhwa"
+   }
+  },
+  {
+   "name": "King Edward Medical University",
+   "shortName": "KEMU",
+   "aliases": [],
+   "city": "Lahore",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/King-Edward-Medical-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "Kinnaird College for Women",
+   "shortName": "KCW",
+   "aliases": [
+    "Kinnaird College"
+   ],
+   "city": "Lahore",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Kinnaird-College-for-Women.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "Kohat University of Science and Technology",
+   "shortName": "",
+   "aliases": [],
+   "city": "Kohat",
+   "province": "Khyber Pakhtunkhwa",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/KPK/Kohat-University-of-Science-and-Technology.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Khyber Pakhtunkhwa"
+   }
+  },
+  {
+   "name": "Kohsar University, Murree",
+   "shortName": "",
+   "aliases": [],
+   "city": "Rawalpindi",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Kohsar-University,-Murree.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "Lahore College for Women University",
+   "shortName": "LCWU",
+   "aliases": [],
+   "city": "Lahore",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Lahore-College-for-Women-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "Lahore Garrison University",
+   "shortName": "",
+   "aliases": [],
+   "city": "Lahore",
+   "province": "Punjab",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Lahore-Garrison-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "Lahore Leads University",
+   "shortName": "",
+   "aliases": [],
+   "city": "Lahore",
+   "province": "Punjab",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Lahore-Leads-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "Lahore School of Economics",
+   "shortName": "LSE",
+   "aliases": [],
+   "city": "Lahore",
+   "province": "Punjab",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Lahore-School-of-Economics.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "Lahore University of Biological and Applied Sciences",
+   "shortName": "",
+   "aliases": [],
+   "city": "Lahore",
+   "province": "Punjab",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Lahore-University-of-Biological-and-Applied-Sciences.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "Lahore University of Management Sciences",
+   "shortName": "LUMS",
+   "aliases": [],
+   "city": "Lahore",
+   "province": "Punjab",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Lahore-University-of-Management-Sciences.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Pakistan"
+   }
+  },
+  {
+   "name": "Lasbela University of Agriculture, Water & Marine Sciences",
+   "shortName": "",
+   "aliases": [],
+   "city": "Lasbella",
+   "province": "Balochistan",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Balochistan/Lasbela-University-of-Agriculture,-Water-and-Marine-Sciences.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Balochistan"
+   }
+  },
+  {
+   "name": "Liaquat University of Medical & Health Sciences",
+   "shortName": "LUMHS",
+   "aliases": [],
+   "city": "Jamshoro",
+   "province": "Sindh",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Liaquat-University-of-Medical-and-Health-Sciences.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Malir University of Science & Technology, Karachi",
+   "shortName": "",
+   "aliases": [],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Malir-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Mehran University of Engineering & Technology",
+   "shortName": "MUET",
+   "aliases": [
+    "Mehran University"
+   ],
+   "city": "Jamshoro",
+   "province": "Sindh",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Mehran-University-of-Engineering--Technology.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Metropolitan University Karachi",
+   "shortName": "",
+   "aliases": [],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Metropolitan-University-Karachi.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Millennium Institute of Technology and Entrepreneurship, Karachi",
+   "shortName": "",
+   "aliases": [],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/MITE.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Minhaj University",
+   "shortName": "",
+   "aliases": [],
+   "city": "Lahore",
+   "province": "Punjab",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Minhaj-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "Mir Chakar Khan Rind University of Technology, Dera Ghazi Khan",
+   "shortName": "",
+   "aliases": [],
+   "city": "Dera Ghazi Khan",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Mir-Chakar-Rind-University-of-Technology.aspx",
+    "discipline": "Engineering & Technology",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "Mir Chakar Khan Rind University, Sibi Balochistan",
+   "shortName": "",
+   "aliases": [],
+   "city": "Sibi",
+   "province": "Balochistan",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Balochistan/Mir-Chakar-Khan-Rind-University,-Sibi--Balochistan.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Balochistan"
+   }
+  },
+  {
+   "name": "Mirpur University of Science & Technology",
+   "shortName": "",
+   "aliases": [],
+   "city": "Mirpur",
+   "province": "Azad Jammu & Kashmir",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/AJK/Mirpur-University-of-Science-and-Technology.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of AJK"
+   }
+  },
+  {
+   "name": "Mohi-ud-Din Islamic University",
+   "shortName": "",
+   "aliases": [],
+   "city": "Nerian Sharif",
+   "province": "Azad Jammu & Kashmir",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/AJK/Mohi-ud-Din-Islamic-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of AJK"
+   }
+  },
+  {
+   "name": "Muhammad Ali Jinnah University",
+   "shortName": "MAJU",
+   "aliases": [],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Muhammad-Ali-Jinnah-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Muhammad Nawaz Shareef University of Agriculture",
+   "shortName": "",
+   "aliases": [],
+   "city": "Multan",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Muhammad-Nawaz-Shareef-University-of-Agriculture.aspx",
+    "discipline": "Agriculture & Veterinary",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "Muhammad Nawaz Sharif University of Engineering & Technology",
+   "shortName": "",
+   "aliases": [],
+   "city": "Multan",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Muhammad-Nawaz-Sharif-University-of-Engineering-and-Technology.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "Mukabbir University of Science & Technology, Gujrat",
+   "shortName": "",
+   "aliases": [],
+   "city": "Gujrat",
+   "province": "Punjab",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Mukabbir-University-of-Science-&-Technology,-Gujrat.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "Multan University of Science & Technology, Multan",
+   "shortName": "",
+   "aliases": [],
+   "city": "Multan",
+   "province": "Punjab",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Multan-University-of-Science-&-Technology,-Multan.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "MY University",
+   "shortName": "",
+   "aliases": [],
+   "city": "Islamabad",
+   "province": "Islamabad Capital Territory",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Islamabad/MY-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Pakistan"
+   }
+  },
+  {
+   "name": "Namal University, Mainwali",
+   "shortName": "",
+   "aliases": [],
+   "city": "Mianwali",
+   "province": "Punjab",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Namal-University-Manwali.aspx",
+    "discipline": "Engineering & Technology",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "National College of Arts",
+   "shortName": "",
+   "aliases": [],
+   "city": "Lahore",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/National-College-of-Arts.aspx",
+    "discipline": "Arts & Design",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "National College of Business Administration & Economics",
+   "shortName": "",
+   "aliases": [],
+   "city": "Lahore",
+   "province": "Punjab",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/National-College-of-Business-Administration--Economics.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "National Defense University",
+   "shortName": "",
+   "aliases": [],
+   "city": "Islamabad",
+   "province": "Islamabad Capital Territory",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Islamabad/National-Defense-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Pakistan"
+   }
+  },
+  {
+   "name": "National Excellence Institute (NEI), Rawalpindi",
+   "shortName": "",
+   "aliases": [],
+   "city": "Rawalpindi",
+   "province": "Punjab",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Islamabad/National-Excellence-Institute-(NEI),-Rawalpindi.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Pakistan"
+   }
+  },
+  {
+   "name": "National Institute of Technology, Lahore",
+   "shortName": "",
+   "aliases": [],
+   "city": "Lahore",
+   "province": "Punjab",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/National Institute of TEchnology, Lahore.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Pakistan"
+   }
+  },
+  {
+   "name": "National Skills University, Islamabad",
+   "shortName": "",
+   "aliases": [],
+   "city": "Islamabad",
+   "province": "Islamabad Capital Territory",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Islamabad/National-Skills-University,-Islamabad.aspx",
+    "discipline": "Engineering & Technology",
+    "charteredBy": "Government of Pakistan"
+   }
+  },
+  {
+   "name": "National Textile University",
+   "shortName": "NTU",
+   "aliases": [],
+   "city": "Faisalabad",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/National-Textile-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Pakistan"
+   }
+  },
+  {
+   "name": "National University of Computer & Emerging Sciences",
+   "shortName": "FAST",
+   "aliases": [
+    "FAST-NUCES",
+    "NUCES",
+    "FAST University",
+    "FAST NUCES Karachi",
+    "FAST NUCES Lahore",
+    "FAST NUCES Islamabad"
+   ],
+   "city": "Islamabad",
+   "province": "Islamabad Capital Territory",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Islamabad/National-University-of-Computer-and-Emerging-Sciences.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Pakistan"
+   }
+  },
+  {
+   "name": "National University of Medical Sciences",
+   "shortName": "NUMS",
+   "aliases": [],
+   "city": "Rawalpindi",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Islamabad/National-University-of-Medical-Sciences.aspx",
+    "discipline": "Medical",
+    "charteredBy": "Government of Pakistan"
+   }
+  },
+  {
+   "name": "National University of Modern Languages",
+   "shortName": "NUML",
+   "aliases": [],
+   "city": "Islamabad",
+   "province": "Islamabad Capital Territory",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Islamabad/National-University-of-Modern-Languages.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Pakistan"
+   }
+  },
+  {
+   "name": "National University of Pakistan",
+   "shortName": "",
+   "aliases": [],
+   "city": "Rawalpindi",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/National-University-of-Pakistan.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Pakistan"
+   }
+  },
+  {
+   "name": "National University of Sciences & Technology",
+   "shortName": "NUST",
+   "aliases": [
+    "NUST University",
+    "PNEC"
+   ],
+   "city": "Islamabad",
+   "province": "Islamabad Capital Territory",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Islamabad/National-University-of-Sciences--Technology.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Pakistan"
+   }
+  },
+  {
+   "name": "National University of Technology (NUTECH), Islamabad",
+   "shortName": "",
+   "aliases": [],
+   "city": "Islamabad",
+   "province": "Islamabad Capital Territory",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Islamabad/NUTECH.aspx",
+    "discipline": "Engineering & Technology",
+    "charteredBy": "Government of Pakistan"
+   }
+  },
+  {
+   "name": "NED University of Engineering & Technology",
+   "shortName": "NED",
+   "aliases": [
+    "NEDUET",
+    "NED University"
+   ],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/NED-University-of-Engineering--Technology.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Newport Institute of Communications & Economics",
+   "shortName": "",
+   "aliases": [],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Newport-Institute-of-Communications--Economics.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "NFC Institute of Engineering & Technology",
+   "shortName": "",
+   "aliases": [],
+   "city": "Multan",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/NFC-Institute-of-Engineering--Technology.aspx",
+    "discipline": "Engineering & Technology",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "Nippon Institute of Advanced Sciences, Sheikhupura",
+   "shortName": "",
+   "aliases": [],
+   "city": "Sheikhupura",
+   "province": "Punjab",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Nippon Institute of Advanced Sciences, Sheikhupura.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Pakistan"
+   }
+  },
+  {
+   "name": "Nishtar Medical University, Multan",
+   "shortName": "",
+   "aliases": [],
+   "city": "Multan",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Nishtar-Medical-University,-Multan.aspx",
+    "discipline": "Medical",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "Northern University",
+   "shortName": "",
+   "aliases": [],
+   "city": "Nowshehra",
+   "province": "Khyber Pakhtunkhwa",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/KPK/Northern-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Khyber Pakhtunkhwa"
+   }
+  },
+  {
+   "name": "Nur International University",
+   "shortName": "",
+   "aliases": [],
+   "city": "Lahore",
+   "province": "Punjab",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Nur-International-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "PAF Air War College Institute, Karachi",
+   "shortName": "",
+   "aliases": [],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/PAF Air-War-College-Institute,-Karachi-.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Pakistan"
+   }
+  },
+  {
+   "name": "Pak-Austria Fachhochschule Institute of Applied Sciences and Technology, Haripur",
+   "shortName": "",
+   "aliases": [],
+   "city": "Haripur",
+   "province": "Khyber Pakhtunkhwa",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/KPK/PAF-IAST.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Khyber Pakhtunkhwa"
+   }
+  },
+  {
+   "name": "Pakistan Global Institute, Rawat",
+   "shortName": "",
+   "aliases": [],
+   "city": "Rawat",
+   "province": "Punjab",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Pakistan-Global-Institute,-Rawat.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Pakistan"
+   }
+  },
+  {
+   "name": "Pakistan Institute of Development Economics",
+   "shortName": "",
+   "aliases": [],
+   "city": "Islamabad",
+   "province": "Islamabad Capital Territory",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Islamabad/Pakistan-Institute-of-Development-Economics.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Pakistan"
+   }
+  },
+  {
+   "name": "Pakistan Institute of Engineering & Applied Sciences",
+   "shortName": "PIEAS",
+   "aliases": [],
+   "city": "Islamabad",
+   "province": "Islamabad Capital Territory",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Islamabad/Pakistan-Institute-of-Engineering-And-Applied-Sciences.aspx",
+    "discipline": "Engineering & Technology",
+    "charteredBy": "Government of Pakistan"
+   }
+  },
+  {
+   "name": "Pakistan Institute of Fashion & Design",
+   "shortName": "",
+   "aliases": [],
+   "city": "Lahore",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Pakistan-Institute-of-Fashion-and-Design.aspx",
+    "discipline": "Arts & Design",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "Pakistan Military Academy",
+   "shortName": "",
+   "aliases": [],
+   "city": "Abbottabad",
+   "province": "Khyber Pakhtunkhwa",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/KPK/Pakistan-Military-Academy.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Pakistan"
+   }
+  },
+  {
+   "name": "Pakistan Naval Academy",
+   "shortName": "",
+   "aliases": [],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Pakistan-Naval-Academy.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Peoples University of Medical & Health Sciences for Women",
+   "shortName": "",
+   "aliases": [],
+   "city": "Nawabshah",
+   "province": "Sindh",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Peoples-University-of-Medical-and-Health-Sciences-for-Women.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Pir Mehr Ali Shah Arid Agriculture University",
+   "shortName": "PMAS-AAUR",
+   "aliases": [
+    "Arid Agriculture University"
+   ],
+   "city": "Rawalpindi",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Pir-Mehr-Ali-Shah-Arid-Agriculture-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "Preston Institute of Management, Science & Technology",
+   "shortName": "",
+   "aliases": [],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Preston-Institute-of-Management,-Science-and-Technology.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Preston University, Karachi",
+   "shortName": "",
+   "aliases": [],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Preston-University, Karachi.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Preston University, Kohat",
+   "shortName": "",
+   "aliases": [],
+   "city": "Kohat",
+   "province": "Khyber Pakhtunkhwa",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/KPK/Preston-University-Kohat.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Khyber Pakhtunkhwa"
+   }
+  },
+  {
+   "name": "Punjab Tianjin University of Technology, Lahore",
+   "shortName": "",
+   "aliases": [],
+   "city": "Lahore",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Punjab-Tianjin-Universityf-of-Technology-(PTUT),-Lahore.aspx",
+    "discipline": "Engineering & Technology",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "Qarshi University",
+   "shortName": "",
+   "aliases": [],
+   "city": "Lahore",
+   "province": "Punjab",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Qarshi-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "Quaid e Azam Institute of Management Sciences Sargodha",
+   "shortName": "",
+   "aliases": [],
+   "city": "Sargodha",
+   "province": "Punjab",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Quaid-e-Azam-Institute-of-Management-Sciences-Sargodha.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "Quaid-e-Awam University of Engineering, Sciences & Technology",
+   "shortName": "QUEST",
+   "aliases": [
+    "Quaid Awam University",
+    "Quaid-e-Awam University"
+   ],
+   "city": "Nawabshah",
+   "province": "Sindh",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Quaid-e-Awam-University-of-Engineering,-Sciences--Technology.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Quaid-i-Azam University",
+   "shortName": "QAU",
+   "aliases": [
+    "Quaid-e-Azam University"
+   ],
+   "city": "Islamabad",
+   "province": "Islamabad Capital Territory",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Islamabad/Quaid-i-Azam-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Pakistan"
+   }
+  },
+  {
+   "name": "Qurtaba University of Science & Information Technology",
+   "shortName": "",
+   "aliases": [],
+   "city": "Peshawar",
+   "province": "Khyber Pakhtunkhwa",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/KPK/Qurtaba-University-of-Science-and-Information-Technology.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Khyber Pakhtunkhwa"
+   }
+  },
+  {
+   "name": "Rashid Latif Khan University, Lahore",
+   "shortName": "",
+   "aliases": [],
+   "city": "Lahore",
+   "province": "Punjab",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Rashid-Latif-Khan-University-Lahore.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "Rawalpindi Medical University",
+   "shortName": "",
+   "aliases": [],
+   "city": "Rawalpindi",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Rawalpindi-Medical-University.aspx",
+    "discipline": "Medical",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "Rawalpindi Women University, Rawalpindi",
+   "shortName": "",
+   "aliases": [],
+   "city": "Rawalpindi",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Rawalpindi-Women-University,-Rawalpindi.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "Riphah International University",
+   "shortName": "RIU",
+   "aliases": [
+    "Riphah"
+   ],
+   "city": "Islamabad",
+   "province": "Islamabad Capital Territory",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Islamabad/Riphah-International-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Pakistan"
+   }
+  },
+  {
+   "name": "Saifee Burhani University, Karachi",
+   "shortName": "",
+   "aliases": [],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Saifee-Burhani-University,-Karachi.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Salim Habib University (Former Barret Hodgson University), Karachi",
+   "shortName": "SHU",
+   "aliases": [
+    "Salim Habib University",
+    "Barrett Hodgson University",
+    "BHU"
+   ],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Barrett-Hodgson-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Sardar Bahadur Khan Women University",
+   "shortName": "",
+   "aliases": [],
+   "city": "Quetta",
+   "province": "Balochistan",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Balochistan/Sardar-Bahadur-Khan-Women-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Balochistan"
+   }
+  },
+  {
+   "name": "Sarhad University of Science & Information Technology",
+   "shortName": "",
+   "aliases": [],
+   "city": "Peshawar",
+   "province": "Khyber Pakhtunkhwa",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/KPK/Sarhad-University-of-Science-and-Information-Technology.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Khyber Pakhtunkhwa"
+   }
+  },
+  {
+   "name": "Shah Abdul Latif University",
+   "shortName": "",
+   "aliases": [],
+   "city": "Khairpur",
+   "province": "Sindh",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Shah-Abdul-Latif-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Shaheed Allah Buksh Soomro University of Arts, Design and Heritages, Jamshoro",
+   "shortName": "",
+   "aliases": [],
+   "city": "Jamshoro",
+   "province": "Sindh",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Shaheed-Allah-Buksh-Soomro-University-of-Arts,-Design-and-Heritages,-Jamshoro.aspx",
+    "discipline": "Arts & Design",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Shaheed Benazir Bhutto City University",
+   "shortName": "",
+   "aliases": [],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Shaheed-Benazir-Bhutto-City-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Shaheed Benazir Bhutto Dewan University",
+   "shortName": "",
+   "aliases": [],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Shaheed-Benazir-Bhutto-Dewan-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Shaheed Benazir Bhutto University",
+   "shortName": "",
+   "aliases": [],
+   "city": "Upper Dir",
+   "province": "Khyber Pakhtunkhwa",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/KPK/Shaheed-Benazir-Bhutto-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Khyber Pakhtunkhwa"
+   }
+  },
+  {
+   "name": "Shaheed Benazir Bhutto University of Veterinary & Animal Sciences",
+   "shortName": "",
+   "aliases": [],
+   "city": "Nawabshah",
+   "province": "Sindh",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Shaheed-Benazir-Bhutto-University-of-Veterinary-And-Animal-Sciences-.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Shaheed Benazir Bhutto University, Shaheed Benazirabad",
+   "shortName": "",
+   "aliases": [],
+   "city": "Nawabshah",
+   "province": "Sindh",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Shaheed-Benazir-Bhutto-University,-Shaheed-Benazirabad.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Shaheed Benazir Bhutto Women University",
+   "shortName": "",
+   "aliases": [],
+   "city": "Peshawar",
+   "province": "Khyber Pakhtunkhwa",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/KPK/Shaheed-Benazir-Bhutto-Women-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Khyber Pakhtunkhwa"
+   }
+  },
+  {
+   "name": "Shaheed Mohtarma Benazir Bhutto Medical University",
+   "shortName": "",
+   "aliases": [],
+   "city": "Larkana",
+   "province": "Sindh",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Shaheed-Mohtarma-Benazir-Bhutto-Medical-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Shaheed Zulfikar Ali Bhutto Institute of Science & Technology",
+   "shortName": "SZABIST",
+   "aliases": [
+    "SZABIST University",
+    "SZABIST Karachi"
+   ],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Shaheed-Zulfikar-Ali-Bhutto-Institute-of-Science--Technology-(SZABIST).aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Shaheed Zulfiqar Ali Bhutto Medical University",
+   "shortName": "",
+   "aliases": [],
+   "city": "Islamabad",
+   "province": "Islamabad Capital Territory",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Islamabad/Shaheed-Zulfiqar-Ali-Bhutto-Medical-University.aspx",
+    "discipline": "Medical",
+    "charteredBy": "Government of Pakistan"
+   }
+  },
+  {
+   "name": "Shaheed Zulfiqar Ali Bhutto University of Law",
+   "shortName": "",
+   "aliases": [],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Shaheed-Zulfiqar-Ali-Bhutto-University-of-Law.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Shifa Tameer-e-Millat University",
+   "shortName": "STMU",
+   "aliases": [],
+   "city": "Islamabad",
+   "province": "Islamabad Capital Territory",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Islamabad/Shifa-Tameer-e-Millat-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Pakistan"
+   }
+  },
+  {
+   "name": "Shuhada-e-Army Public School University of Technology, Nowshera",
+   "shortName": "",
+   "aliases": [],
+   "city": "Nowshehra",
+   "province": "Khyber Pakhtunkhwa",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/KPK/Shuhada-e-Army-Public-School-University-of-Technology,-Nowshera.aspx",
+    "discipline": "Engineering & Technology",
+    "charteredBy": "Government of Khyber Pakhtunkhwa"
+   }
+  },
+  {
+   "name": "Sindh Agriculture University, Tandojam",
+   "shortName": "",
+   "aliases": [],
+   "city": "Hyderabad",
+   "province": "Sindh",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Sindh-Agriculture-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Sindh Institute of Management & Technology",
+   "shortName": "",
+   "aliases": [],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Sindh-Institute-of-Management-and-Technology.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Sindh Institute of Medical Sciences",
+   "shortName": "",
+   "aliases": [],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Sindh-Institute-of-Medical-Sciences.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Sindh Madresatul Islam University",
+   "shortName": "SMIU",
+   "aliases": [
+    "Sindh Madressatul Islam University"
+   ],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Sindh-Madresatul-Islam-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Sir Syed (CASE) Institute of Technology, Islamabad",
+   "shortName": "",
+   "aliases": [],
+   "city": "Islamabad",
+   "province": "Islamabad Capital Territory",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Islamabad/SSIT.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Pakistan"
+   }
+  },
+  {
+   "name": "Sir Syed University of Engineering & Technology",
+   "shortName": "SSUET",
+   "aliases": [
+    "Sir Syed University"
+   ],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Sir-Syed-University-of-Engineering--Technology.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Sohail University, Karachi",
+   "shortName": "",
+   "aliases": [],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Sohail-University,-Karachi.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "South Punjab Institute of Science and Technology, Dera Ghazi Khan",
+   "shortName": "",
+   "aliases": [],
+   "city": "Dera Ghazi Khan",
+   "province": "Punjab",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/South-Punjab-Institute-of-Science-and-Technology,-Dera-Ghazi-Khan.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "Sukkur IBA University",
+   "shortName": "SIBAU",
+   "aliases": [
+    "Sukkur IBA"
+   ],
+   "city": "Sukkur",
+   "province": "Sindh",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Sukkur IBA University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Textile Institute of Pakistan",
+   "shortName": "",
+   "aliases": [],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Textile-Institute-of-Pakistan.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "Thal University, Bhakkar",
+   "shortName": "",
+   "aliases": [],
+   "city": "Bhakkar",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Thal-University,-Bhakkar.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "The Azad Jammu & Kashmir University of Bhimber",
+   "shortName": "",
+   "aliases": [],
+   "city": "Bhimber",
+   "province": "Azad Jammu & Kashmir",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/AJK/The-Azad-Jammu-&-Kashmir-University-of-Bhimber.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of AJK"
+   }
+  },
+  {
+   "name": "The Bolan University of Medical and Health Sciences, Quetta",
+   "shortName": "",
+   "aliases": [],
+   "city": "Quetta",
+   "province": "Balochistan",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Balochistan/BUMHS.aspx",
+    "discipline": "Medical",
+    "charteredBy": "Government of Balochistan"
+   }
+  },
+  {
+   "name": "The Ganj Shakar University, Pakpattan",
+   "shortName": "",
+   "aliases": [],
+   "city": "Pakpatan",
+   "province": "Punjab",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/The-Ganj-Shakar-University,-Pakpattan.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "The Green International University, Lahore",
+   "shortName": "",
+   "aliases": [],
+   "city": "Lahore",
+   "province": "Punjab",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Green-International-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "The Nazeer Hussain University",
+   "shortName": "",
+   "aliases": [],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/The-Nazeer-Hussain-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "The Shaikh Ayaz University, Shikarpur Sindh",
+   "shortName": "",
+   "aliases": [],
+   "city": "Shikarpur",
+   "province": "Sindh",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/The-Shaikh-Ayaz-University,-Shikarpur.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "The Sindh Institute of Physical Medicine and Rehabilitation, Karachi",
+   "shortName": "",
+   "aliases": [],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/SIPMR.aspx",
+    "discipline": "Medical",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "The Superior University",
+   "shortName": "",
+   "aliases": [],
+   "city": "Lahore",
+   "province": "Punjab",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/The-Superior-College.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "The University of Agriculture, D. I. Khan",
+   "shortName": "",
+   "aliases": [],
+   "city": "Dera Ismail Khan",
+   "province": "Khyber Pakhtunkhwa",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/KPK/The-University-of-Agriculture,-D-I-Khan.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Khyber Pakhtunkhwa"
+   }
+  },
+  {
+   "name": "The University of Agriculture, Peshawar",
+   "shortName": "",
+   "aliases": [],
+   "city": "Peshawar",
+   "province": "Khyber Pakhtunkhwa",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/KPK/The University of Agriculture, Peshawar.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Khyber Pakhtunkhwa"
+   }
+  },
+  {
+   "name": "The University of Agriculture, Swat",
+   "shortName": "",
+   "aliases": [],
+   "city": "Swat",
+   "province": "Khyber Pakhtunkhwa",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/KPK/The-University-of-Agriculture,-Swat.aspx",
+    "discipline": "Agriculture & Veterinary",
+    "charteredBy": "Government of Khyber Pakhtunkhwa"
+   }
+  },
+  {
+   "name": "The University of Faisalabad",
+   "shortName": "",
+   "aliases": [],
+   "city": "Faisalabad",
+   "province": "Punjab",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/The-University-of-Faisalabad.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "The University of Larkano",
+   "shortName": "",
+   "aliases": [],
+   "city": "Larkana",
+   "province": "Sindh",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/The-University-of-Larkano.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "The University of Mirpurkhas",
+   "shortName": "",
+   "aliases": [],
+   "city": "Mirpur Khas",
+   "province": "Sindh",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/The-University-of-Mirpurkhas.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Pakistan"
+   }
+  },
+  {
+   "name": "The University of Veterinary & Animal Sciences, Swat",
+   "shortName": "",
+   "aliases": [],
+   "city": "Swat",
+   "province": "Khyber Pakhtunkhwa",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/KPK/The-University-of-Veterinary-&-Animal-Sciences,-Swat.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Khyber Pakhtunkhwa"
+   }
+  },
+  {
+   "name": "The Women University",
+   "shortName": "",
+   "aliases": [],
+   "city": "Multan",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/The-Women-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "TIMES University, Multan",
+   "shortName": "",
+   "aliases": [],
+   "city": "Multan",
+   "province": "Punjab",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/TIMES-University,-Multan.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "UIT University, Karachi",
+   "shortName": "UIT",
+   "aliases": [],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/UIT University, Karachi.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "University of Agriculture",
+   "shortName": "UAF",
+   "aliases": [
+    "University of Agriculture Faisalabad"
+   ],
+   "city": "Faisalabad",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/University-of-Agriculture.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "University of Art and Culture, Jamshoro",
+   "shortName": "",
+   "aliases": [],
+   "city": "Jamshoro",
+   "province": "Sindh",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/University-of-Art-and-Culture.aspx",
+    "discipline": "Arts & Design",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "University of Azad Jammu & Kashmir",
+   "shortName": "",
+   "aliases": [],
+   "city": "Muzaffarabad",
+   "province": "Azad Jammu & Kashmir",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/AJK/University-of-Azad-Jammu-and-Kashmir.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of AJK"
+   }
+  },
+  {
+   "name": "University of Balochistan",
+   "shortName": "",
+   "aliases": [],
+   "city": "Quetta",
+   "province": "Balochistan",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Balochistan/University-of-Balochistan.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Balochistan"
+   }
+  },
+  {
+   "name": "University of Baltistan, Skardu",
+   "shortName": "",
+   "aliases": [],
+   "city": "Skardu",
+   "province": "Gilgit Baltistan",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Gilgit Baltistan/University-of-Baltistan.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Pakistan"
+   }
+  },
+  {
+   "name": "University of Buner",
+   "shortName": "",
+   "aliases": [],
+   "city": "Bunair",
+   "province": "Khyber Pakhtunkhwa",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/KPK/University-of-Buner.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Khyber Pakhtunkhwa"
+   }
+  },
+  {
+   "name": "University of Central Punjab",
+   "shortName": "UCP",
+   "aliases": [],
+   "city": "Lahore",
+   "province": "Punjab",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/University-of-Central-Punjab.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "University of Chakwal, Chakwal",
+   "shortName": "",
+   "aliases": [],
+   "city": "Chakwal",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/University-of-Chakwal.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "University of Chenab, Gujrat",
+   "shortName": "",
+   "aliases": [],
+   "city": "Gujrat",
+   "province": "Punjab",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/University-of-Chenab,-Gujrat.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "University of Child Health Sciences, Lahore",
+   "shortName": "",
+   "aliases": [],
+   "city": "Lahore",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/University-of-Child-Health-Sciences,-Lahore.aspx",
+    "discipline": "Medical",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "University of Chitral",
+   "shortName": "",
+   "aliases": [],
+   "city": "Chitral",
+   "province": "Khyber Pakhtunkhwa",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/KPK/University-of-Chitral.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Khyber Pakhtunkhwa"
+   }
+  },
+  {
+   "name": "University of Education",
+   "shortName": "",
+   "aliases": [],
+   "city": "Lahore",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/University-of-Education.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "University of Engineering & Technology (UET), Mardan",
+   "shortName": "",
+   "aliases": [],
+   "city": "Mardan",
+   "province": "Khyber Pakhtunkhwa",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/KPK/University-of-Engineering--Technology-Mardan.aspx",
+    "discipline": "Engineering & Technology",
+    "charteredBy": "Government of Khyber Pakhtunkhwa"
+   }
+  },
+  {
+   "name": "University of Engineering & Technology, Lahore",
+   "shortName": "UET",
+   "aliases": [
+    "UET Lahore",
+    "University of Engineering and Technology Lahore"
+   ],
+   "city": "Lahore",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/University-of-Engineering-and-Technology.aspx",
+    "discipline": "Engineering & Technology",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "University of Engineering & Technology, Peshawar",
+   "shortName": "UET Peshawar",
+   "aliases": [],
+   "city": "Peshawar",
+   "province": "Khyber Pakhtunkhwa",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/KPK/University-of-Engineering-and-Technology.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Pakistan"
+   }
+  },
+  {
+   "name": "University of Engineering & Technology, Taxila",
+   "shortName": "",
+   "aliases": [],
+   "city": "Taxila",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/University-of-Engineering-&-Technology,-Taxila.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "University of Engineering and Applied Sciences, Swat",
+   "shortName": "",
+   "aliases": [],
+   "city": "Swat",
+   "province": "Khyber Pakhtunkhwa",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/KPK/University-of-Engineering-&-Applied-Sciences,-Swat.aspx",
+    "discipline": "Engineering & Technology",
+    "charteredBy": "Government of Khyber Pakhtunkhwa"
+   }
+  },
+  {
+   "name": "University of FATA",
+   "shortName": "",
+   "aliases": [],
+   "city": "Kohat",
+   "province": "Khyber Pakhtunkhwa",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/KPK/University-of-FATA.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Khyber Pakhtunkhwa"
+   }
+  },
+  {
+   "name": "University of Gujrat",
+   "shortName": "",
+   "aliases": [],
+   "city": "Gujrat",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/University-of-Gujrat.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "University of Gwadar",
+   "shortName": "",
+   "aliases": [],
+   "city": "Gawadar",
+   "province": "Balochistan",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Balochistan/University-of-Gwadar.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Balochistan"
+   }
+  },
+  {
+   "name": "University of Haripur",
+   "shortName": "",
+   "aliases": [],
+   "city": "Haripur",
+   "province": "Khyber Pakhtunkhwa",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/KPK/University-of-Haripur.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Khyber Pakhtunkhwa"
+   }
+  },
+  {
+   "name": "University of Haveli",
+   "shortName": "",
+   "aliases": [],
+   "city": "Haveli",
+   "province": "Azad Jammu & Kashmir",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/AJK/University-of-Haveli.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of AJK"
+   }
+  },
+  {
+   "name": "University of Health Sciences",
+   "shortName": "",
+   "aliases": [],
+   "city": "Lahore",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/University-of-Health-Sciences.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "University of Home Economics, Lahore",
+   "shortName": "",
+   "aliases": [],
+   "city": "Lahore",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/University-of-Home-Economics-Lahore.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "University of Jhang",
+   "shortName": "",
+   "aliases": [],
+   "city": "Jhang",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/University-of-Jhang.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "University of Kamalia",
+   "shortName": "",
+   "aliases": [],
+   "city": "Kamalia",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/University-of-Kamalia.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "University of Karachi",
+   "shortName": "KU",
+   "aliases": [
+    "UoK",
+    "Karachi University"
+   ],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/University-of-Karachi.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "University of Kotli",
+   "shortName": "",
+   "aliases": [],
+   "city": "Kotli",
+   "province": "Azad Jammu & Kashmir",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/AJK/University-of-Kotli.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of AJK"
+   }
+  },
+  {
+   "name": "University of Lahore",
+   "shortName": "UOL",
+   "aliases": [
+    "The University of Lahore"
+   ],
+   "city": "Lahore",
+   "province": "Punjab",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/University-of-Lahore.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "University of Lakki Marwat",
+   "shortName": "",
+   "aliases": [],
+   "city": "Lakki Marwat",
+   "province": "Khyber Pakhtunkhwa",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/KPK/The-University-of-Lakki-Marwat.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Khyber Pakhtunkhwa"
+   }
+  },
+  {
+   "name": "University of Layyah",
+   "shortName": "",
+   "aliases": [],
+   "city": "Layyah",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/University-of-Layyah.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "University of Loralai",
+   "shortName": "",
+   "aliases": [],
+   "city": "Loralai",
+   "province": "Balochistan",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Balochistan/University-of-Loralai.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Balochistan"
+   }
+  },
+  {
+   "name": "University of Makran, Panjgur",
+   "shortName": "",
+   "aliases": [],
+   "city": "Punjgur",
+   "province": "Balochistan",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Balochistan/University-of-Makran,-Panjgur.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Balochistan"
+   }
+  },
+  {
+   "name": "University of Malakand",
+   "shortName": "",
+   "aliases": [],
+   "city": "Malakand",
+   "province": "Khyber Pakhtunkhwa",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/KPK/University-of-Malakand.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Khyber Pakhtunkhwa"
+   }
+  },
+  {
+   "name": "University of Management & Technology",
+   "shortName": "UMT",
+   "aliases": [],
+   "city": "Lahore",
+   "province": "Punjab",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/University-of-Management-and-Technology.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "University of Mianwali",
+   "shortName": "",
+   "aliases": [],
+   "city": "Mianwali",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/University-of-Mianwali.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "University of Modern Sciences, Tando Muhammad Khan",
+   "shortName": "",
+   "aliases": [],
+   "city": "Tando Muhammad Khan",
+   "province": "Sindh",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/University-of-Modern-Sciences,-Tando-Muhammad-Khan.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "University of Narowal",
+   "shortName": "",
+   "aliases": [],
+   "city": "Narowal",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/University-of-Narowal.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "University of Okara",
+   "shortName": "",
+   "aliases": [],
+   "city": "Okara",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/University-of-Okara.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "University of Peshawar",
+   "shortName": "UoP",
+   "aliases": [],
+   "city": "Peshawar",
+   "province": "Khyber Pakhtunkhwa",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/KPK/University-of-Peshawar.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Khyber Pakhtunkhwa"
+   }
+  },
+  {
+   "name": "University of Poonch",
+   "shortName": "",
+   "aliases": [],
+   "city": "Poonch",
+   "province": "Azad Jammu & Kashmir",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/AJK/University-of-Poonch.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of AJK"
+   }
+  },
+  {
+   "name": "University of Rasul-Mandi Bahauddin",
+   "shortName": "",
+   "aliases": [],
+   "city": "Mandi Bahauddin",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/University of Rasul-Mandi Bahauddin.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "University of Sahiwal",
+   "shortName": "",
+   "aliases": [],
+   "city": "Sahiwal",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/University-of-Sahiwal.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "University of Sargodha",
+   "shortName": "",
+   "aliases": [],
+   "city": "Sargodha",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/University-of-Sargodha.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "University of Science & Technology",
+   "shortName": "",
+   "aliases": [],
+   "city": "Bannu",
+   "province": "Khyber Pakhtunkhwa",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/KPK/University-of-Science-and-Technology.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Khyber Pakhtunkhwa"
+   }
+  },
+  {
+   "name": "University of Science and Technology, Lahore",
+   "shortName": "",
+   "aliases": [],
+   "city": "Lahore",
+   "province": "Punjab",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/University-of-Science-and-Technology,-Lahore.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "University of Shangla",
+   "shortName": "",
+   "aliases": [],
+   "city": "Shangla",
+   "province": "Khyber Pakhtunkhwa",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/KPK/University-of-Shangla.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Khyber Pakhtunkhwa"
+   }
+  },
+  {
+   "name": "University of Sialkot, Sialkot",
+   "shortName": "",
+   "aliases": [],
+   "city": "Sialkot",
+   "province": "Punjab",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/UniversityofSialkot.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "University of Sindh",
+   "shortName": "UoS",
+   "aliases": [
+    "Sindh University"
+   ],
+   "city": "Mirpur Khas",
+   "province": "Sindh",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/University-of-Sindh.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "University of South Asia",
+   "shortName": "",
+   "aliases": [],
+   "city": "Lahore",
+   "province": "Punjab",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/University-of-South-Asia.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "University of Southern Punjab",
+   "shortName": "",
+   "aliases": [],
+   "city": "Multan",
+   "province": "Punjab",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/university-of-Southern-Punjab.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "University of Sufism and Modern Sciences, Bhitshah Sindh",
+   "shortName": "",
+   "aliases": [],
+   "city": "Bhit Shah",
+   "province": "Sindh",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/USMS-Bhitshah.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  },
+  {
+   "name": "University of Swabi",
+   "shortName": "",
+   "aliases": [],
+   "city": "Swabi",
+   "province": "Khyber Pakhtunkhwa",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/KPK/University-of-Swabi.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Khyber Pakhtunkhwa"
+   }
+  },
+  {
+   "name": "University of Swat",
+   "shortName": "",
+   "aliases": [],
+   "city": "Swat",
+   "province": "Khyber Pakhtunkhwa",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/KPK/University-of-Swat.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Khyber Pakhtunkhwa"
+   }
+  },
+  {
+   "name": "University of the Punjab",
+   "shortName": "PU",
+   "aliases": [
+    "Punjab University"
+   ],
+   "city": "Lahore",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/University-of-the-Punjab.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "University of Turbat",
+   "shortName": "",
+   "aliases": [],
+   "city": "Turbat",
+   "province": "Balochistan",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Balochistan/University-of-Turbat.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Balochistan"
+   }
+  },
+  {
+   "name": "University of Veterinary & Animal Sciences",
+   "shortName": "UVAS",
+   "aliases": [],
+   "city": "Lahore",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/University-of-Veterinary-and-Animal-Sciences.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "University of Wah",
+   "shortName": "",
+   "aliases": [],
+   "city": "Rawalpindi",
+   "province": "Punjab",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/University-of-Wah.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Punjab"
+   }
+  },
+  {
+   "name": "Virtual University of Pakistan",
+   "shortName": "VU",
+   "aliases": [
+    "Virtual University"
+   ],
+   "city": "Lahore",
+   "province": "Punjab",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Punjab/Virtual-University-of-Pakistan.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Pakistan"
+   }
+  },
+  {
+   "name": "Woman University Swabi",
+   "shortName": "",
+   "aliases": [],
+   "city": "Swabi",
+   "province": "Khyber Pakhtunkhwa",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/KPK/University-of-Swabi-for-Women.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Khyber Pakhtunkhwa"
+   }
+  },
+  {
+   "name": "Women University Mardan",
+   "shortName": "",
+   "aliases": [],
+   "city": "Mardan",
+   "province": "Khyber Pakhtunkhwa",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/KPK/Women-University-Mardan.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Khyber Pakhtunkhwa"
+   }
+  },
+  {
+   "name": "Women University of Azad Jammu & Kashmir",
+   "shortName": "",
+   "aliases": [],
+   "city": "Bagh",
+   "province": "Azad Jammu & Kashmir",
+   "sector": "Public",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/AJK/Women-University-of-Azad-Jammu-and-Kashmir.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of AJK"
+   }
+  },
+  {
+   "name": "Zia-ud-Din University",
+   "shortName": "ZU",
+   "aliases": [
+    "Ziauddin University"
+   ],
+   "city": "Karachi",
+   "province": "Sindh",
+   "sector": "Private",
+   "status": "approved",
+   "hec": {
+    "page": "https://www.hec.gov.pk/english/universities/Pages/Sindh/Zia-ud-Din-University.aspx",
+    "discipline": "General",
+    "charteredBy": "Government of Sindh"
+   }
+  }
+ ]
+}

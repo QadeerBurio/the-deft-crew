@@ -8,6 +8,7 @@ const multer = require("multer");
 const { storage, uploadLogo, hasCloudinary, deleteFromCloudinary } = require("../config/cloudinary");
 const User = require("../models/User");
 const University = require("../models/University");
+const universities = require("../services/universities");
 const Notification = require("../models/Notification");
 const Application = require("../models/Application");
 const path = require("path");
@@ -190,6 +191,7 @@ router.post("/signup", async (req, res) => {
       isAlumni,
       phone,
       universityName,
+      universityId: universityIdInput,
       address,
       instagram,
       referralCodeInput,
@@ -236,17 +238,33 @@ router.post("/signup", async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, 10);
 
     let universityId = null;
+    let universityDisplay = "";
     let name = "";
 
     // 4. Role logic
     if (role === "student") {
-      if (!fullName || !universityName) {
+      if (!fullName || (!universityName && !universityIdInput)) {
         return res.status(400).json({ error: "Name and university required" });
       }
       name = fullName;
-      let uni = await University.findOne({ name: universityName });
-      if (!uni) uni = await University.create({ name: universityName });
+      // the shared list (services/universities.js): an approved university, or the pending one the student just asked
+      // for ("my university isn't listed"); an old app build sends the typed name: matched to the list, else a request
+      let uni = null;
+      if (universityIdInput && mongoose.Types.ObjectId.isValid(String(universityIdInput))) {
+        uni = await University.findOne({ _id: universityIdInput, status: { $in: ["approved", "pending"] } }).lean();
+        if (!uni) return res.status(400).json({ error: "Pick your university from the list", code: "UNIVERSITY_NOT_AVAILABLE" });
+      } else {
+        const typed = String(universityName).replace(/\s+/g, " ").trim().slice(0, 150);
+        const cityPart = (typed.split(/\s+[—–-]\s+/)[1] || city || "").trim();
+        uni = await universities.bestMatch(typed, cityPart);
+        if (!uni) {
+          const r = await universities.request({ name: typed.split(/\s+[—–]\s+/)[0], city: cityPart || "Karachi" }).catch(() => null);
+          uni = r?.match ? await University.findById(r.match.id).lean() : r?.university ? await University.findById(r.university.id).lean() : null;
+        }
+        if (!uni) return res.status(400).json({ error: "Pick your university from the list", code: "UNIVERSITY_NOT_AVAILABLE" });
+      }
       universityId = uni._id;
+      universityDisplay = uni.name;
     } else if (role === "brand") {
       if (!brandName) {
         return res.status(400).json({ error: "Brand name required" });
@@ -282,6 +300,7 @@ router.post("/signup", async (req, res) => {
       rollNo,
       phone,
       university: universityId,
+      ...(universityDisplay ? { universityName: universityDisplay } : {}),
       address,
       instagram,
       status: "Not Verified",
