@@ -7,8 +7,12 @@
 //   POST   /:id/hide | /:id/show
 // An addition or edit shows in the app and portal dropdowns within a minute (GET /api/universities is cached 60 s).
 //   POST   /merge                    { fromId, toId }  every student / offer / confession moves, the old name becomes an alias
-//   GET    /unmatched                old typed names students have that aren't on the list, with counts and a suggestion
+//   GET    /unmatched                old typed names students have that aren't on the list, with counts, a suggestion with a
+//                                    confidence (high / medium / low / none) and alternatives; high first. Read only.
+//   GET    /unmatched/summary        { unmatched, students, matchedToday }
 //   POST   /unmatched/:id/match      { toId }  = merge into that university
+//   POST   /unmatched/match-bulk     { items: [{ id, toId }] } (up to 200)  each one merged and logged on its own;
+//                                    { matched, students, failed: [{ id, code, message }] }
 //   POST   /unmatched/:id/add        { name?, shortName?, city, aliases? }  becomes an approved university as it is
 const express = require("express");
 const mongoose = require("mongoose");
@@ -118,21 +122,50 @@ for (const [path, status, action] of [["hide", "hidden", "university.hide"], ["s
   }));
 }
 
-async function mergeAndLog(req, fromId, toId, action) {
+async function mergeAndLog(req, fromId, toId, action, reason = "") {
   const from = await load(fromId);
   const to = await load(toId);
   const before = { from: snap(from), to: snap(to) };
   const r = await unis.merge(from._id, to._id);
-  await audit(req, action, from, before, { from: snap(await load(from._id)), to: snap(await load(to._id)), moved: r.moved });
+  await audit(req, action, from, before, { from: snap(await load(from._id)), to: snap(await load(to._id)), moved: r.moved }, reason);
   return r;
 }
 router.post("/merge", handle(async (req, res) => ok(req, res, await mergeAndLog(req, req.body?.fromId, req.body?.toId, "university.merge"))));
 
 router.get("/unmatched", handle(async (req, res) => ok(req, res, await unis.unmatched())));
+router.get("/unmatched/summary", handle(async (req, res) => ok(req, res, await unis.unmatchedSummary())));
+router.post("/unmatched/match-bulk", handle(async (req, res) => {
+  const items = Array.isArray(req.body?.items) ? req.body.items : [];
+  if (!items.length) return fail(req, res, 400, "NOTHING_SELECTED", "Select at least one name");
+  if (items.length > 200) return fail(req, res, 400, "TOO_MANY", "Match up to 200 names at a time");
+  const seen = new Set();
+  const out = { matched: 0, students: 0, failed: [], results: [] };
+  for (const it of items) {
+    const id = String(it?.id || "");
+    try {
+      if (seen.has(id)) throw Object.assign(new Error("Listed twice"), { status: 400, code: "DUPLICATE" });
+      seen.add(id);
+      const u = await load(id);
+      if (u.status) throw Object.assign(new Error("This name is already on the list"), { status: 409, code: "NOT_UNMATCHED" });
+      const to = await load(it?.toId);
+      if (to.status !== "approved") throw Object.assign(new Error("Match to a university that is on the list"), { status: 400, code: "TARGET_NOT_LISTED" });
+      const r = await mergeAndLog(req, u._id, to._id, "university.match", `bulk match (${items.length} selected)`);
+      out.matched += 1;
+      out.students += r.moved.students || 0;
+      out.results.push({ id, to: r.to, moved: r.moved });
+    } catch (err) {
+      if (!err?.status) console.error("[admin-universities] bulk", err?.message);
+      out.failed.push({ id, code: err?.code || "SERVER_ERROR", message: err?.status ? err.message : "Something went wrong" });
+    }
+  }
+  ok(req, res, out);
+}));
 router.post("/unmatched/:id/match", handle(async (req, res) => {
   const u = await load(req.params.id);
   if (u.status) return fail(req, res, 409, "NOT_UNMATCHED", "This name is already on the list");
-  ok(req, res, await mergeAndLog(req, u._id, req.body?.toId, "university.match"));
+  const to = await load(req.body?.toId);
+  if (to.status !== "approved") return fail(req, res, 400, "TARGET_NOT_LISTED", "Match to a university that is on the list");
+  ok(req, res, await mergeAndLog(req, u._id, to._id, "university.match"));
 }));
 router.post("/unmatched/:id/add", handle(async (req, res) => {
   const u = await load(req.params.id);
