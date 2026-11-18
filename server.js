@@ -264,8 +264,8 @@ app.use("/api/brands", require("./routes/brands.routes"));
 app.use("/api/brand/store", require("./routes/brandStore.routes")); // a brand's own online store (WooCommerce)
 app.use("/api/notification", require("./routes/notification.routes"));
 app.use("/api/profile", require("./routes/profile.routes"));
-app.use("/api/admin/actions", require("./routes/adminActions.routes"));
-app.use("/api/admin/universities", require("./routes/adminUniversities.routes")); // the shared university list (admin only, logged) // the unified admin action log (read-only)
+app.use("/api/admin/actions", require("./routes/adminActions.routes")); // the unified admin action log (read-only)
+app.use("/api/admin/universities", require("./routes/adminUniversities.routes")); // the shared university list (admin only, logged)
 app.use("/api/admin/features", require("./routes/adminFeatures.routes")); // features per account (admin only, logged)
 app.use("/api/admin", require("./routes/admin.routes"));
 app.use("/api/membership", require("./routes/membership.route"));
