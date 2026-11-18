@@ -7,11 +7,14 @@
 //   bestMatch(text, city?)      the approved university a typed name most likely means, or null ("did you mean …?")
 //   unmatchedEntry(name)        an old app build's typed name that matches nothing: kept as an unmatched entry (never listed)
 //   displayName(user)           the name to show for a student (shared list first, the old text as a fallback)
-//   unmatched()                 the old typed names students have, grouped with counts and a suggested match
+//   unmatched()                 the old typed names students have, grouped with counts and a suggested match with a
+//                               confidence (high / medium / low / none, services/universityMatch.js) and alternatives
+//   unmatchedSummary()          { unmatched, students, matchedToday } for the admin page's counts
 //   merge(fromId, toId)         every student / offer / confession moves to `toId`; `from`'s name becomes an alias
 //   recount(ids)                studentCount for these universities
 const mongoose = require("mongoose");
 const University = require("../models/University");
+const matcher = require("./universityMatch");
 
 const STOP = new Set(["the", "of", "and", "for", "in", "at", "pakistan", "pk"]);
 const CAMPUS = /\b(main|city|north|south|east|west|new|old|gulshan|clifton|airport|defence|road|link|m-9|campus|branch|sub-campus)\b/g;
@@ -140,18 +143,30 @@ async function recount(ids) {
   await Promise.all(list.map((id) => University.updateOne({ _id: id }, { $set: { studentCount: m.get(id) || 0 } })));
 }
 
-/** old typed names (signup entries without a status) that students use, with counts and a suggestion */
+const UNMATCHED = { $or: [{ status: { $exists: false } }, { status: null }] };
+const CONFIDENCE_ORDER = { high: 0, medium: 1, low: 2, none: 3 };
+/** old typed names (signup entries without a status) that students use, with counts, the most likely official
+ *  university, how sure that is (high / medium / low / none) and a few alternatives. Read only. */
 async function unmatched() {
-  const rows = await University.find({ $or: [{ status: { $exists: false } }, { status: null }] }).select("name city").lean();
+  const rows = await University.find(UNMATCHED).select("name city").lean();
   if (!rows.length) return [];
-  const counts = await countsFor(rows.map((r) => r._id));
-  const out = [];
-  for (const r of rows) {
-    const students = counts.get(String(r._id)) || 0;
-    const s = await bestMatch(r.name, r.city);
-    out.push({ id: String(r._id), name: r.name, students, suggestion: s ? view(s) : null });
-  }
-  return out.sort((a, b) => b.students - a.students || a.name.localeCompare(b.name));
+  const [counts, list] = await Promise.all([countsFor(rows.map((r) => r._id)), approved()]);
+  const out = rows.map((r) => {
+    const s = matcher.suggest(r.name, list, { city: r.city, view });
+    return { id: String(r._id), name: r.name, city: r.city || "", students: counts.get(String(r._id)) || 0, suggestion: s.match, confidence: s.confidence, score: s.score, reason: s.reason, alternatives: s.alternatives };
+  });
+  return out.sort((a, b) => CONFIDENCE_ORDER[a.confidence] - CONFIDENCE_ORDER[b.confidence] || b.students - a.students || a.name.localeCompare(b.name));
+}
+
+// midnight in Pakistan (UTC+5, no daylight saving) as a Date
+const startOfTodayPK = (now = new Date()) => { const pk = new Date(now.getTime() + 5 * 3600e3); pk.setUTCHours(0, 0, 0, 0); return new Date(pk.getTime() - 5 * 3600e3); };
+/** the admin page's counts: unmatched names, students on them, names matched (or added as new) today */
+async function unmatchedSummary(now = new Date()) {
+  const rows = await University.find(UNMATCHED).select("_id").lean();
+  const counts = rows.length ? await countsFor(rows.map((r) => r._id)) : new Map();
+  const AdminActionLog = mongoose.models.AdminActionLog || require("../models/AdminActionLog");
+  const done = await AdminActionLog.find({ targetType: "University", action: { $in: ["university.match", "university.add_unmatched"] }, at: { $gte: startOfTodayPK(now) } }).select("targetId").lean();
+  return { unmatched: rows.length, students: [...counts.values()].reduce((a, b) => a + b, 0), matchedToday: new Set(done.map((d) => String(d.targetId))).size };
 }
 
 /** move everything from one entry to another; the old name stays findable as an alias */
@@ -179,4 +194,4 @@ async function merge(fromId, toId) {
   return { from: view(from), to: view(to), moved };
 }
 
-module.exports = { keyOf, coreOf, all, search, bestMatch, unmatchedEntry, displayName, unmatched, merge, recount, countsFor, view, bust, approved };
+module.exports = { keyOf, coreOf, all, search, bestMatch, unmatchedEntry, displayName, unmatched, unmatchedSummary, startOfTodayPK, merge, recount, countsFor, view, bust, approved };
