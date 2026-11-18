@@ -173,6 +173,8 @@ city: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "University",
     },
+    // the university's name as shown (the shared list's, models/University.js); set with `university`
+    universityName: { type: String, default: "", trim: true },
     instagram: { type: String },
 // Add these fields inside the userSchema, near the student-specific section:
 gender: {
