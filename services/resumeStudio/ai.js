@@ -5,11 +5,11 @@
 const OpenAI = require("openai");
 
 let client;
-const ATTEMPT_MS = 45000;
+const ATTEMPT_MS = 55000;
 let override = null; // tests: async (messages) => replyText
 
 function getClient() {
-  // 45 s per attempt, no SDK retries: completeJson makes at most 2 attempts, so a tailoring waits 90 s at most
+  // 55 s per attempt, no SDK retries: completeJson makes at most 2 attempts, so a tailoring waits 110 s at most
   if (!client) client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: ATTEMPT_MS, maxRetries: 0 });
   return client;
 }
@@ -21,7 +21,7 @@ async function complete(messages) {
   const res = await getClient().chat.completions.create({
     model: process.env.OPENAI_MODEL || "gpt-4o-mini",
     messages,
-    temperature: 0.2,
+    temperature: 0.4, // v3: real rewording (facts are checked in code, not by a low temperature)
     response_format: { type: "json_object" },
   });
   const choice = res.choices?.[0];

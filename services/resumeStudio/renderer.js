@@ -13,7 +13,7 @@
 const PDFDocument = require("pdfkit");
 const urdu = require("../pdfText/urdu");
 
-const RENDERER_VERSION = "ats-classic-2";
+const RENDERER_VERSION = "ats-classic-3"; // 3: the section order a tailored version chose (content.sectionOrder)
 const MARGIN = 50;
 const BODY = 10;
 const SMALL = 9;
@@ -228,9 +228,13 @@ function render(content, { draft = false } = {}) {
   };
 
   const fresher = c.workExperience.length === 0;
-  const order = fresher
-    ? [summary, projects, education, skills, experience, certifications, languages]
-    : [summary, experience, skills, projects, education, certifications, languages];
+  const byName = { experience, projects, education, skills, certifications, languages };
+  const chosen = Array.isArray(c.sectionOrder) && c.sectionOrder.length ? c.sectionOrder.filter((n) => byName[n]) : null;
+  const order = chosen
+    ? [summary, ...chosen.map((n) => byName[n]), ...Object.keys(byName).filter((n) => !chosen.includes(n)).map((n) => byName[n])]
+    : fresher
+      ? [summary, projects, education, skills, experience, certifications, languages]
+      : [summary, experience, skills, projects, education, certifications, languages];
   order.forEach((f) => f());
   doc.end();
   return done;

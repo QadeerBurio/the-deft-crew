@@ -6,6 +6,7 @@ const crypto = require("crypto");
 const cache = require("../../utils/cache");
 const { normalizeSkill, SYNONYM_MAP } = require("../../utils/skillNormalizer");
 const injection = require("./injection");
+const { extractKeywords } = require("./keywords");
 
 const TTL_SECONDS = 7 * 24 * 3600;
 
@@ -34,28 +35,30 @@ function otherRequirementsIn(text) {
   const t = String(text || "");
   const years = t.match(/\b(\d{1,2})\+?\s*(?:years?|yrs?)\b[^.\n]{0,40}/i);
   if (years) out.push({ requirement: years[0].trim(), kind: "experience" });
-  if (/\b(bachelor|bs|bsc|be|master|ms|msc|mba|phd|degree)\b/i.test(t)) {
-    const m = t.match(/[^.\n]{0,40}\b(bachelor|bs|bsc|be|master|ms|msc|mba|phd|degree)\b[^.\n]{0,40}/i);
-    out.push({ requirement: (m ? m[0] : "degree").trim(), kind: "education" });
-  }
+  // a degree: the words, or the short forms written in capitals (BS / MS / BBA), never "MS Excel" / "MS Office"
+  const DEGREE = /\b(bachelor'?s?|master'?s?|mba|phd|degree)\b|\b(BS|BSc|BBA|BE|MS|MSc)\b(?!\s*(Excel|Office|Word|Teams|PowerPoint|Access|Project|SQL))/;
+  const line = t.split("\n").find((l) => DEGREE.test(l.replace(/\b(bachelor|master|mba|phd|degree)\b/gi, (w) => w.toLowerCase())) || /\b(bachelor|master|mba|phd|degree)\b/i.test(l));
+  if (line) out.push({ requirement: line.replace(/^[\s\-*•]+/, "").trim().slice(0, 90), kind: "education" });
   return out;
 }
 
-/** { hash, title, excerpt, requirements: [{ requirement, kind }], skills, injectionFlags } */
-async function requirementsFor({ title = "", description = "" }) {
+/** { hash, title, company, excerpt, requirements: [{ requirement, kind }], skills, keywords: [{ term, kind }], injectionFlags } */
+async function requirementsFor({ title = "", description = "", company = "" }) {
   const scanned = injection.scan(String(description).slice(0, injection.MAX_JOB_CHARS));
   const text = normalizeText(scanned.text);
   const hash = hashOf(`${title}\n${text}`);
-  const key = `career:resume:jobreq:${hash}`;
+  const key = `career:resume:jobreq:v2:${hash}`; // v2: with keywords
+  const withCompany = (o) => ({ ...o, company: String(company || "").replace(/\s+/g, " ").trim().slice(0, 120) });
   try {
     const hit = await cache.get(key);
-    if (hit) return { ...JSON.parse(hit), cached: true };
+    if (hit) return { ...withCompany(JSON.parse(hit)), cached: true };
   } catch {}
   const skills = skillTermsIn(`${title}\n${text}`);
   const requirements = [...skills.map((s) => ({ requirement: s, kind: "skill" })), ...otherRequirementsIn(text)];
-  const out = { hash, title: String(title).slice(0, 200), excerpt: text.slice(0, 2500), requirements, skills, injectionFlags: scanned.flagged };
+  const keywords = extractKeywords(title, text, skills);
+  const out = { hash, title: String(title).slice(0, 200), excerpt: text.slice(0, 3500), requirements, skills, keywords, injectionFlags: scanned.flagged };
   try { await cache.set(key, JSON.stringify(out), TTL_SECONDS); } catch {}
-  return { ...out, cached: false };
+  return { ...withCompany(out), cached: false };
 }
 
 module.exports = { requirementsFor, skillTermsIn, hashOf, normalizeText, SKILL_TERMS };

@@ -13,7 +13,9 @@ const CareerResumeDraft = require("../../models/CareerResumeDraft");
 const CareerResumeApprovedVersion = require("../../models/CareerResumeApprovedVersion");
 const { StudioError } = require("./tailor");
 const { revisionHashOf, hashContent } = require("./facts");
-const { checkText, checkVersion, corpusOf, getAt, setAt, listForOrder } = require("./validator");
+const { checkText, checkHeadline, checkVersion, corpusOf, getAt, setAt, listForOrder, entryText, condenseTarget, kindOfPath } = require("./validator");
+const { coverage } = require("./keywords");
+const { estimatePages } = require("./tailor");
 const { RENDERER_VERSION, pdfStatus } = require("./renderer");
 const matching = require("../career/matchingService");
 const SECTIONS = ["workExperience", "education", "projects", "skills", "certifications", "languages"];
@@ -62,12 +64,20 @@ function addedSkills(draft) {
 function contentWithDecisions(draft) {
   const content = clone(draft.sourceContent);
   const used = (draft.suggestions || []).filter(applied);
+  const textOf = (s) => (s.decision === "edited" ? s.editedText : s.proposed);
   for (const s of used.filter((x) => x.kind === "reword")) {
-    if (typeof getAt(content, s.fieldPath) === "string") setAt(content, s.fieldPath, s.decision === "edited" ? s.editedText : s.proposed);
+    if (typeof getAt(content, s.fieldPath) === "string") setAt(content, s.fieldPath, textOf(s));
   }
-  for (const s of used.filter((x) => x.kind === "reorder")) {
+  // a less relevant entry as one line: its description becomes the line, its bullets go into it
+  for (const s of used.filter((x) => x.kind === "condense")) {
+    const entry = getAt(content, condenseTarget(s.fieldPath));
+    if (entry && typeof entry === "object") { entry.description = textOf(s); if (Array.isArray(entry.achievements)) entry.achievements = []; }
+  }
+  const depth = (s) => (s.fieldPath === "order.sections" ? 2 : /\]\./.test(s.fieldPath) ? 0 : 1);
+  for (const s of used.filter((x) => x.kind === "reorder").sort((a, b) => depth(a) - depth(b))) {
     const list = listForOrder(content, s.fieldPath);
     const order = JSON.parse(s.proposed);
+    if (s.fieldPath === "order.sections") { if (Array.isArray(order) && order.length === list.length) content.sectionOrder = order; continue; }
     if (Array.isArray(list) && order.length === list.length) setAt(content, s.fieldPath.replace(/^order\./, ""), order.map((i) => list[i]));
   }
   // the job's skills the resume shows (and the ones the student confirmed) lead the skills section
@@ -75,11 +85,36 @@ function contentWithDecisions(draft) {
   if (extra.length) content.skills = [...extra, ...(content.skills || [])];
   return keepComplete(draft.sourceContent, content);
 }
-/** the match estimate (the jobs list's skill-evidence matcher) on some content, for this draft's job: 0-100 or null */
+/**
+ * The match estimate on some content for this draft's job, 0-100 or null: the jobs list's skill-evidence matcher
+ * and the share of the job's keywords the resume shows, averaged (either alone when the job has only one).
+ */
 function scoreOf(draft, content) {
   const skills = draft.match?.jobSkills || [...(draft.match?.matched || []), ...(draft.match?.missing || [])].filter((r) => r.kind === "skill").map((r) => r.requirement);
-  if (!skills.length) return null;
-  return matching.match({ skills, requirements: [] }, matching.profileOf({ content })).relevance.score;
+  const parts = [];
+  if (skills.length) parts.push(matching.match({ skills, requirements: [] }, matching.profileOf({ content })).relevance.score);
+  const kw = draft.match?.keywords || [];
+  if (kw.length) parts.push(Math.round((coverage(kw, content).covered.length / kw.length) * 100));
+  if (!parts.length) return null;
+  return Math.round(parts.reduce((a, b) => a + b, 0) / parts.length);
+}
+/** which of the job's keywords a content shows */
+const keywordsOf = (draft, content) => coverage(draft.match?.keywords || [], content);
+/** the part of the resume a suggestion belongs to (for "accept / undo this section") */
+function sectionOf(fieldPath) {
+  if (fieldPath === "personalInfo.title") return "headline";
+  if (fieldPath === "professionalSummary.summary") return "summary";
+  if (fieldPath === "order.sections") return "layout";
+  const m = /^(?:order\.|condense\.)?(workExperience|projects|education|skills)/.exec(fieldPath);
+  return m ? { workExperience: "experience", projects: "projects", education: "education", skills: "skills" }[m[1]] : "other";
+}
+/** the version's default name: "<Name> – <Job title> (<Company>)" */
+function defaultLabel(draft) {
+  const pi = draft.sourceContent?.personalInfo || {};
+  const name = [pi.firstName, pi.lastName].filter(Boolean).join(" ").trim();
+  const title = draft.target?.title || "tailored resume";
+  const company = draft.target?.company ? ` (${draft.target.company})` : "";
+  return `${name ? `${name} – ` : ""}${title}${company}`.replace(/\s+/g, " ").trim().slice(0, 80);
 }
 /** the job's skills the (final) resume doesn't show: the student may confirm one, with a proof line */
 function missingSkills(draft, content) {
@@ -92,8 +127,12 @@ function missingSkills(draft, content) {
 function changesOf(source, final) {
   const out = [];
   const push = (section, label, before, after) => { if (String(before || "") !== String(after || "")) out.push({ section, label, before: before || "", after: after || "" }); };
-  push("summary", "summary", source.professionalSummary?.summary, final.professionalSummary?.summary);
   const names = (list, f) => (list || []).map(f).join("\n");
+  push("headline", "headline", source.personalInfo?.title, final.personalInfo?.title);
+  push("summary", "summary", source.professionalSummary?.summary, final.professionalSummary?.summary);
+  push("layout", "order of sections", (source.sectionOrder || []).join(" → "), (final.sectionOrder || []).join(" → "));
+  push("experience", "order of experience", names(source.workExperience, (w) => `${w.position} at ${w.company}`), names(final.workExperience, (w) => `${w.position} at ${w.company}`));
+  push("education", "order of education", names(source.education, (e) => e.institution), names(final.education, (e) => e.institution));
   push("skills", "skills", names(source.skills, (s) => s.name), names(final.skills, (s) => s.name));
   (final.workExperience || []).forEach((w, i) => {
     const s = (source.workExperience || []).find((x) => x.company === w.company && x.position === w.position) || {};
@@ -123,10 +162,11 @@ function studentView(draft) {
     resumeId: String(d.resumeId),
     status: d.status,
     revision: d.revision,
-    target: { kind: d.target?.kind, jobId: d.target?.jobId ? String(d.target.jobId) : null, title: d.target?.title || "" },
+    target: { kind: d.target?.kind, jobId: d.target?.jobId ? String(d.target.jobId) : null, title: d.target?.title || "", company: d.target?.company || "" },
+    defaultLabel: defaultLabel(d),
     provenance: d.provenance,
     suggestions: (d.suggestions || []).map((s) => ({
-      suggestionId: s.suggestionId, kind: s.kind, fieldPath: s.fieldPath, original: s.original, proposed: s.proposed, reason: s.reason,
+      suggestionId: s.suggestionId, kind: s.kind, fieldPath: s.fieldPath, section: sectionOf(s.fieldPath), original: s.original, proposed: s.proposed, reason: s.reason,
       sourceFactIds: s.sourceFactIds, status: s.status, riskFlags: s.riskFlags, decision: s.decision, editedText: s.editedText,
       editStatus: s.editStatus || null, editRiskFlags: s.editRiskFlags || [], confirmedTrue: !!s.confirmedTrue,
     })),
@@ -134,6 +174,10 @@ function studentView(draft) {
     match: d.match || { matched: [], missing: [], unknown: [] },
     // the match estimate on the base resume and on this tailored version ("before X% → after Y%")
     scores: { before: scoreOf(d, d.sourceContent), after: scoreOf(d, contentWithDecisions(d)) },
+    // which of the job's keywords the resume shows, before and after ("keywords covered N of M")
+    keywords: { before: keywordsOf(d, d.sourceContent), after: keywordsOf(d, contentWithDecisions(d)) },
+    // about how many pages, and what it should fit (1 for students with little experience, at most 2)
+    pages: { before: estimatePages(d.sourceContent), after: estimatePages(contentWithDecisions(d)), budget: d.match?.pageBudget || 2 },
     surfacedSkills: (d.match?.surfaced || []).map((s) => ({ skill: s.skill, evidence: (s.evidence || []).map((e) => e.text).filter(Boolean) })),
     confirmedSkills: (d.match?.confirmedSkills || []).map((s) => ({ skill: s.skill, proof: s.proof, confirmedAt: s.confirmedAt })),
     missingSkills: missingSkills(d, contentWithDecisions(d)),
@@ -164,7 +208,15 @@ async function decide(userId, draftId, body) {
   if (!draft) throw new StudioError("NOT_FOUND", "Draft not found");
   if (draft.status !== "open") throw new StudioError("ALREADY_APPROVED", "This draft is already approved. Start a new tailoring to make changes.");
   if (Number(body?.revision) !== draft.revision) throw Object.assign(new StudioError("STALE_REVISION", "This draft changed on another device. Reload it and try again."), { current: draft.revision });
-  const list = Array.isArray(body?.decisions) ? body.decisions.slice(0, 100) : [];
+  let list = Array.isArray(body?.decisions) ? body.decisions.slice(0, 100) : [];
+  // { bulk: { section?: "summary" | "experience" | ..., decision: "accepted" | "rejected" | "pending" } }: accept takes
+  // every change the checks passed (a "not in your resume" one still needs its own "this is true"); undo / reject
+  // takes every change of the section
+  if (!list.length && body?.bulk && ["accepted", "rejected", "pending"].includes(body.bulk.decision)) {
+    const inSection = (draft.suggestions || []).filter((s) => !body.bulk.section || sectionOf(s.fieldPath) === body.bulk.section);
+    list = inSection.filter((s) => body.bulk.decision !== "accepted" || s.status === "ok").map((s) => ({ suggestionId: s.suggestionId, decision: body.bulk.decision }));
+    if (!list.length) throw new StudioError("NOTHING_TO_DECIDE", body.bulk.decision === "accepted" ? "These changes need your own check: accept each one after reading it." : "Nothing to change in this section");
+  }
   if (!list.length) throw new StudioError("NO_DECISIONS", "Nothing to change");
   const corpus = corpusOf(draft.facts || []);
   const suggestions = clone(draft.suggestions);
@@ -185,10 +237,13 @@ async function decide(userId, draftId, body) {
     s.editStatus = "";
     s.editRiskFlags = [];
     if (d.decision === "edited") {
-      if (s.kind !== "reword") throw new StudioError("INVALID_DECISION", "A reorder can be accepted or rejected, not edited");
+      if (s.kind === "reorder") throw new StudioError("INVALID_DECISION", "A reorder can be accepted or rejected, not edited");
       const text = String(d.editedText || "").replace(/\s+/g, " ").trim().slice(0, 1500);
       if (!text) throw new StudioError("EMPTY_EDIT", "Your edit is empty");
-      const r = checkText(text, s.original, corpus);
+      const jobTerms = [draft.target?.title, ...((draft.match?.keywords || []).map((k) => k.term))].filter(Boolean).join("\n");
+      const r = s.fieldPath === "personalInfo.title"
+        ? checkHeadline(text, s.original, corpus, { jobTitle: draft.target?.title, jobTerms })
+        : checkText(text, s.original, corpus, { kind: kindOfPath(s.fieldPath), jobTerms });
       if (r.status === "blocked") throw Object.assign(new StudioError("EDIT_BLOCKED", "Your edit adds a date, link or e-mail that isn't in your resume. Change it in your resume first."), { suggestionId: s.suggestionId, riskFlags: r.riskFlags });
       if (r.status === "needs_user_confirmation" && !confirmTrue) throw Object.assign(new StudioError("CONFIRMATION_REQUIRED", "Your edit says something that isn't in your resume. Save it only if it is true."), { suggestionId: s.suggestionId, riskFlags: r.riskFlags });
       Object.assign(s, { editedText: text, editStatus: r.status, editRiskFlags: r.riskFlags });
@@ -228,15 +283,18 @@ async function approve(userId, draftId, body) {
     throw new StudioError("SOURCE_CHANGED", "Your resume changed after this draft was made. Please tailor it again.");
   }
   const final = contentWithDecisions(draft);
-  const check = checkVersion(draft.sourceContent, final, corpusOf(draft.facts || []), confirmedClaims(draft), addedSkills(draft).map((s) => s.name));
+  const jobCtx = { title: draft.target?.title || "", terms: [draft.target?.title, ...((draft.match?.keywords || []).map((k) => k.term))].filter(Boolean).join("\n") };
+  const check = checkVersion(draft.sourceContent, final, corpusOf(draft.facts || []), confirmedClaims(draft), addedSkills(draft).map((s) => s.name), jobCtx);
   if (!check.ok) throw Object.assign(new StudioError("VALIDATION_FAILED", "Some changes add details that aren't in your resume."), { errors: check.errors });
-  const label = String(body?.label || draft.target?.title || "Tailored resume").replace(/\s+/g, " ").trim().slice(0, 80);
+  const label = String(body?.label || defaultLabel(draft)).replace(/\s+/g, " ").trim().slice(0, 80);
+  const TEMPLATES = ["ats-classic", "modern_ats", "stanford", "jakes", "rezi", "faang"];
+  const templateId = TEMPLATES.includes(body?.templateId) ? body.templateId : "ats-classic";
   let version;
   let created = true;
   try {
     version = (await CareerResumeApprovedVersion.create({
-      userId, sourceResumeId: draft.resumeId, draftId: draft._id, label,
-      target: { kind: draft.target?.kind || "", jobId: draft.target?.jobId || null, title: draft.target?.title || "" },
+      userId, sourceResumeId: draft.resumeId, draftId: draft._id, label, templateId,
+      target: { kind: draft.target?.kind || "", jobId: draft.target?.jobId || null, title: draft.target?.title || "", company: draft.target?.company || "" },
       contentSnapshot: final, contentHash: hashContent(final), rendererVersion: RENDERER_VERSION, promptVersion: draft.promptVersion,
     })).toObject();
   } catch (e) {
@@ -250,7 +308,7 @@ async function approve(userId, draftId, body) {
 
 /** Version metadata the owner (and, for an attached one, the employer) sees */
 const versionView = (v) => ({
-  id: String(v._id), label: v.label, target: { kind: v.target?.kind || "", jobId: v.target?.jobId ? String(v.target.jobId) : null, title: v.target?.title || "" },
+  id: String(v._id), label: v.label, target: { kind: v.target?.kind || "", jobId: v.target?.jobId ? String(v.target.jobId) : null, title: v.target?.title || "", company: v.target?.company || "" },
   contentHash: v.contentHash, templateId: v.templateId, rendererVersion: v.rendererVersion, approvedAt: v.approvedAt,
   usedInApplication: !!v.usedInApplication, retainUntil: v.retainUntil || null, deletable: !v.usedInApplication,
 });
@@ -297,4 +355,4 @@ module.exports = {
   confirmSkill,
   keepComplete,
   scoreOf,
-  addedSkills, decide, approve, studentView, versionView, contentWithDecisions, applied };
+  addedSkills, decide, approve, studentView, versionView, contentWithDecisions, applied, sectionOf, defaultLabel, keywordsOf };
