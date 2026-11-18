@@ -1,9 +1,11 @@
-// services/universities.js — the shared university list (models/University.js): search, requests, matching
-// typed names, merging duplicates and the admin's "unmatched names". Matching (careers) never calls this.
+// services/universities.js — the shared university list (models/University.js): the full list, search, matching
+// typed names, merging duplicates and the admin's "unmatched names". Only admins add to the list (students can't).
+// Matching (careers) never calls this.
+//   all()                       every approved university, A–Z, with aliases (the app / portal dropdowns)
 //   keyOf(text)                 the name normalised for matching
 //   search(q, { limit })        approved universities whose name / short name / aliases match (case and space don't matter)
 //   bestMatch(text, city?)      the approved university a typed name most likely means, or null ("did you mean …?")
-//   request({ name, city, userId })  a student's "my university isn't listed": the match if there is one, else a pending entry
+//   unmatchedEntry(name)        an old app build's typed name that matches nothing: kept as an unmatched entry (never listed)
 //   displayName(user)           the name to show for a student (shared list first, the old text as a fallback)
 //   unmatched()                 the old typed names students have, grouped with counts and a suggested match
 //   merge(fromId, toId)         every student / offer / confession moves to `toId`; `from`'s name becomes an alias
@@ -44,7 +46,7 @@ const jaccard = (a, b) => {
 // approved entries, in memory (a few hundred rows): search stays fast without a text index
 let cache = null;
 let cacheAt = 0;
-const TTL = 5 * 60 * 1000;
+const TTL = 60 * 1000; // an admin's change shows within a minute everywhere (and at once on the server that made it)
 async function approved() {
   if (cache && Date.now() - cacheAt < TTL) return cache;
   const rows = await University.find({ status: "approved" }).select("name shortName city province aliases key studentCount").lean();
@@ -55,6 +57,11 @@ async function approved() {
 const bust = () => { cache = null; };
 
 const view = (u) => ({ id: String(u._id), name: u.name, shortName: u.shortName || "", city: u.city || "", status: u.status || "unmatched" });
+
+/** every approved university, A–Z, with its other names (for filtering in the dropdown) */
+async function all() {
+  return (await approved()).slice().sort((a, b) => a.name.localeCompare(b.name)).map((u) => ({ ...view(u), aliases: u.aliases || [] }));
+}
 
 async function search(q, { limit = 20 } = {}) {
   const list = await approved();
@@ -96,25 +103,18 @@ async function bestMatch(text, city = "") {
   return bestScore >= 0.75 ? best : null;
 }
 
-/** "my university isn't listed": the match if it's really there, else a pending entry (one per name) */
-async function request({ name, city, userId = null }) {
+/** an old app build's typed name that matches nothing: one unmatched entry per name (no status: never in the list;
+ *  the admin matches it under "unmatched names") */
+async function unmatchedEntry(name) {
   const clean = String(name || "").replace(/\s+/g, " ").trim().slice(0, 150);
-  const cleanCity = String(city || "").replace(/\s+/g, " ").trim().slice(0, 80);
-  if (clean.length < 3) throw Object.assign(new Error("Type your university's full name"), { status: 400, code: "NAME_REQUIRED" });
-  if (!cleanCity) throw Object.assign(new Error("Add the city"), { status: 400, code: "CITY_REQUIRED" });
-  const match = await bestMatch(clean, cleanCity);
-  if (match) return { match: view(match), created: false };
-  const key = keyOf(clean);
-  // the same request twice (or by two students): one pending entry
-  const existing = await University.findOne({ $or: [{ key, status: "pending" }, { name: clean }] }).lean();
-  if (existing && existing.status !== "hidden") return { university: view(existing), created: false };
-  if (existing) return { university: view(existing), created: false, hidden: true };
+  if (clean.length < 2) return null;
+  const existing = await University.findOne({ name: clean }).lean();
+  if (existing) return existing.status === "hidden" && existing.mergedInto ? University.findById(existing.mergedInto).lean() : existing;
   try {
-    const u = await University.create({ name: clean, city: cleanCity, key, status: "pending", source: "student", requestedBy: mongoose.Types.ObjectId.isValid(String(userId || "")) ? userId : null });
-    return { university: view(u), created: true };
+    return (await University.create({ name: clean, key: keyOf(clean), source: "signup" })).toObject();
   } catch (e) {
     if (e?.code !== 11000) throw e;
-    return { university: view(await University.findOne({ name: clean }).lean()), created: false };
+    return University.findOne({ name: clean }).lean();
   }
 }
 
@@ -179,4 +179,4 @@ async function merge(fromId, toId) {
   return { from: view(from), to: view(to), moved };
 }
 
-module.exports = { keyOf, coreOf, search, bestMatch, request, displayName, unmatched, merge, recount, countsFor, view, bust, approved };
+module.exports = { keyOf, coreOf, all, search, bestMatch, unmatchedEntry, displayName, unmatched, merge, recount, countsFor, view, bust, approved };

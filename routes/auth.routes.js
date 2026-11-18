@@ -247,20 +247,17 @@ router.post("/signup", async (req, res) => {
         return res.status(400).json({ error: "Name and university required" });
       }
       name = fullName;
-      // the shared list (services/universities.js): an approved university, or the pending one the student just asked
-      // for ("my university isn't listed"); an old app build sends the typed name: matched to the list, else a request
+      // the shared list (services/universities.js): an approved university by id. A name without an id (the app's
+      // bundled list while offline, or an old app build) is matched to the list; an old build's name that matches
+      // nothing is kept as an unmatched entry for the admin (never shown in the list), so signup still works
       let uni = null;
       if (universityIdInput && mongoose.Types.ObjectId.isValid(String(universityIdInput))) {
-        uni = await University.findOne({ _id: universityIdInput, status: { $in: ["approved", "pending"] } }).lean();
+        uni = await University.findOne({ _id: universityIdInput, status: "approved" }).lean();
         if (!uni) return res.status(400).json({ error: "Pick your university from the list", code: "UNIVERSITY_NOT_AVAILABLE" });
       } else {
         const typed = String(universityName).replace(/\s+/g, " ").trim().slice(0, 150);
         const cityPart = (typed.split(/\s+[—–-]\s+/)[1] || city || "").trim();
-        uni = await universities.bestMatch(typed, cityPart);
-        if (!uni) {
-          const r = await universities.request({ name: typed.split(/\s+[—–]\s+/)[0], city: cityPart || "Karachi" }).catch(() => null);
-          uni = r?.match ? await University.findById(r.match.id).lean() : r?.university ? await University.findById(r.university.id).lean() : null;
-        }
+        uni = (await universities.bestMatch(typed, cityPart)) || (await universities.unmatchedEntry(typed));
         if (!uni) return res.status(400).json({ error: "Pick your university from the list", code: "UNIVERSITY_NOT_AVAILABLE" });
       }
       universityId = uni._id;
