@@ -11,8 +11,6 @@
 const ALLOW = [
   // signing up and in, codes and password reset
   ["POST", /^\/auth\/(signup|login|signup\/verify-otp|signup\/resend-otp|forgot-password|resend-otp|verify-otp|reset-password)\/?$/i],
-  // "my university isn't listed" during signup (no account yet): rate limited per device, makes only a pending request
-  ["POST", /^\/universities\/request\/?$/i],
   // store webhooks: each checks its own signature or secret
   ["POST", /^\/webhooks\/woocommerce\/[^/]+\/?$/i],
   ["POST", /^\/webhooks\/confirm\/?$/i],

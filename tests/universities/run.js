@@ -1,13 +1,12 @@
-// The shared university list (feat/universities): search by name / short name / alias (approved only), students'
-// "not listed" requests (pending, near-duplicates answered "did you mean", rate limited), signup with the list (and
-// old app builds that send a typed name), the student's own university, admin add / edit / hide / approve / reject /
-// merge (logged; merge moves students and keeps an alias), unmatched old names with match-to / add-as-new, the HEC
-// seed script (dry run, apply, idempotent), and matching that never reads a university.
+// The shared university list (feat/universities, fix/universities-rules): the full list A–Z (approved only) and search by
+// name / short name / alias; students can NOT add universities (no request route); signup with the list, offline with a
+// bundled name, and old app builds; the student's own university; admin add / edit / hide / show / merge (logged; merge
+// moves students and keeps an alias), no approve / reject / badge; unmatched old names with match-to / add-as-new; the
+// HEC seed script (dry run, apply, idempotent); matching that never reads a university.
 //   node tests/universities/run.js [serverDir]
 const path = require("path");
 const fs = require("fs");
 const SERVER = path.resolve(process.argv[2] || path.join(__dirname, "..", ".."));
-process.env.RATE_LIMIT_UNIVERSITY_REQUEST_MAX = "5";
 const h = require("../hiring-fixes/harness")(SERVER, {
   extraRoutes: [["/api/universities", "./routes/university.routes"], ["/api/admin/universities", "./routes/adminUniversities.routes"], ["/api/auth", "./routes/auth.routes"]],
   models: ["University", "Offer", "Confession", "AdminActionLog"],
@@ -50,37 +49,30 @@ const ip = (n) => ({ "x-forwarded-for": `10.0.0.${n}` });
   check("running it again changes nothing (idempotent)", out.add.length === 0 && out.adopt.length === 0 && out.update.length === 0, JSON.stringify({ a: out.add.length, d: out.adopt.length, u: out.update.slice(0, 3) }));
   check("the suspended institute is seeded hidden", rows("University", (u) => /^Global Institute, Lahore$/.test(u.name))[0]?.status === "hidden");
 
-  console.log("── search (public, approved only)");
+  console.log("── the full list (public, approved only, A–Z) and search");
   unis.bust();
   const names = (r) => (r.json?.data || []).map((u) => u.name);
-  let r = await call("GET", "/api/universities?search=iobm");
-  check("short name 'iobm' finds the Institute of Business Management", r.status === 200 && names(r)[0] === "Institute of Business Management" && r.json.data[0].shortName === "IoBM" && r.json.data[0].city === "Karachi", JSON.stringify(r.json?.data?.slice(0, 2)));
+  let r = await call("GET", "/api/universities");
+  const full = r.json?.data || [];
+  const approvedCount = rows("University", (u) => u.status === "approved").length;
+  check(`no search: every approved university (${full.length}), A–Z, with short name, city and aliases`, r.status === 200 && full.length === approvedCount && full.length >= 280 && full.every((u, i) => i === 0 || full[i - 1].name.localeCompare(u.name) <= 0) && full.some((u) => u.shortName === "IoBM" && u.city === "Karachi" && Array.isArray(u.aliases)), `${full.length} of ${approvedCount}`);
+  check("…never hidden or old unmatched entries", !names(r).includes("Global Institute, Lahore") && !names(r).includes("iobm karachi") && !names(r).includes("NED University of Engineering and Technology — Karachi"));
+  r = await call("GET", "/api/universities?search=iobm");
+  check("search: short name 'iobm' → Institute of Business Management", r.status === 200 && names(r)[0] === "Institute of Business Management", JSON.stringify(r.json?.data?.slice(0, 2)));
   r = await call("GET", "/api/universities?search=" + encodeURIComponent("  Fast-NUCES "));
-  check("alias, any case and spacing: 'Fast-NUCES' → National University of Computer & Emerging Sciences", names(r)[0] === "National University of Computer & Emerging Sciences", names(r).slice(0, 3).join(" | "));
+  check("search: alias, any case and spacing ('Fast-NUCES')", names(r)[0] === "National University of Computer & Emerging Sciences", names(r).slice(0, 3).join(" | "));
   r = await call("GET", "/api/universities?search=karachi%20university");
-  check("alias 'Karachi University' → University of Karachi", names(r)[0] === "University of Karachi", names(r).slice(0, 3).join(" | "));
-  r = await call("GET", "/api/universities?search=" + encodeURIComponent("ned engineering"));
-  check("words of the name: 'ned engineering' → NED University of Engineering & Technology", names(r)[0] === "NED University of Engineering & Technology", names(r).slice(0, 3).join(" | "));
-  r = await call("GET", "/api/universities?search=global%20institute");
-  check("hidden ones never show", !names(r).includes("Global Institute, Lahore"));
-  r = await call("GET", "/api/universities?search=iobm%20karachi");
-  check("old unmatched entries never show ('iobm karachi' typed at signup)", !names(r).includes("iobm karachi"));
+  check("search: alias 'Karachi University' → University of Karachi", names(r)[0] === "University of Karachi");
 
-  console.log("── 'my university isn't listed'");
-  r = await call("POST", "/api/universities/request", { body: { name: "Inst. of Business Management", city: "Karachi" }, headers: ip(1) });
-  check("a near-duplicate: 'did you mean Institute of Business Management?', nothing created", r.status === 200 && r.json.data.match?.name === "Institute of Business Management" && /Did you mean/.test(r.json.data.message) && !rows("University", (u) => u.status === "pending").length, r.text.slice(0, 200));
+  console.log("── students can't add universities");
   r = await call("POST", "/api/universities/request", { body: { name: "Karachi Grammar College of Design", city: "Karachi" }, headers: ip(1) });
-  const pendingId = r.json?.data?.university?.id;
-  check("a new name: a pending entry the student can use now", r.status === 201 && r.json.data.university.status === "pending" && /pending review/.test(r.json.data.message), r.text.slice(0, 200));
-  r = await call("POST", "/api/universities/request", { body: { name: "karachi grammar college of design", city: "Karachi" }, headers: ip(2) });
-  check("the same request again: the same pending entry (no duplicate)", r.json?.data?.university?.id === pendingId && rows("University", (u) => u.status === "pending").length === 1);
-  r = await call("POST", "/api/universities/request", { body: { name: "Ab", city: "" }, headers: ip(2) });
-  check("too short / no city: a plain 400", r.status === 400 && ["NAME_REQUIRED", "CITY_REQUIRED"].includes(r.json.error.code));
-  const burst = [];
-  for (let i = 0; i < 6; i++) burst.push((await call("POST", "/api/universities/request", { body: { name: `Test College ${i}`, city: "Hyderabad" }, headers: ip(9) })).status);
-  check("rate limit: 5 an hour per device, the 6th is 429", burst.slice(0, 5).every((s) => s === 201) && burst[5] === 429, burst.join(","));
+  check("POST /api/universities/request is gone (signed out)", r.status === 404 && !rows("University", (u) => u.name === "Karachi Grammar College of Design").length, `${r.status}`);
+  r = await call("POST", "/api/universities/request", { tok: tok.s2, body: { name: "Karachi Grammar College of Design", city: "Karachi" } });
+  check("…and for a signed-in student", r.status === 404 && !rows("University", (u) => u.name === "Karachi Grammar College of Design").length);
+  r = await call("POST", "/api/admin/universities", { tok: tok.s2, body: { name: "Student Made College", city: "Karachi" } });
+  check("students can't use the admin add either", r.status === 403 && !rows("University", (u) => u.name === "Student Made College").length);
   const allow = reqS("./middleware/rejectGuestWrites");
-  check("signed-out (signup) callers may send a request; nothing else under /universities", allow.allowed("POST", "/universities/request") && !allow.allowed("PUT", "/universities/mine"));
+  check("signed-out callers can't write anything under /universities", !allow.allowed("POST", "/universities/request") && !allow.allowed("PUT", "/universities/mine"));
 
   console.log("── signup uses the list");
   const iobm = rows("University", (u) => u.name === "Institute of Business Management")[0];
@@ -88,15 +80,19 @@ const ip = (n) => ({ "x-forwarded-for": `10.0.0.${n}` });
   r = await signup({ universityId: String(iobm._id) }, 1);
   const u1 = rows("User", (u) => u.email === "new1@test.local")[0];
   check("signup with a university from the list: id and name stored", (r.status === 200 || r.status === 201) && String(u1?.university) === String(iobm._id) && u1.universityName === "Institute of Business Management", `${r.status} ${r.text.slice(0, 200)}`);
-  r = await signup({ universityId: pendingId }, 2);
+  r = await signup({ universityName: "Institute of Business Management" }, 2);
   const u2 = rows("User", (u) => u.email === "new2@test.local")[0];
-  check("signup with the pending one the student just asked for: allowed, shows as their university", String(u2?.university) === pendingId && u2.universityName === "Karachi Grammar College of Design", `${r.status} ${r.text.slice(0, 150)}`);
+  check("signup offline (a name from the app's bundled list, no id): matched to the same university", String(u2?.university) === String(iobm._id) && u2.universityName === "Institute of Business Management", `${r.status} ${r.text.slice(0, 150)}`);
   r = await signup({ universityId: String(legacy.iobmTypo) }, 3);
-  check("signup with an old unmatched / hidden entry: refused", r.status === 400 && r.json?.code === "UNIVERSITY_NOT_AVAILABLE");
+  check("signup with an old unmatched / hidden entry's id: refused", r.status === 400 && r.json?.code === "UNIVERSITY_NOT_AVAILABLE");
   const before = rows("University").length;
   r = await signup({ universityName: "NED University of Engineering and Technology City Campus — Karachi" }, 4);
   const u4 = rows("User", (u) => u.email === "new4@test.local")[0];
-  check("an old app build sending the typed name: matched to the list (no new entry)", u4 && rows("University", (x) => String(x._id) === String(u4.university))[0]?.name === "NED University of Engineering & Technology" && rows("University").length === before, `${r.status} ${rows("University", (x) => String(x._id) === String(u4?.university))[0]?.name}`);
+  check("an old app build's typed name: matched to the list (no new entry)", u4 && rows("University", (x) => String(x._id) === String(u4.university))[0]?.name === "NED University of Engineering & Technology" && rows("University").length === before);
+  r = await signup({ universityName: "Some College Nobody Knows" }, 5);
+  const u5 = rows("User", (u) => u.email === "new5@test.local")[0];
+  const e5 = rows("University", (x) => String(x._id) === String(u5?.university))[0];
+  check("an old build's name that matches nothing: signup works, kept as an unmatched name (not added to the list)", u5 && e5?.name === "Some College Nobody Knows" && !e5.status && !names(await call("GET", "/api/universities")).includes("Some College Nobody Knows"), `${r.status} ${JSON.stringify(e5)}`);
 
   console.log("── a student's own university (profile edit)");
   r = await call("PUT", "/api/universities/mine", { tok: tok.s1, body: { universityId: String(iobm._id) } });
@@ -105,17 +101,19 @@ const ip = (n) => ({ "x-forwarded-for": `10.0.0.${n}` });
   check("…not an old unmatched entry", r.status === 400);
   r = await call("PUT", "/api/universities/mine", { tok: tok.brand, body: { universityId: String(iobm._id) } });
   check("…and only students have one", r.status === 403);
-  await call("PUT", "/api/universities/mine", { tok: tok.s1, body: { universityId: String(legacy.ned) } }); // back to the old one (refused) — re-point for the next part
   await User.collection.updateOne({ _id: ids.s1 }, { $set: { university: legacy.ned }, $unset: { universityName: "" } });
 
   console.log("── admin");
   r = await call("GET", "/api/admin/universities", { tok: tok.s2 });
   check("students can't open the admin list", r.status === 403);
-  r = await call("GET", "/api/admin/universities?status=pending", { tok: tok.admin });
-  check("pending requests first, with student counts", r.status === 200 && r.json.data[0].status === "pending" && r.json.data.find((x) => x.id === pendingId)?.students === 1, JSON.stringify(r.json?.data?.slice(0, 2)));
+  r = await call("GET", "/api/admin/universities", { tok: tok.admin });
+  const statuses = new Set((r.json?.data || []).map((x) => x.status));
+  check("the admin list has every university: approved, hidden and unmatched, with student counts", r.status === 200 && statuses.has("approved") && statuses.has("hidden") && statuses.has("unmatched") && (r.json.data.find((x) => x.id === String(legacy.ned))?.students === 2), [...statuses].join(","));
   r = await call("GET", "/api/admin/universities/pending-count", { tok: tok.admin });
-  const pendingCount = r.json?.data?.pending;
-  check("the menu badge count", pendingCount === 6, String(pendingCount));
+  check("no pending-request badge any more", r.status === 404);
+  r = await call("POST", `/api/admin/universities/${iobm._id}/approve`, { tok: tok.admin, body: {} });
+  const r2 = await call("POST", `/api/admin/universities/${iobm._id}/reject`, { tok: tok.admin, body: { reason: "x" } });
+  check("no approve / reject any more", r.status === 404 && r2.status === 404);
   r = await call("GET", "/api/admin/universities?search=iobm&status=approved", { tok: tok.admin });
   check("search + status filter", r.json.data.length === 1 && r.json.data[0].shortName === "IoBM");
   r = await call("GET", "/api/admin/universities?city=Jamshoro", { tok: tok.admin });
@@ -123,25 +121,13 @@ const ip = (n) => ({ "x-forwarded-for": `10.0.0.${n}` });
   r = await call("POST", "/api/admin/universities", { tok: tok.admin, body: { name: "Test Institute of Design", shortName: "TID", city: "Lahore", aliases: "TID Lahore, Design Institute Lahore" } });
   const addedId = r.json?.data?.id;
   check("add: approved, with aliases", r.status === 201 && r.json.data.status === "approved" && r.json.data.aliases.length === 2);
-  unis.bust();
-  check("…and searchable right away", (await call("GET", "/api/universities?search=tid")).json.data[0]?.id === addedId);
+  check("…and in the full list the dropdowns load, right away on this server", names(await call("GET", "/api/universities")).includes("Test Institute of Design"));
   r = await call("PATCH", `/api/admin/universities/${addedId}`, { tok: tok.admin, body: { name: "Test Institute of Design & Media", city: "Lahore" } });
-  check("edit", r.status === 200 && r.json.data.name === "Test Institute of Design & Media");
+  check("edit: the new name is in the list", r.status === 200 && r.json.data.name === "Test Institute of Design & Media" && names(await call("GET", "/api/universities")).includes("Test Institute of Design & Media"));
   r = await call("POST", `/api/admin/universities/${addedId}/hide`, { tok: tok.admin, body: {} });
-  unis.bust();
-  check("hide: not offered any more", r.json?.data?.status === "hidden" && !(await call("GET", "/api/universities?search=tid")).json.data.some((x) => x.id === addedId));
-  r = await call("POST", `/api/admin/universities/${pendingId}/approve`, { tok: tok.admin, body: { shortName: "KGCD" } });
-  check("approve a request (with a short name): approved, the student's name updated", r.status === 200 && r.json.data.status === "approved" && rows("User", (u) => u.email === "new2@test.local")[0].universityName === "Karachi Grammar College of Design");
-  const p1 = rows("University", (u) => u.name === "Test College 0")[0];
-  r = await call("POST", `/api/admin/universities/${p1._id}/reject`, { tok: tok.admin, body: {} });
-  check("reject needs a reason", r.status === 400 && r.json.error.code === "REASON_REQUIRED");
-  r = await call("POST", `/api/admin/universities/${p1._id}/reject`, { tok: tok.admin, body: { reason: "test entry" } });
-  check("reject with a reason: hidden, reason kept", r.status === 200 && r.json.data.status === "hidden" && r.json.data.rejectReason === "test entry");
-  // a pending request a student uses, rejected as a duplicate of a real one: "merge into existing"
-  const p2 = rows("University", (u) => u.name === "Test College 1")[0];
-  await User.collection.insertOne(student(oid(), "Zoya Test", p2._id));
-  r = await call("POST", `/api/admin/universities/${p2._id}/reject`, { tok: tok.admin, body: { reason: "duplicate of IoBM", mergeInto: String(iobm._id) } });
-  check("reject + merge into existing: the student moves, the name becomes an alias", r.status === 200 && rows("User", (u) => u.name === "Zoya Test")[0].universityName === "Institute of Business Management" && rows("University", (u) => String(u._id) === String(iobm._id))[0].aliases.includes("Test College 1"), r.text.slice(0, 200));
+  check("hide: not offered any more", r.json?.data?.status === "hidden" && !names(await call("GET", "/api/universities")).includes("Test Institute of Design & Media"));
+  r = await call("POST", `/api/admin/universities/${addedId}/show`, { tok: tok.admin, body: {} });
+  check("show: back in the list", r.json?.data?.status === "approved" && names(await call("GET", "/api/universities")).includes("Test Institute of Design & Media"));
 
   console.log("── unmatched names (old typed text)");
   r = await call("GET", "/api/admin/universities/unmatched", { tok: tok.admin });
@@ -161,13 +147,12 @@ const ip = (n) => ({ "x-forwarded-for": `10.0.0.${n}` });
   check("merge duplicates: students move, old name kept as an alias", r.status === 200 && rows("User", (u) => u.name === "Hira Khan")[0].universityName === "Institute of Business Management" && rows("University", (u) => String(u._id) === String(iobm._id))[0].aliases.includes("IoBM Karachi Campus Two"));
   r = await call("POST", "/api/admin/universities/merge", { tok: tok.admin, body: { fromId: String(iobm._id), toId: String(iobm._id) } });
   check("merging into itself: refused", r.status === 400);
-  unis.bust();
   check("search finds a merged name through its alias", (await call("GET", "/api/universities?search=" + encodeURIComponent("IoBM Karachi Campus Two"))).json.data[0]?.name === "Institute of Business Management");
 
   console.log("── logged");
   const logs = rows("AdminActionLog", (l) => l.targetType === "University");
   const acts = new Set(logs.map((l) => l.action));
-  check("every admin change is in the action log (add, edit, hide, approve, reject, match, add as new, merge)", ["university.add", "university.edit", "university.hide", "university.approve", "university.reject", "university.match", "university.add_unmatched", "university.merge"].every((a) => acts.has(a)), [...acts].join(","));
+  check("every admin change is in the action log (add, edit, hide, show, match, add as new, merge)", ["university.add", "university.edit", "university.hide", "university.show", "university.match", "university.add_unmatched", "university.merge"].every((a) => acts.has(a)), [...acts].join(","));
   check("…with the admin and the before / after", logs.every((l) => String(l.admin) === String(ids.admin) && l.after));
   check("…a merge records how many students moved", logs.some((l) => l.action === "university.match" && l.after?.moved?.students === 2));
 

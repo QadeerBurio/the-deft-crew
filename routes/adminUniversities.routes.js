@@ -1,13 +1,11 @@
 // routes/adminUniversities.routes.js — /api/admin/universities: the admin's university list (admins only, checked
 // against the database). Every change is logged in AdminActionLog (action "university.*").
-//   GET    /?search=&city=&status=   all entries (approved / pending / hidden / unmatched) with student counts, newest pending first
-//   GET    /pending-count            for the menu badge
-//   GET    /cities                   cities in the list (filter)
+//   GET    /?search=&city=&status=   every entry (approved / hidden / unmatched) with student counts
+//   GET    /cities                   cities in the list (filter); also tells the portal the page is available
 //   POST   /                         { name, shortName?, city, aliases? }  add (approved)
 //   PATCH  /:id                      { name?, shortName?, city?, aliases? } edit
 //   POST   /:id/hide | /:id/show
-//   POST   /:id/approve              a pending request (optionally edited: same fields as PATCH)
-//   POST   /:id/reject               { reason, mergeInto? }  hidden with the reason; mergeInto moves its students there
+// An addition or edit shows in the app and portal dropdowns within a minute (GET /api/universities is cached 60 s).
 //   POST   /merge                    { fromId, toId }  every student / offer / confession moves, the old name becomes an alias
 //   GET    /unmatched                old typed names students have that aren't on the list, with counts and a suggestion
 //   POST   /unmatched/:id/match      { toId }  = merge into that university
@@ -78,11 +76,10 @@ router.get("/", handle(async (req, res) => {
   let list = await University.find(filter).lean();
   if (q) list = list.filter((u) => [u.name, u.shortName, ...(u.aliases || [])].some((x) => unis.keyOf(x).includes(q)) || unis.keyOf(u.city).startsWith(q));
   const counts = await unis.countsFor(list.map((u) => u._id));
-  const order = { pending: 0, unmatched: 1, approved: 2, hidden: 3 };
+  const order = { unmatched: 0, approved: 1, pending: 2, hidden: 3 };
   ok(req, res, list.map((u) => row(u, counts)).sort((a, b) => order[a.status] - order[b.status] || b.students - a.students || a.name.localeCompare(b.name)));
 }));
 
-router.get("/pending-count", handle(async (req, res) => ok(req, res, { pending: await University.countDocuments({ status: "pending" }) })));
 router.get("/cities", handle(async (req, res) => ok(req, res, [...new Set((await University.find({ city: { $ne: "" } }).select("city").lean()).map((u) => u.city))].sort())));
 
 router.post("/", handle(async (req, res) => {
@@ -112,6 +109,7 @@ for (const [path, status, action] of [["hide", "hidden", "university.hide"], ["s
     const u = await load(req.params.id);
     const before = snap(u);
     if (status === "approved" && u.mergedInto) return fail(req, res, 400, "MERGED", "This entry was merged into another university");
+    if (status === "approved" && !u.city) return fail(req, res, 400, "CITY_REQUIRED", "Add the city first (edit)");
     u.status = status;
     await u.save();
     await audit(req, action, u, before, snap(u), clean(req.body?.reason, 500));
@@ -119,36 +117,6 @@ for (const [path, status, action] of [["hide", "hidden", "university.hide"], ["s
     ok(req, res, row(u, await unis.countsFor([u._id])));
   }));
 }
-
-router.post("/:id/approve", handle(async (req, res) => {
-  const u = await load(req.params.id);
-  if (u.status !== "pending") return fail(req, res, 409, "NOT_PENDING", "Only a pending request can be approved");
-  const before = snap(u);
-  applyFields(u, req.body || {});
-  u.status = "approved";
-  await u.save();
-  await User.updateMany({ university: u._id }, { $set: { universityName: u.name } });
-  await audit(req, "university.approve", u, before, snap(u));
-  unis.bust();
-  ok(req, res, row(u, await unis.countsFor([u._id])));
-}));
-
-router.post("/:id/reject", handle(async (req, res) => {
-  const u = await load(req.params.id);
-  if (u.status !== "pending") return fail(req, res, 409, "NOT_PENDING", "Only a pending request can be rejected");
-  const reason = clean(req.body?.reason, 300);
-  if (!reason) return fail(req, res, 400, "REASON_REQUIRED", "Say why (the student sees it)");
-  const before = snap(u);
-  let merged = null;
-  if (req.body?.mergeInto) merged = await unis.merge(u._id, (await load(req.body.mergeInto))._id); // students move to the real one
-  const fresh = await load(u._id);
-  fresh.status = "hidden";
-  fresh.rejectReason = reason;
-  await fresh.save();
-  await audit(req, "university.reject", fresh, before, { ...snap(fresh), ...(merged ? { movedTo: merged.to.name, moved: merged.moved } : {}) }, reason);
-  unis.bust();
-  ok(req, res, { ...row(fresh, await unis.countsFor([fresh._id])), merged });
-}));
 
 async function mergeAndLog(req, fromId, toId, action) {
   const from = await load(fromId);
