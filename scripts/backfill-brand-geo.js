@@ -84,32 +84,32 @@ async function main() {
   }
 
   const which = INCLUDE_GEOCODED ? notManual : { ...notManual, ...missingGeo };
-  const branches = await Branch.find({ isInStore: true, location: { $nin: [null, ""] }, ...which })
+  const branches = await Branch.find({ isActive: true, isInStore: true, location: { $nin: [null, ""] }, ...which })
     .select("_id name location city brand")
     .lean();
-  const offers = await Offer.find({ isInStore: true, location: { $nin: [null, ""] }, ...which })
+  const offers = await Offer.find({ status: { $ne: "archived" }, isInStore: true, location: { $nin: [null, ""] }, ...which })
     .select("_id title location brand")
     .lean();
   const manualCount =
     (await Branch.countDocuments({ geoSource: "manual" })) + (await Offer.countDocuments({ geoSource: "manual" }));
 
   const brandIds = [...new Set([...branches, ...offers].map((d) => String(d.brand)).filter(Boolean))];
-  const brands = await User.find({ _id: { $in: brandIds } }).select("_id name city").lean();
+  const brands = await User.find({ _id: { $in: brandIds }, role: "brand", brandApprovalStatus: "approved" }).select("_id name city").lean();
   const brandById = new Map(brands.map((b) => [String(b._id), b]));
 
   const jobs = [
     ...branches.map((b) => {
       const brand = brandById.get(String(b.brand)) || {};
       const city = String(b.city || brand.city || "").trim();
-      return { Model: Branch, type: "branch", id: b._id, brand: brand.name || "", city, raw: b.location, address: buildAddress([b.location, city]) };
+      return { Model: Branch, type: "branch", id: b._id, brandId: b.brand, brand: brand.name || "", city, raw: b.location, address: buildAddress([b.location, city]) };
     }),
     ...offers.map((o) => {
       const brand = brandById.get(String(o.brand)) || {};
       const city = String(brand.city || "").trim();
-      return { Model: Offer, type: "offer", id: o._id, brand: brand.name || "", city, raw: o.location, address: buildAddress([o.location, city]) };
+      return { Model: Offer, type: "offer", id: o._id, brandId: o.brand, brand: brand.name || "", city, raw: o.location, address: buildAddress([o.location, city]) };
     }),
   ]
-    .filter((j) => j.address)
+    .filter((j) => j.address && brandById.has(String(j.brandId)))
     .slice(0, LIMIT);
 
   console.log(
@@ -122,7 +122,9 @@ async function main() {
   const count = { ok: 0, rejected: 0, error: 0, saved: 0, notSaved: 0 };
 
   for (const job of jobs) {
-    const v = await geocodeDetailed(job.address, { expectedCity: job.city });
+    const v = officeNote(job.raw)
+      ? { status: "rejected", reason: "suspected agency office address: correct the address before geocoding" }
+      : await geocodeDetailed(job.address, { expectedCity: job.city });
     count[v.status] = (count[v.status] || 0) + 1;
     let reason = v.reason || "";
     if (!DRY && v.status === "ok") {

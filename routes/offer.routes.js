@@ -140,8 +140,8 @@ router.put("/:offerId", auth, uploadOffer.single("image"), async (req, res) => {
 
     res.json({ message: "Offer updated successfully", offer });
 
-    // "near me": re-geocode only when the address changed (after the response)
-    if ((offer.location || "") !== locationBefore) {
+    // Retry missing coordinates on save, including when in-store is enabled.
+    if ((offer.location || "") !== locationBefore || (offer.isInStore && !offer.geo?.coordinates?.length)) {
       geocodeInBackground(Offer, offer._id, offer.isInStore ? [offer.location] : [], { brandId: offer.brand, clearOnFail: true });
     }
   } catch (err) {

@@ -207,9 +207,9 @@ router.put("/:branchId", auth, async (req, res) => {
       branch,
     });
 
-    // "near me": re-geocode only when the address changed (after the response)
+    // Retry missing coordinates on save, including after a key/billing repair.
     const addressAfter = branch.isInStore ? buildAddress([branch.location, branch.city]) : "";
-    if (addressAfter !== addressBefore) {
+    if (addressAfter !== addressBefore || (branch.isInStore && !branch.geo?.coordinates?.length)) {
       geocodeInBackground(Branch, branch._id, branch.isInStore ? [branch.location] : [], {
         city: branch.city,
         brandId: branch.brand,

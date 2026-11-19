@@ -8,7 +8,7 @@
 // Rules:
 //   • No key → geocoding is skipped and logged once. Nothing else changes.
 //   • Saves never wait for geocoding: routes call geocode*InBackground() AFTER the
-//     document is saved and the response is sent. Errors and timeouts (3 s) are
+//     document is saved and the response is sent. Errors and timeouts (8 s) are
 //     logged and the document simply stays without `geo`.
 //   • A point set by hand (geoSource: 'manual') is never overwritten.
 //   • Every address is sent with the brand's city and ", Pakistan", restricted to
@@ -18,7 +18,7 @@
 //     Accepted points store geoPrecision ('exact' | 'area') and geoCity.
 const axios = require("axios");
 
-const TIMEOUT_MS = 3000;
+const TIMEOUT_MS = 8000;
 const GOOGLE_URL = "https://maps.googleapis.com/maps/api/geocode/json";
 
 let warnedNoKey = false;
@@ -114,7 +114,7 @@ function judgeResult(result, expectedCity) {
 // Full verdict, for the backfill report:
 // → { status: 'ok', point, matchedCity, precision } | { status: 'rejected', reason, matchedCity? } | { status: 'error', reason }
 // Never throws.
-async function geocodeDetailed(address, { expectedCity } = {}) {
+async function geocodeOnce(address, { expectedCity } = {}) {
   if (!address) return { status: "rejected", reason: "no address" };
   if (provider() !== "google") return { status: "error", reason: `unsupported GEOCODER "${provider()}"` };
   if (!hasKey()) {
@@ -132,12 +132,22 @@ async function geocodeDetailed(address, { expectedCity } = {}) {
     const status = res.data?.status;
     if (status === "ZERO_RESULTS") return { status: "rejected", reason: "no result" };
     if (status !== "OK") return { status: "error", reason: `google status ${status || "unknown"}` };
-    const v = judgeResult(res.data?.results?.[0], expectedCity);
+    const verdicts = (res.data?.results || []).map((result) => judgeResult(result, expectedCity));
+    const v = verdicts.find((result) => result.point) || verdicts[0] || { reason: "no result" };
     if (v.point) return { status: "ok", ...v };
     return { status: "rejected", reason: v.reason, matchedCity: v.matchedCity };
   } catch (e) {
     return { status: "error", reason: `request failed: ${e.code || e.message}` };
   }
+}
+
+// Retry transient network/provider failures once; configuration and address errors
+// need correction rather than repeated billable requests.
+async function geocodeDetailed(address, opts = {}) {
+  const verdict = await geocodeOnce(address, opts);
+  if (verdict.status !== "error" || !/request failed: (ECONNABORTED|ETIMEDOUT|ECONNRESET|EAI_AGAIN)|google status UNKNOWN_ERROR/.test(verdict.reason)) return verdict;
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  return geocodeOnce(address, opts);
 }
 
 // → { lng, lat, precision, matchedCity } or null. Never throws.
