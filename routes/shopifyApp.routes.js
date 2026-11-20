@@ -1,5 +1,7 @@
 // routes/shopifyApp.routes.js
 const express = require("express");
+const { timingSafeEqual } = require("node:crypto");
+const { registerShopifyLink, digest, shopPattern } = require("./shopifyLink");
 const { creditSafe } = require("../services/loyalty");
 const router = express.Router();
 const User = require("../models/User");
@@ -12,7 +14,9 @@ const Notification = require("../models/Notification");
 // ============================================================
 const verifyApiKey = (req, res, next) => {
   const apiKey = req.headers["x-api-key"];
-  if (!apiKey || apiKey !== process.env.SHOPIFY_APP_API_KEY) {
+  const expected = process.env.SHOPIFY_APP_API_KEY;
+  if (!expected || typeof apiKey !== "string" ||
+      !timingSafeEqual(Buffer.from(digest(apiKey), "hex"), Buffer.from(digest(expected), "hex"))) {
     console.warn("[shopify-app] Unauthorized request, bad x-api-key");
     return res.status(401).json({ error: "Unauthorized" });
   }
@@ -82,7 +86,7 @@ router.get("/brand", verifyApiKey, async (req, res) => {
       },
       discounts: codes.map((c) => ({
         code: c.code,
-        discountType: "percentage",
+        discountType: c.shopifyDiscountType || "percentage",
         discountValue: c.discountPercentage,
         isActive: c.status === "active",
       })),
@@ -93,127 +97,68 @@ router.get("/brand", verifyApiKey, async (req, res) => {
   }
 });
 
-// ============================================================
-// POST /api/shopify-app/link-shop
-// Body: { shop: "xxx.myshopify.com", brandId?: "<TDC user _id>", email?: "brand@x.com" }
-// Called by Remix immediately after install (from app._index.tsx loader).
-// ============================================================
-router.post("/link-shop", verifyApiKey, async (req, res) => {
-  try {
-    const { brandId, email } = req.body || {};
-    const shop = normalizeShop(req.body?.shop);
+registerShopifyLink(router, verifyApiKey);
 
-    if (!shop) return res.status(400).json({ error: "shop required" });
-
-    let brand = null;
-
-    // Priority 1: match by explicit brandId (most reliable)
-    if (brandId) {
-      brand = await User.findOneAndUpdate(
-        { _id: brandId, role: "brand" },
-        { shopifyStoreUrl: shop },
-        { new: true }
-      ).lean();
-    }
-
-    // Priority 2: match by email (case-insensitive)
-    if (!brand && email) {
-      brand = await User.findOneAndUpdate(
-        { email: String(email).toLowerCase().trim(), role: "brand" },
-        { shopifyStoreUrl: shop },
-        { new: true }
-      ).lean();
-    }
-
-    // Priority 3: if exactly one unlinked brand exists with a matching
-    // brandName equal to the shop prefix, use it. (Optional — remove if unwanted.)
-    if (!brand) {
-      const prefix = shop.replace(".myshopify.com", "");
-      brand = await User.findOneAndUpdate(
-        {
-          role: "brand",
-          $or: [
-            { shopifyStoreUrl: "" },
-            { shopifyStoreUrl: { $exists: false } },
-          ],
-          brandName: new RegExp(`^${prefix}$`, "i"),
-        },
-        { shopifyStoreUrl: shop },
-        { new: true }
-      ).lean();
-    }
-
-    if (!brand) {
-      // Not fatal — Remix will show the "Partner brand not configured"
-      // message, and the merchant can link manually later.
-      console.warn(`[link-shop] No brand matched for shop=${shop}`);
-      return res
-        .status(404)
-        .json({ success: false, error: "No matching brand", shop });
-    }
-
-    console.log(
-      `[link-shop] Linked ${shop} → brand ${brand._id} (${brand.brandName || brand.name})`
-    );
-    res.json({ success: true, brandId: brand._id, shop });
-  } catch (err) {
-    console.error("[shopify-app] /link-shop error:", err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ============================================================
-// POST /api/shopify-app/discount
-// Called by the Remix Discounts page when a merchant manually creates
-// a discount code inside the embedded app.
-// ============================================================
+// Persist the result under the stable shop/discount key. Shopify rules share
+// the existing global code namespace; a conflicting code is never overwritten.
 router.post("/discount", verifyApiKey, async (req, res) => {
   try {
-    const {
-      shop,
-      code,
-      discountType,
-      discountValue,
-      shopifyDiscountId,
-      startsAt,
-      endsAt,
-    } = req.body || {};
-
-    const cleanShop = normalizeShop(shop);
-    if (!cleanShop || !code) {
-      return res.status(400).json({ error: "shop and code required" });
+    const { shop, brandId, code, discountType, discountValue, shopifyDiscountId, startsAt, endsAt } = req.body || {};
+    const start = typeof startsAt === "string" ? new Date(startsAt) : null;
+    const end = typeof endsAt === "string" ? new Date(endsAt) : null;
+    if (typeof shop !== "string" || !shopPattern.test(shop) ||
+        typeof brandId !== "string" || !/^[a-f0-9]{24}$/i.test(brandId) ||
+        typeof code !== "string" || !/^[A-Z0-9_-]{3,32}$/.test(code) ||
+        !["percentage", "fixed_amount"].includes(discountType) ||
+        !Number.isFinite(discountValue) || discountValue <= 0 ||
+        (discountType === "percentage" && discountValue > 100) ||
+        typeof shopifyDiscountId !== "string" || !/^gid:\/\/shopify\/DiscountCodeNode\/\d+$/.test(shopifyDiscountId) ||
+        !start || !Number.isFinite(start.getTime()) ||
+        (endsAt != null && (!end || !Number.isFinite(end.getTime()) || end <= start))) {
+      return res.status(400).json({ error: "Invalid Shopify discount payload" });
+    }
+    const key = digest(JSON.stringify([shop, shopifyDiscountId]));
+    if (req.get("Idempotency-Key") !== key) {
+      return res.status(400).json({ error: "Invalid Idempotency-Key" });
     }
 
-    const brand = await User.findOne({
-      shopifyStoreUrl: cleanShop,
-      role: "brand",
-    });
-    if (!brand) {
-      return res.status(404).json({ error: "Brand not found for shop" });
+    const brand = await User.findOne({ _id: brandId, shopifyStoreUrl: shop, role: "brand" }).lean();
+    if (!brand) return res.status(409).json({ error: "The store is not connected to that TDC brand" });
+
+    const fingerprint = digest(JSON.stringify([
+      String(brand._id), code, discountType, discountValue, start.toISOString(), end?.toISOString() ?? null,
+    ]));
+    const filters = { shopifySaveKey: key };
+    let result;
+    try {
+      result = await PromoCode.findOneAndUpdate(filters, {
+        $setOnInsert: {
+          code,
+          brand: brand._id,
+          discountPercentage: discountValue,
+          brandName: brand.brandName || brand.name,
+          offerTitle: `Manual rule (${shop})`,
+          externalProvider: "shopify",
+          externalDiscountId: shopifyDiscountId,
+          expiresAt: end,
+          shopifySaveFingerprint: fingerprint,
+          shopifyDiscountType: discountType,
+          shopifyStartsAt: start,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      }, { upsert: true, returnDocument: "after", timestamps: false }).select("_id shopifySaveFingerprint").lean();
+    } catch (error) {
+      if (error.code !== 11000) throw error;
+      result = await PromoCode.findOne(filters).select("_id shopifySaveFingerprint").lean();
     }
-
-    await PromoCode.findOneAndUpdate(
-      { code: String(code).toUpperCase().trim() },
-      {
-        code: String(code).toUpperCase().trim(),
-        brand: brand._id,
-        discountPercentage: Number(discountValue) || 0,
-        brandName: brand.brandName || brand.name,
-        offerTitle: `Manual rule (${cleanShop})`,
-        status: "active",
-        externalProvider: "shopify",
-        externalDiscountId: shopifyDiscountId || "",
-        expiresAt: endsAt
-          ? new Date(endsAt)
-          : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-      },
-      { upsert: true, new: true }
-    );
-
-    res.json({ success: true });
-  } catch (err) {
-    console.error("[shopify-app] /discount error:", err);
-    res.status(500).json({ error: err.message });
+    if (!result || result.shopifySaveFingerprint !== fingerprint) {
+      return res.status(409).json({ error: "The discount ID or code is already in use for a different rule" });
+    }
+    res.json({ success: true, discountId: String(result._id) });
+  } catch (error) {
+    console.error("[shopify-app] discount save failed", error.name);
+    res.status(503).json({ error: "TDC could not save the discount. Try again." });
   }
 });
 

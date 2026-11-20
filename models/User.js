@@ -343,6 +343,11 @@ userSchema.set("toJSON", {
 userSchema.statics.HIDDEN_FIELDS = HIDDEN_FIELDS;
 
 // --- INDEXES ---
+userSchema.index({ shopifyStoreUrl: 1 }, {
+  name: "unique_brand_shopify_store",
+  unique: true,
+  partialFilterExpression: { role: "brand", shopifyStoreUrl: { $gt: "" } },
+});
 userSchema.index({ role: 1, status: 1 });
 userSchema.index({ university: 1, role: 1 });
 userSchema.index({ brandApprovalStatus: 1, role: 1 }); // For filtering brands

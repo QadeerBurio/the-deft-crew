@@ -1,10 +1,14 @@
 // models/PromoCode.js
 const mongoose = require("mongoose");
 
+function isStudentPromo() {
+  return !this.shopifySaveKey;
+}
+
 const promoSchema = new mongoose.Schema({
   code: { type: String, required: true, unique: true, uppercase: true, trim: true },
-  offer: { type: mongoose.Schema.Types.ObjectId, ref: "Offer", required: true },
-  student: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+  offer: { type: mongoose.Schema.Types.ObjectId, ref: "Offer", required: isStudentPromo },
+  student: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: isStudentPromo },
   brand: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
 
   discountPercentage: { type: Number, required: true },
@@ -24,8 +28,12 @@ const promoSchema = new mongoose.Schema({
   default: 'none',
 },
 externalDiscountId: { type: String, default: "" },
+  shopifySaveKey: String,
+  shopifySaveFingerprint: String,
+  shopifyDiscountType: { type: String, enum: ["percentage", "fixed_amount"] },
+  shopifyStartsAt: Date,
 
-  expiresAt: { type: Date, required: true, default: () => new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) },
+  expiresAt: { type: Date, required: isStudentPromo, default: () => new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) },
   maxUses: { type: Number, default: 1 },
   usedCount: { type: Number, default: 0 },
 
@@ -35,6 +43,11 @@ externalDiscountId: { type: String, default: "" },
   userAgent: String,
 }, { timestamps: true });
 
+promoSchema.index({ shopifySaveKey: 1 }, {
+  name: "unique_shopify_discount_save",
+  unique: true,
+  partialFilterExpression: { shopifySaveKey: { $type: "string" } },
+});
 promoSchema.index({ student: 1, status: 1 });
 promoSchema.index({ brand: 1, status: 1 });
 promoSchema.index({ offer: 1, student: 1 });
