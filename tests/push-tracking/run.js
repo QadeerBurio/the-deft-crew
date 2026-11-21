@@ -3,7 +3,7 @@
 //   flag on for A: every sender (bell, sendToUser, social bulk, engagement gateway) → one tracked PushLog row per send
 //     with its id in A's push data; B (flag off) in the same bulk send gets nothing extra; the gateway's own row is
 //     used (no second row); sent / failed and the ticket id recorded; receipts mark tracked rows delivered
-//   POST /api/notifications/push-opened/:logId: the recipient only, the first tap only; bad ids → false, no 500
+//   POST /api/notification/push-opened/:logId: the recipient only, the first tap only; bad ids → false, no 500
 //   node tests/push-tracking/run.js [serverDir]
 const path = require("path");
 const http = require("http");
@@ -56,7 +56,7 @@ const tracking = reqS("./services/pushTracking");
 
 const app = express();
 app.use(express.json());
-app.use("/api/notifications", reqS("./routes/notification.routes"));
+app.use("/api/notification", reqS("./routes/notification.routes")); // the same path as server.js
 
 const oid = () => new mongoose.Types.ObjectId();
 const A = oid(); const B = oid();
@@ -76,7 +76,7 @@ const settle = () => new Promise((r) => setTimeout(r, 40));
 (async () => {
   const server = http.createServer(app).listen(0);
   const port = server.address().port;
-  const tap = async (id, who) => { const r = await fetch(`http://127.0.0.1:${port}/api/notifications/push-opened/${id}`, { method: "POST", headers: { authorization: `Bearer ${T[who]}`, "content-type": "application/json" }, body: "{}" }); return { status: r.status, json: await r.json().catch(() => null) }; };
+  const tap = async (id, who) => { const r = await fetch(`http://127.0.0.1:${port}/api/notification/push-opened/${id}`, { method: "POST", headers: { authorization: `Bearer ${T[who]}`, "content-type": "application/json" }, body: "{}" }); return { status: r.status, json: await r.json().catch(() => null) }; };
 
   quiet.log("-- flag off (not configured)");
   await sendToUser(A, "hi", "there", { type: "System" });
