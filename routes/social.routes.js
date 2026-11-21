@@ -1404,6 +1404,8 @@ const myIdOf = (req) => (isGuestReq(req) ? '' : String(req.user?._id || req.user
 // a comment others may see: live (or written before statuses existed); my own held comment is shown to me
 const commentVisible = (c, meId) => Confession.isLive(c) || (!!meId && String(c?.user?._id || c?.user || '') === meId);
 // the confessions a viewer may see: live ones, plus their own held ("under review") ones
+// the sender of confession mention notifications: no real account, so nobody learns who commented
+const ANON_CONFESSION_SENDER = new mongoose.Types.ObjectId('000000000000000000000a00');
 const confessionCheck = require('../services/confessionCheck');
 const confessionStrikes = require('../services/confessionStrikes');
 const safetyAlerts = require('../services/safetyAlerts');
@@ -1743,15 +1745,17 @@ router.post('/confessions/comment/:id', auth, limitIfSafety('confession_comment'
     // ✅ Send MENTION notifications (only for mentions — no auto-reply notify, since anonymous)
     const previewText = text.length > 30 ? text.substring(0, 30) + "..." : text;
     const held = commentStatus === 'pending';
-    // held comments notify nobody; with confession safety on the mention doesn't name the commenter (plan P4-1)
+    // held comments notify nobody. Confessions are anonymous, so the mention never names the commenter, for everyone
+    // (owner, P4-1 follow-up): anonymous text, and the sender is a fixed id that matches no account (the app then shows
+    // "Someone" and opens no profile).
     if (validMentions.length > 0 && !held) {
       for (const mentionedId of validMentions) {
         try {
           await createNotification(
             mentionedId,
-            req.user._id,
+            ANON_CONFESSION_SENDER,
             'mention',
-            commentStatus ? `someone mentioned you in a confession: "${previewText}"` : `${req.user.name} mentioned you in a confession: "${previewText}"`,
+            `someone mentioned you in a confession: "${previewText}"`,
             null // No postId since it's a confession
           );
         } catch (notifErr) {

@@ -151,6 +151,11 @@ const tick = (ms = 20) => new Promise((r) => setTimeout(r, ms));
   check("comment ok → 200, live", r.status === 200 && !r.json?.held, r.text);
   const note = rows("SocialNotification", (n) => String(n.recipient || n.user || n.to) === String(ids.B) || /mentioned you in a confession/.test(n.message || n.text || ""));
   check("…the mention doesn't name the commenter (flag on)", note.length > 0 && note.every((n) => !/Ayesha/.test(JSON.stringify(n))) && note.some((n) => /someone mentioned you/.test(JSON.stringify(n))), JSON.stringify(note));
+  check("…and its sender is no real account (not the commenter)", note.every((n) => String(n.sender) === "000000000000000000000a00"), JSON.stringify(note.map((n) => n.sender)));
+  const before = rows("SocialNotification").length;
+  r = await call("POST", `/api/social/confessions/comment/${live._id}`, { tok: T.O, body: { text: "hey @Bilal", mentions: [String(ids.B)] } });
+  const fresh = rows("SocialNotification").slice(before);
+  check("flag off too: the mention is anonymous (text and sender), for everyone", r.status === 200 && fresh.length === 1 && /^someone mentioned you in a confession/.test(fresh[0].text || fresh[0].message || "") && String(fresh[0].sender) === "000000000000000000000a00" && !/Omar/.test(JSON.stringify(fresh[0])), JSON.stringify(fresh));
 
   console.log("-- rate limit (flag on only)");
   process.env.RATE_LIMIT_CONFESSION_POST_MAX = "2";
