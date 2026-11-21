@@ -201,13 +201,32 @@ router.get('/my-notifications', auth, async (req, res) => {
   }
 });
 
+// ── N-4: ONE INBOX (flag unifiedInbox; read only; the lists below stay for older apps) ──
+const inboxOn = (req, userId) => require('../config/featureFlags').isEnabled('unifiedInbox', { id: String(userId), role: req.user?.role || 'student' });
+router.get('/unified', auth, async (req, res) => {
+  try {
+    const userId = resolveUserId(req);
+    if (!userId) return res.status(401).json({ message: 'User ID required' });
+    if (!inboxOn(req, userId)) return res.status(404).json({ message: 'Not found' });
+    res.json(await require('../services/unifiedInbox').inbox(toId(userId), { limit: req.query.limit }));
+  } catch (err) {
+    console.error('[notifications] unified inbox error:', err.message);
+    res.status(500).json({ message: 'Error fetching notifications' });
+  }
+});
+
 // ── 5. GET UNREAD COUNT ──
+// ?scope=all (N-4, unifiedInbox on): bell + social, with per-tab counts; otherwise the bell count, as before
 router.get('/unread-count', auth, async (req, res) => {
   try {
     const userId = resolveUserId(req);
     if (!userId) return res.status(401).json({ message: 'User ID required' });
 
     const uid = toId(userId);
+    if (req.query.scope === 'all' && inboxOn(req, userId)) {
+      const unread = await require('../services/unifiedInbox').unread(uid);
+      return res.json({ count: unread.all, unread });
+    }
 
     const count = await Notification.countDocuments({
       recipient: uid,

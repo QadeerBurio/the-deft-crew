@@ -119,6 +119,9 @@ const FLAGS = {
   // N-3 (app only): no notification prompt on login; a small sheet asks after a good moment (first deal claimed,
   // confession posted, job applied); Settings shows "turn on" / "turn on in settings". Off = the prompt on login.
   pushAskV2: { default: false, client: true, grant: { roles: ["student"], label: "Push ask v2" } },
+  // N-4: one inbox for the bell and social notifications (GET /api/notification/unified, tabs for you / campus /
+  // system, one unread count). Off = the two lists as today (the new route answers 404).
+  unifiedInbox: { default: false, client: true, grant: { roles: ["student"], label: "One inbox" } },
 };
 
 const JOBS = {
