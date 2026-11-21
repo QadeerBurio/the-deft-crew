@@ -116,6 +116,9 @@ const FLAGS = {
   // relevant 3 a day, broadcast 1–2 a day, quiet hours for relevant and broadcast only. Off = every sender keeps its
   // own rules, exactly as before.
   pushBudgetV1: { default: false, client: true, grant: { roles: ["student"], label: "Push budget" } },
+  // N-3 (app only): no notification prompt on login; a small sheet asks after a good moment (first deal claimed,
+  // confession posted, job applied); Settings shows "turn on" / "turn on in settings". Off = the prompt on login.
+  pushAskV2: { default: false, client: true, grant: { roles: ["student"], label: "Push ask v2" } },
 };
 
 const JOBS = {
