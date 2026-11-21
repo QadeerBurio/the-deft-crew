@@ -109,6 +109,9 @@ const FLAGS = {
   // FLAG_REFERRAL_VERIFY_GATE="ids:<test referrer id>"; FLAG_REFERRAL_VERIFY_GATE=on for everyone. Off = paid at
   // signup, as today. Rewards already paid are never touched (the awards are idempotent).
   referralVerifyGate: { default: false, client: false },
+  // N-6: push open tracking (services/pushTracking.js), per recipient: every push to the account gets a PushLog
+  // row and carries its id; the app reports the tap. Off = no rows, no extra data: pushes exactly as before.
+  pushOpenTracking: { default: false, client: true, grant: { roles: ["student"], label: "Push open tracking" } },
 };
 
 const JOBS = {

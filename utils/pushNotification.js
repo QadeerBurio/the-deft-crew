@@ -265,9 +265,14 @@ function rememberProjects(learned) {
 }
 
 // (client is ignored: kept so older callers keep working)
+// N-6 (pushOpenTracking): recipients with the flag get a PushLog row and its id in the data (stamp writes the id
+// into the caller's messages array, so handleTickets later sees the same messages). Flag off: untouched.
 async function sendAllSafe(client, messages, projectOf = {}) {
+  const tracking = require('../services/pushTracking');
+  const ctx = await tracking.stamp(messages);
   const { tickets, learned } = await sendByProject(messages, projectOf);
   rememberProjects(learned);
+  await tracking.afterSend(ctx, tickets);
   return tickets;
 }
 
@@ -325,6 +330,8 @@ async function checkReceiptsFor(okPairs, userId, tag = '[push]') {
     console.warn(`${tag} receipts not available:`, err.message);
     return;
   }
+  // N-6: delivered, for tracked rows only (pushOpenTracking)
+  await require('../services/pushTracking').markDelivered(Object.entries(receipts).filter(([, r]) => r?.status === 'ok').map(([id]) => id));
   for (const [id, receipt] of Object.entries(receipts)) {
     if (receipt?.status !== 'error') continue;
     const pair = okPairs.find((p) => p.id === id);

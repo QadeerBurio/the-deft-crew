@@ -34,6 +34,10 @@ const pushLogSchema = new mongoose.Schema(
       index: true,
     },
     data: { type: mongoose.Schema.Types.Mixed, default: {} },
+    // N-6 (pushOpenTracking): true on rows whose id travels in the push (opens and receipts are recorded);
+    // sender: "gateway" (engagement) or "send" (any other sender). Missing on older rows.
+    tracked: { type: Boolean },
+    sender: { type: String },
   },
   { timestamps: true }
 );

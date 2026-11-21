@@ -59,7 +59,10 @@ async function send(userId, msg) {
       if (sentThisWeek >= weeklyCap) return { sent: false, reason: 'weekly_cap' };
     }
 
-    const user = await User.findById(userId).select('pushTokens').lean();
+    const user = await User.findById(userId).select('pushTokens role').lean();
+    // N-6 (pushOpenTracking): this row's id travels in the push so the tap can be recorded
+    const tracking = require('../pushTracking');
+    const trackedId = tracking.forUser({ _id: userId, role: user?.role }) ? new (require('mongoose').Types.ObjectId)() : null;
     const seen = new Set();
     const entries = (user?.pushTokens || []).filter((t) => {
       if (!t?.token || seen.has(t.token)) return false; // one push per device
@@ -93,12 +96,14 @@ async function send(userId, msg) {
           channelId,
           soundKey,
           ...data,
+          ...(trackedId ? { pushLogId: String(trackedId) } : {}),
         },
       }));
 
     if (messages.length === 0) return { sent: false, reason: 'no_valid_token' };
 
     const log = await PushLog.create({
+      ...(trackedId ? { _id: trackedId, tracked: true, sender: 'gateway' } : {}),
       user: userId, type, priority,
       title: title || '', body: body || '', mood,
       dayKey: today, weekKey: thisWeek, data,
@@ -291,11 +296,12 @@ async function checkReceipts() {
   }
 }
 
-async function markOpened(logId) {
-  if (!logId) return false;
+// the first tap only, and only by the push's own recipient (N-6)
+async function markOpened(logId, userId = null) {
+  if (!logId || !require('mongoose').Types.ObjectId.isValid(String(logId))) return false;
   try {
-    await PushLog.updateOne({ _id: logId }, { $set: { openedAt: new Date() } });
-    return true;
+    const r = await PushLog.updateOne({ _id: logId, ...(userId ? { user: userId } : {}), openedAt: null }, { $set: { openedAt: new Date() } });
+    return (r.matchedCount ?? r.n ?? 0) > 0;
   } catch (err) {
     console.error('[pushGateway] markOpened error:', err.message);
     return false;
