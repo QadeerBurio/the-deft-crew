@@ -32,7 +32,7 @@ async function creditReferralOnSignup(refereeUserId) {
       feature: null,
       dayKey: dayKey(),
       meta: { refereeId: refereeIdStr },
-      source: 'system',
+      source: 'server',
       dedupeKey,
     });
   } catch (err) {
@@ -118,7 +118,7 @@ async function creditReferral(refereeUserId) {
       feature: null,
       dayKey: dayKey(),
       meta: { refereeId: refereeIdStr },
-      source: 'system',
+      source: 'server',
       dedupeKey: eventKey,
     });
   } catch (err) {
