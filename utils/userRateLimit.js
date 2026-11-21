@@ -20,6 +20,7 @@ const LIMITS = {
   confession_post: { max: 5, windowMin: 60 }, // new confessions (flag confessionSafety, plan P4-1)
   confession_comment: { max: 30, windowMin: 60 }, // confession comments (flag confessionSafety)
   confession_report: { max: 20, windowMin: 60 }, // confession / comment reports (flag confessionSafety)
+  confession_precheck: { max: 60, windowMin: 60 }, // the text check before an image upload (flag confessionSafety)
 };
 
 const envKey = (name, part) => `RATE_LIMIT_${name.toUpperCase()}_${part}`;

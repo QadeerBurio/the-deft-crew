@@ -1410,6 +1410,8 @@ const confessionCheck = require('../services/confessionCheck');
 const confessionStrikes = require('../services/confessionStrikes');
 const safetyAlerts = require('../services/safetyAlerts');
 const safetySettings = require('../services/safetySettings');
+const safetyObserve = require('../services/safetyObserve');
+const confessionImages = require('../services/confessionImages');
 const { perUser } = require('../utils/userRateLimit');
 // per-user limits only for students with the flag on (everyone else: exactly as before)
 const limitIfSafety = (name) => { const lim = perUser(name); return (req, res, next) => (safetyOn(req) ? lim(req, res, next) : next()); };
@@ -1665,9 +1667,10 @@ router.post('/confessions/comment/:id', auth, limitIfSafety('confession_comment'
       return res.status(404).json({ error: "Confession not found" });
     }
 
-    // confession safety (plan P4-1, flag confessionSafety): ban, then the pre-post check. Flag off: as before.
+    // confession safety (plan P4-1): as for posts, by the admin mode (enforce / observe / off) and the flag
+    const safetyMode = (await safetySettings.get()).mode;
     let commentStatus = null;
-    if (safetyOn(req)) {
+    if (safetyMode === 'enforce' && safetyOn(req)) {
       const meDoc = await User.findById(req.user._id).select('confessionBanUntil').lean();
       const banned = confessionStrikes.bannedUntil(meDoc);
       if (banned) return banReply(res, banned);
@@ -1717,6 +1720,10 @@ router.post('/confessions/comment/:id', auth, limitIfSafety('confession_comment'
 
     confession.comments.push(newComment);
     await confession.save();
+    if (safetyMode === 'observe') {
+      const saved = confession.comments[confession.comments.length - 1];
+      setImmediate(() => safetyObserve.observePost({ kind: 'comment', text: text.trim(), universityId: confession.university, userId: req.user._id, confessionId: confession._id, commentId: saved?._id }));
+    }
 
     const updatedConfession = await Confession.findById(req.params.id)
       .populate('comments.user', 'name profileImage')
@@ -1981,15 +1988,20 @@ router.post('/confessions/create', auth, limitIfSafety('confession_post'), async
       return res.status(400).json({ error: "add your university in your profile to post confessions" });
     }
 
-    // confession safety (plan P4-1, flag confessionSafety): ban, then the pre-post check. Flag off: as before.
+    // confession safety (plan P4-1). Admin mode "enforce" (default): ban, then the pre-post check, for accounts with the
+    // confessionSafety flag. "observe": every post is checked after it's saved and the decision logged, nothing acts.
+    // "off", or the flag off: as before.
+    const safetyMode = (await safetySettings.get()).mode;
     let safety = null; // { status, statusReason, support }
-    if (safetyOn(req)) {
+    if (safetyMode === 'enforce' && safetyOn(req)) {
       const banned = confessionStrikes.bannedUntil(currentUser);
       if (banned) return banReply(res, banned);
       const result = await confessionCheck.check({ text: text || '', image: image || '', universityId: currentUser.university?._id });
       if (result.verdict === 'edit') {
         const blocked = await confessionStrikes.noteBlocked(req.user._id, { reason: result.reasons.map((r) => r.code).join(', '), content: text });
         alertIfSevere(result, req.user._id, text, '');
+        // the app uploaded the image before posting: it's not used now (P4-1 follow-up)
+        if (image) setImmediate(() => confessionImages.deleteImage(image, 'post blocked at the pre-check'));
         return needsEditReply(res, result, blocked);
       }
       if (result.verdict === 'hold' || result.verdict === 'selfharm') {
@@ -2013,6 +2025,11 @@ router.post('/confessions/create', auth, limitIfSafety('confession_post'), async
     });
 
     await confession.save();
+
+    // observe mode: check in the background and log what would have happened (nothing acts)
+    if (safetyMode === 'observe') {
+      setImmediate(() => safetyObserve.observePost({ kind: 'confession', text: text || '', image: image || '', universityId: currentUser.university?._id, userId: req.user._id, confessionId: confession._id }));
+    }
 
     // held ("under review"): no push, no points, nothing public. Self-harm: support for the author, e-mail to admins.
     if (safety && safety.status === 'pending') {
