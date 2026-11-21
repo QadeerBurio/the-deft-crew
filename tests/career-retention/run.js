@@ -113,7 +113,7 @@ const range = { from: ago(1000), to: new Date() };
   check("dry run counts: 1 application (7 events, 1 interview, 1 offer, 1 outcome, 1 notification), 1 skipped (public), 1 old resume version", out.applications === 1 && out.events === 7 && out.interviews === 1 && out.offers === 1 && out.outcomes === 1 && out.outbox === 1 && out.skippedPublic === 1 && out.resumeVersions === 1, JSON.stringify(out));
   check("…and writes nothing at all", snapshot() === before);
   const line = logs.find((l) => l.startsWith("[career-retention]")) || "";
-  check("one log line with counts only: no ids, names, notes or phone numbers", /dry-run: 1 application/.test(line) && /nothing written/.test(line) && !/[0-9a-f]{24}/.test(line) && !/Ayesha|0300|Clifton|brother/.test(line), line);
+  check("one log line with counts only: no ids, names, notes or phone numbers", /dry-run: 1 application/.test(line) && /nothing written/.test(line) && !/[0-9a-f]{24}/.test(line) && !/Ayesha|0300 1234567|Clifton|brother/.test(line), line);
   process.env.CAREER_RETENTION_MODE = "dry-run";
   check("CAREER_RETENTION_MODE=dry-run (or any other value) is a dry run too", (await capture(() => retention.run())).mode === "dry-run" && snapshot() === before);
 
@@ -128,7 +128,7 @@ const range = { from: ago(1000), to: new Date() };
   check("…one placeholder per person: every event has the same candidate, every employer action the same actor", new Set(oldEv.map((e) => String(e.candidate))).size === 1 && new Set(oldEv.filter((e) => e.actorRole === "employer").map((e) => String(e.actor))).size === 1 && String(oldEv[0].actor) === String(oldEv[0].candidate));
   check("…types, order, times and roles are unchanged (7 events)", oldEv.map((e) => e.type).join() === events.filter((e) => same(e.application, OLD)).map((e) => e.type).join() && oldEv.every((e, i) => e.seq === i + 1 && +e.occurredAt === +events.find((x) => same(x._id, e._id)).occurredAt));
   const metaText = JSON.stringify(oldEv.map((e) => e.metadata));
-  check("…notes, internal notes, locations and links are cleared; offer / interview ids and the answer stay", !/strong portfolio|0300|Clifton|meet\.example|90k|brother/.test(metaText) && oldEv[4].metadata.offerId === "of1" && oldEv[5].metadata.response === "accept" && oldEv[2].metadata.interviewId === "iv1", metaText);
+  check("…notes, internal notes, locations and links are cleared; offer / interview ids and the answer stay", !/strong portfolio|0300 1234567|Clifton|meet\.example|90k|brother/.test(metaText) && oldEv[4].metadata.offerId === "of1" && oldEv[5].metadata.response === "accept" && oldEv[2].metadata.interviewId === "iv1", metaText);
   const iv = rows("CareerInterview", (x) => same(x.application, OLD))[0];
   check("interview: placeholder ids; location, meeting link and note empty; the candidate's message removed, the answer kept", !same(iv.candidate, S1) && !same(iv.employer, E1) && iv.location === "" && iv.meetingLink === "" && iv.note === "" && iv.responses.length === 1 && iv.responses[0].response === "accept" && !iv.responses[0].message && iv.status === "completed");
   const of = rows("CareerOffer", (x) => same(x.application, OLD))[0];

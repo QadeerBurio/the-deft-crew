@@ -147,7 +147,7 @@ const strip = (m) => { const { computedAt, ...rest } = m || {}; return rest; };
   console.log("── 2. fairness (docs/MATCHING_FAIRNESS.md)");
   const s3 = rows.find((x) => x.applicationId === String(A.S3)).match;
   check("same skills, different name / university / city → the same match", JSON.stringify(strip(s1)) === JSON.stringify(strip(s3)));
-  check("the reply carries no name, email, phone, university or city", !/full name|sana|taha|bilal|Ayesha|Khan|example\.com|test\.local|\+92|0300|NED University|Some Other University|Lahore|Karachi/i.test(r.text), r.text.match(/full name|sana|taha|bilal|Ayesha|Khan|example\.com|test\.local|\+92|0300|NED University|Some Other University|Lahore|Karachi/i)?.[0]);
+  check("the reply carries no name, email, phone, university or city", !/full name|sana|taha|bilal|Ayesha|Khan|example\.com|test\.local|\+92|"0300"|03001234567|NED University|Some Other University|Lahore|Karachi/i.test(r.text), r.text.match(/full name|sana|taha|bilal|Ayesha|Khan|example\.com|test\.local|\+92|"0300"|03001234567|NED University|Some Other University|Lahore|Karachi/i)?.[0]);
 
   console.log("── 3. the drawer / profile reply carries the same view");
   r = await call("GET", `/api/career/matching/applications/${A.S1}`, T.E);

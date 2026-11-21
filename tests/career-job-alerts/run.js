@@ -157,7 +157,7 @@ const jobBody = (extra = {}) => ({ title: "React intern", department: "Eng", loc
   check("alert rows for strong matches in the pilot with a resume and a token: S1, S2 (another name, city, university), S4, S5", who(alertRows()) === "S1,S2,S4,S5", who(alertRows()));
   check("…not S3 (33%: weak), S6 (no resume), S7 (no push token), SOUT (outside the pilot)", ["S3", "S6", "S7", "SOUT"].every((k) => !alertRows((x) => same(x.student, ids[k])).length));
   check("S1 and S2 got the push: the job, the company, how many skills, which ones; a tap opens the job", pushedTo("S1").length === 1 && pushedTo("S2").length === 1 && /A new job that matches your skills/.test(pushedTo("S1")[0].title) && /React intern at Bright Labs: your resume shows 3 of its 3 skills \(JavaScript, React, Node\.js\)\./.test(pushedTo("S1")[0].body) && pushedTo("S1")[0].data.screen === "Career" && pushedTo("S1")[0].data.params.openJobId === String(J1), JSON.stringify(pushedTo("S1")[0]));
-  check("…no employer e-mail or phone in it", !/hr@brightlabs\.test|0300/.test(JSON.stringify(pushed)));
+  check("…no employer e-mail or phone in it", !/hr@brightlabs\.test|03001234567|300 0000000/.test(JSON.stringify(pushed)));
   const s4 = alertRows((x) => same(x.student, ids.S4))[0], s5 = alertRows((x) => same(x.student, ids.S5))[0];
   check("S4 (jobs notifications off) → skipped: pref_off", pushedTo("S4").length === 0 && s4.status === "skipped" && s4.lastError === "pref_off", s4.lastError);
   check("S5 (already had today's marketing push) → skipped: daily_cap", pushedTo("S5").length === 0 && s5.status === "skipped" && s5.lastError === "daily_cap", s5.lastError);

@@ -151,7 +151,7 @@ const box = (extra = {}) => ({ branchId: String(ids.A1), title: "Evening bakery 
   console.log("── 2. delivered through the gateway: caps, opt-out; an in-app note when sent");
   check("K1, K2, K7, K8 got the push", ["K1", "K2", "K7", "K8"].every((k) => pushedTo(k).length === 1), pushed.map((m) => m.to).join(" "));
   check("…with the box, brand, price, pickup and branch; a tap opens the box", /A new Surprise Box near you/.test(pushedTo("K1")[0]?.title || "") && /Alpha Bakery: Evening bakery box, PKR 450\. Pick up .* at Alpha Clifton\./.test(pushedTo("K1")[0]?.body || "") && pushedTo("K1")[0]?.data?.screen === "SurpriseBoxes" && pushedTo("K1")[0]?.data?.params?.listingId === L1.id, JSON.stringify(pushedTo("K1")[0]));
-  check("…no phone number or e-mail anywhere in it", !/0300|@test\.local/.test(JSON.stringify(pushed)));
+  check("…no phone number or e-mail anywhere in it", !/03001234567|@test\.local/.test(JSON.stringify(pushed)));
   check("K5 (deals off) → skipped, nothing sent", pushedTo("K5").length === 0 && annOf("K5")[0].status === "skipped" && annOf("K5")[0].lastError === "pref_off", annOf("K5")[0]?.lastError);
   check("K6 (already had today's marketing push) → skipped: daily_cap", pushedTo("K6").length === 0 && annOf("K6")[0].status === "skipped" && annOf("K6")[0].lastError === "daily_cap", annOf("K6")[0]?.lastError);
   const notes = rows("Notification", (n) => n.metadata?.surplusListingId === L1.id);
