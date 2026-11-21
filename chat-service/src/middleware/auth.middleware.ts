@@ -91,6 +91,21 @@ export const authMiddleware = async (
       return;
     }
 
+    // Suspended / banned accounts (plan P0-6, P4-1b): the same rule as the main server (services/accountStatus.js),
+    // only while FLAG_ACCOUNT_STATUS_ENFORCE is on; admins are never locked out. 401, like the main server.
+    const { lockOf, lockBody } = require('../../../services/accountStatus');
+    const lock = lockOf({
+      _id: String(decoded.id),
+      role: userDoc.role,
+      accountStatus: userDoc.accountStatus,
+      suspensionExpiry: userDoc.suspensionExpiry,
+      suspensionReason: userDoc.suspensionReason,
+    });
+    if (lock.locked) {
+      res.status(401).json({ success: false, ...lockBody(lock) });
+      return;
+    }
+
     // Attach profile details for personalized prompts
     req.user = {
       id: decoded.id,

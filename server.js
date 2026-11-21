@@ -320,7 +320,12 @@ io.on('connection', (socket) => {
   console.log('New client connected:', socket.id);
 
   // --- TRACK ONLINE STATUS ---
-  socket.on('user_online', async (userId) => {
+  // plan P4-1b: the id comes from the sign-in token, never from the client (socket/socketIdentity.js). Older apps
+  // without a token keep working only while FLAG_ACCOUNT_STATUS_ENFORCE is off.
+  socket.on('user_online', async (clientUserId, tokenArg) => {
+    const who = await require('./socket/socketIdentity').resolveOnline(socket, clientUserId, tokenArg).catch(() => ({ refused: true }));
+    if (who.refused) return;
+    const userId = who.userId;
     console.log('User online:', userId);
     socket.userId = userId;
     onlineUsers.set(userId, socket.id);
