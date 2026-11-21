@@ -30,6 +30,7 @@ const MESSAGES = {
   sexual: "sexual or vulgar content isn't allowed.",
   threat: "threats aren't allowed.",
   hate: "hate or bullying isn't allowed.",
+  graphic: "graphic or violent images and content aren't allowed.",
 };
 const reason = (code, span) => ({ code, message: MESSAGES[code], ...(span ? { span: String(span).slice(0, 120) } : {}) });
 
@@ -106,6 +107,8 @@ async function moderation(text, image) {
   if (cat.sexual || minors) reasons.push(reason("sexual"));
   if (cat["harassment/threatening"] || cat["hate/threatening"] || cat.violence) reasons.push(reason("threat"));
   if (cat.hate || cat.harassment) reasons.push(reason("hate"));
+  // images and text: graphic violence (gore). Sexual / self-harm above cover images too (omni-moderation reads both).
+  if (cat["violence/graphic"]) reasons.push(reason("graphic"));
   return { ok: true, reasons, selfHarm, severe: minors || !!cat["harassment/threatening"] || !!cat["hate/threatening"] };
 }
 
