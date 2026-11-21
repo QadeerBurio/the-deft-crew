@@ -267,10 +267,13 @@ app.use("/api/profile", require("./routes/profile.routes"));
 app.use("/api/admin/actions", require("./routes/adminActions.routes")); // the unified admin action log (read-only)
 app.use("/api/admin/universities", require("./routes/adminUniversities.routes")); // the shared university list (admin only, logged)
 app.use("/api/admin/features", require("./routes/adminFeatures.routes")); // features per account (admin only, logged)
+app.use("/api/admin/safety", require("./routes/adminSafety.routes")); // confession safety log (plan P4-7, admins only)
 app.use("/api/admin", require("./routes/admin.routes"));
 app.use("/api/membership", require("./routes/membership.route"));
 app.use("/api/bookings", require("./routes/booking.routes"));
+app.use("/api/social", require("./routes/confessionSafety.routes")); // report / mute / rules (flag confessionSafety; 404 otherwise)
 app.use("/api/social", require("./routes/social.routes"));
+app.use("/api/safety", require("./routes/safetyActions.routes")); // one-time links in the safety e-mail (plan P4-1b)
 app.use("/api/events", require("./routes/event.routes"));
 app.use("/api/app", require("./routes/appFlags.routes")); // public app switches (Meta events kill switch)
 app.use("/api/jobs", require("./routes/jobs.routes"));

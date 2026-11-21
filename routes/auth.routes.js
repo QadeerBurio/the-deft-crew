@@ -211,6 +211,12 @@ router.post("/signup", async (req, res) => {
       return res.status(400).json({ error: "Invalid role" });
     }
 
+    // 1b. blacklisted by confession safety (plan P4-1b): the e-mail or phone can't sign up again (hashes only;
+    // the list is empty unless an admin used a safety e-mail's blacklist link)
+    if (await require("./safetyActions.routes").isBlocked({ email, phone })) {
+      return res.status(403).json({ code: "SIGNUP_BLOCKED", error: "this e-mail or phone number can't be used to sign up.", message: "this e-mail or phone number can't be used to sign up." });
+    }
+
     // 2. Check if user already exists
     const existingUser = await User.findOne({ email });
     if (existingUser) {
