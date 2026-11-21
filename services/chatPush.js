@@ -11,7 +11,9 @@
 //   - not looking at that chat right now (no socket of theirs in the conversation's room)
 //   - their "messages" notification switch is on (notifPrefs.messages; missing = on)
 //   - they haven't blocked the sender
-//   - not in quiet hours, 23:00–09:00 Karachi (CHAT_PUSH_QUIET_HOURS=off sends at night too); skipped, not queued
+//   - no quiet hours by default: a message from a person notifies at any hour, like WhatsApp (the phone's Do Not
+//     Disturb handles silence; owner, CHAT-1 sign-off). Optional override CHAT_PUSH_QUIET_HOURS=on: skipped (not
+//     queued) 23:00–09:00 Karachi. Unset / empty / anything else = no quiet hours. Broadcast pushes keep theirs.
 //   - at most one push per conversation per recipient every 20 s (a burst of messages buzzes once)
 // Push budget (Phase N): "personal", no daily cap. Never throws.
 const { Conversation } = require("../models/Chat");
@@ -23,7 +25,7 @@ const THROTTLE_MS = 20 * 1000;
 const lastSent = new Map(); // `${recipient}:${conversation}` → time
 let send = null; // tests swap sendToUser
 const sender = () => send || require("../utils/pushNotification").sendToUser;
-const quietOn = () => String(process.env.CHAT_PUSH_QUIET_HOURS || "").trim().toLowerCase() !== "off";
+const quietOn = () => ["on", "true", "1", "yes"].includes(String(process.env.CHAT_PUSH_QUIET_HOURS || "").trim().toLowerCase());
 
 /** Which screen a tap opens, and its params (as pushChatMessage decided). */
 async function target(conversationId, senderId) {

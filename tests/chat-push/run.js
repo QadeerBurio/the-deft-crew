@@ -4,7 +4,7 @@
 //   - on: the other participant gets "<sender> 💬" with the message, opening that chat (MessagesScreen / MatchChat /
 //     InquiryChat); never the sender
 //   - not when they are in that chat's room; not when their "messages" switch is off; not when they blocked the sender;
-//     not in quiet hours (23:00–09:00 Karachi; CHAT_PUSH_QUIET_HOURS=off sends); one push per 20 s per conversation
+//     no quiet hours by default (CHAT_PUSH_QUIET_HOURS=on is an optional override); one push per 20 s per conversation
 //   - photo / voice / location previews; long text cut at 80 characters
 //   - notification-prefs: GET has "messages" (default on), PUT saves it
 //   node tests/chat-push/run.js [serverDir]
@@ -52,7 +52,7 @@ const client = (tok) => new Promise((resolve) => { const s = connect(URL, { tran
   const server = h.start();
   const quiet = console.log; console.log = () => {};
   const warn = console.warn; console.warn = () => {};
-  process.env.CHAT_PUSH_QUIET_HOURS = "off"; // the live socket tests run at any hour; quiet hours are checked directly below
+  delete process.env.CHAT_PUSH_QUIET_HOURS; // chat has no quiet hours by default; the override is checked below
 
   const a = await client(T.A);
   a.emit("join_chat", String(conv.AB));
@@ -93,13 +93,22 @@ const client = (tok) => new Promise((resolve) => { const s = connect(URL, { tran
   console.log = quiet; console.warn = warn;
 
   // direct calls: quiet hours, throttle, long text
+  // quiet hours: none by default (person-to-person, like WhatsApp); only the optional override turns them on
   delete process.env.CHAT_PUSH_QUIET_HOURS;
   chatPush._resetThrottle(); pushes.length = 0;
   let r = await chatPush.pushChatMessage(io, conv.AB, ids.A, "at night", NIGHT_PKT);
-  check("02:00 Karachi: skipped (quiet_hours)", r.skipped[String(ids.B)] === "quiet_hours" && pushes.length === 0, JSON.stringify(r));
-  process.env.CHAT_PUSH_QUIET_HOURS = "off";
-  r = await chatPush.pushChatMessage(io, conv.AB, ids.A, "at night, quiet hours off", NIGHT_PKT);
-  check("CHAT_PUSH_QUIET_HOURS=off: sent at night", r.sent.includes(String(ids.B)));
+  check("02:00 Karachi, CHAT_PUSH_QUIET_HOURS unset: sent (no quiet hours for chat)", r.sent.includes(String(ids.B)) && pushes.length === 1, JSON.stringify(r));
+  for (const v of ["", "off", "nonsense"]) {
+    process.env.CHAT_PUSH_QUIET_HOURS = v; chatPush._resetThrottle();
+    r = await chatPush.pushChatMessage(io, conv.AB, ids.A, `night ${v}`, NIGHT_PKT);
+    check(`CHAT_PUSH_QUIET_HOURS="${v}": still sent at night`, r.sent.includes(String(ids.B)));
+  }
+  process.env.CHAT_PUSH_QUIET_HOURS = "on"; chatPush._resetThrottle();
+  r = await chatPush.pushChatMessage(io, conv.AB, ids.A, "at night, override on", NIGHT_PKT);
+  check("CHAT_PUSH_QUIET_HOURS=on (override): skipped at 02:00 (quiet_hours)", r.skipped[String(ids.B)] === "quiet_hours");
+  chatPush._resetThrottle();
+  r = await chatPush.pushChatMessage(io, conv.AB, ids.A, "daytime, override on", DAY_PKT);
+  check("…but sent at 13:00", r.sent.includes(String(ids.B)));
   delete process.env.CHAT_PUSH_QUIET_HOURS;
   chatPush._resetThrottle(); pushes.length = 0;
   const t0 = DAY_PKT.getTime();
