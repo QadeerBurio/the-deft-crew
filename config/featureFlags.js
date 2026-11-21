@@ -104,6 +104,11 @@ const FLAGS = {
   // CHAT-1: device pushes for chat messages (services/chatPush.js), per recipient; the app shows the "messages" switch.
   // Off = no chat pushes, as since 5 Oct 2026. Not in ROLE_DEFAULTS.
   chatPushV1: { default: false, client: true, grant: { roles: ["student"], label: "Chat pushes" } },
+  // Server only (P1 follow-up, owner): referral rewards (referrer +150, new student +100) are paid when the new
+  // student confirms their e-mail code, not at signup. Checked for the referrer's account, so a test can use
+  // FLAG_REFERRAL_VERIFY_GATE="ids:<test referrer id>"; FLAG_REFERRAL_VERIFY_GATE=on for everyone. Off = paid at
+  // signup, as today. Rewards already paid are never touched (the awards are idempotent).
+  referralVerifyGate: { default: false, client: false },
 };
 
 const JOBS = {

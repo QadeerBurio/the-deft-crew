@@ -356,8 +356,9 @@ if (referrer) {
     await updatedReferrer.save();
   }
 
-  // 7c. the referral awards (services/engagement/referralSignup.js)
-  await require("../services/engagement/referralSignup").awardSignupReferral(referrer, user);
+  // 7c. the referral awards (services/engagement/referralSignup.js); with referralVerifyGate they wait for the
+  //     student's e-mail code (verify-otp below pays them)
+  await require("../services/engagement/referralSignup").onSignup(referrer, user);
 
   // 7d. Live badge eval — AFTER canApplyForTdcCard is updated
   try {
@@ -544,6 +545,9 @@ router.post("/signup/verify-otp", async (req, res) => {
     await OtpCode.deleteMany({ user: userId, purpose: SIGNUP_PURPOSE });
     user.emailVerified = true;
     await user.save();
+
+    // referral rewards held back at signup (referralVerifyGate): paid now, once
+    await require("../services/engagement/referralSignup").onEmailVerified(user);
 
     // welcome email now that the address is confirmed
     sendMail({
