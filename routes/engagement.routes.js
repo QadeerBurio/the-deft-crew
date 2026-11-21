@@ -559,17 +559,27 @@ router.get('/home', auth, async (req, res) => {
 // ============================================================
 // POST /api/engagement/events
 // ============================================================
-router.post('/events', auth, async (req, res) => {
+// upgrade v2 funnel events (config/funnelEvents.js): a per-user limit applies to them only, so the older five
+// events behave exactly as before
+const funnelEvents = require('../config/funnelEvents');
+const funnelLimit = require('../utils/userRateLimit').perUser('funnel_events');
+const limitFunnel = (req, res, next) =>
+  (!req.isGuest && funnelEvents.isFunnelEvent(req.body?.name) ? funnelLimit(req, res, next) : next());
+
+router.post('/events', auth, limitFunnel, async (req, res) => {
   try {
     const { name, meta } = req.body || {};
     const ALLOWED = new Set([
       'app_open', 'tour_completed', 'card_snoozed', 'popup_seen', 'push_opened',
     ]);
-    if (!ALLOWED.has(name))
+    const funnel = funnelEvents.isFunnelEvent(name);
+    if (!ALLOWED.has(name) && !funnel)
       return res.status(400).json({ message: 'event not allowed from client' });
 
     if (!req.isGuest) {
-      await track(req.userId, name, { meta, source: 'client' });
+      // funnel events: small plain meta only; meta.refId (if any) makes each occurrence its own row
+      const m = funnel ? funnelEvents.cleanMeta(meta) : meta;
+      await track(req.userId, name, { meta: m, source: 'client' });
     }
     res.status(204).end();
   } catch (err) {

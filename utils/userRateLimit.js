@@ -16,6 +16,7 @@ const { rateLimit } = require("express-rate-limit");
 const LIMITS = {
   resume_pdf: { max: 30, windowMin: 10 }, // draft previews, approved exports, the employer's snapshot PDF
   analytics: { max: 60, windowMin: 10 }, // /api/analytics/*
+  funnel_events: { max: 120, windowMin: 10 }, // upgrade v2 funnel events on POST /api/engagement/events
 };
 
 const envKey = (name, part) => `RATE_LIMIT_${name.toUpperCase()}_${part}`;
