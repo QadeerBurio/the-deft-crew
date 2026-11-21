@@ -314,9 +314,13 @@ async function campusConfessionError(payload) {
   if (!isConfessionDrop || !ref?.id) return null;
   try {
     const Confession = require('../models/Confession');
-    const c = await Confession.findById(ref.id).select('visibility').lean();
+    const c = await Confession.findById(ref.id).select('visibility status').lean();
     if (c?.visibility === 'campus') {
       return 'This confession is campus-only. Pick a public confession for a Daily Drop.';
+    }
+    // plan P4-1: a held, hidden or removed confession can't be a Daily Drop
+    if (c && !Confession.isLive(c)) {
+      return 'This confession is held or hidden by confession safety. Pick a live confession for a Daily Drop.';
     }
   } catch (e) {}
   return null;

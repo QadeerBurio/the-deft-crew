@@ -1397,9 +1397,22 @@ router.get('/posts/:id', auth, async (req, res) => {
 const isAdminUser = (req) => req.userRole === 'admin';
 const isGuestReq = (req) => !!req.isGuest || req.userId === 'guest-user';
 
+// confession safety (plan P4-1): the flag is per user (the author, reporter or viewer acting)
+const featureFlags = require('../config/featureFlags');
+const safetyOn = (req) => !isGuestReq(req) && featureFlags.isEnabled('confessionSafety', { id: String(req.user?._id || req.userId || ''), role: req.userRole });
+const myIdOf = (req) => (isGuestReq(req) ? '' : String(req.user?._id || req.user?.id || ''));
+// a comment others may see: live (or written before statuses existed); my own held comment is shown to me
+const commentVisible = (c, meId) => Confession.isLive(c) || (!!meId && String(c?.user?._id || c?.user || '') === meId);
+// the confessions a viewer may see: live ones, plus their own held ("under review") ones
+const viewFilter = (meId) => (meId
+  ? { $or: [...Confession.LIVE.$or, { authorId: meId, status: 'pending' }] }
+  : Confession.LIVE);
+
 // Can this user see / interact with this confession?
 const canAccessConfession = (req, confession) => {
   if (!confession) return false;
+  // hidden / removed: nobody (held: only through the feed's own filter, for its author)
+  if (!Confession.isLive(confession)) return false;
   if (confession.visibility !== 'campus') return true;
   if (isAdminUser(req)) return true;
   if (isGuestReq(req)) return false;
@@ -1415,7 +1428,19 @@ router.get('/confessions/my-confessions', auth, async (req, res) => {
     const myConfessions = await Confession.find({ authorId: req.user.id })
       .populate('comments.user', 'name profileImage')
       .sort({ createdAt: -1 });
-    res.json(myConfessions);
+    // Anonymous comments stay anonymous for the author too (plan P4-1): same shape as before, but another
+    // student's comment has user: null (as in the feed); my own comments keep my name. Everyone, flag or not.
+    const me = myIdOf(req);
+    const out = myConfessions.map((doc) => {
+      const obj = typeof doc.toObject === 'function' ? doc.toObject() : { ...doc };
+      obj.comments = (obj.comments || []).filter((c) => commentVisible(c, me)).map((c) => {
+        const mine = !!me && String(c.user?._id || c.user || '') === me;
+        return { ...c, user: mine ? c.user : null };
+      });
+      delete obj.reportedBy;
+      return obj;
+    });
+    res.json(out);
   } catch (err) {
     console.error("Confessions Fetch Error:", err);
     res.status(500).json({ error: "Could not fetch your confessions." });
@@ -1423,18 +1448,23 @@ router.get('/confessions/my-confessions', auth, async (req, res) => {
 });
 
 // --- Get Confession Likes ---
+// S3 (plan P4-1): the names and photos of who liked an anonymous confession go only to its author; everyone else
+// gets likes: [] and the count. Same shape ({ likes }), plus count. Everyone, flag or not.
 router.get('/confessions/likes/:id', auth, async (req, res) => {
   try {
-    const confession = await Confession.findById(req.params.id);
+    const confession = await Confession.findById(req.params.id).select('+authorId');
     if (!confession) return res.status(404).json({ message: "Confession not found" });
     if (!canAccessConfession(req, confession)) {
       return res.status(404).json({ message: "Confession not found" });
     }
-    
+    const count = (confession.likedBy || []).length;
+    const isAuthor = !!myIdOf(req) && String(confession.authorId || '') === myIdOf(req);
+    if (!isAuthor) return res.json({ likes: [], count });
+
     const users = await User.find({ _id: { $in: confession.likedBy } })
       .select('name profileImage');
-    
-    res.json({ likes: users });
+
+    res.json({ likes: users, count });
   } catch (err) {
     console.error("Get Confession Likes Error:", err);
     res.status(500).json({ message: "Server Error" });
@@ -1649,7 +1679,7 @@ router.post('/confessions/comment/:id', auth, async (req, res) => {
       .lean();
 
     // ✅ Sanitize comments for response
-    const sanitizedComments = (updatedConfession.comments || []).map(comment => {
+    const sanitizedComments = (updatedConfession.comments || []).filter((c) => commentVisible(c, myIdOf(req))).map(comment => {
       const commentUserId = comment.user?._id?.toString();
       const currentUserId = req.user._id.toString();
       const isMyComment = commentUserId === currentUserId;
@@ -1746,7 +1776,7 @@ router.delete('/confessions/comment/:postId/:commentId', auth, async (req, res) 
       .lean();
 
     // Sanitize
-    const sanitizedComments = (updatedConfession.comments || []).map(c => {
+    const sanitizedComments = (updatedConfession.comments || []).filter((c) => commentVisible(c, myIdOf(req))).map(c => {
       const commentUserId = c.user?._id?.toString();
       const currentUserId = req.user._id.toString();
       const isMyComment = commentUserId === currentUserId;
@@ -1809,6 +1839,15 @@ router.get('/confessions/feed', auth, async (req, res) => {
       filter = { $and: [filter, { createdAt: { $lt: before } }] };
     }
 
+    // plan P4-1: only live confessions (no status = live), plus the viewer's own held ones ("under review"); admins
+    // too (held / hidden ones are on the admin Safety page). Muted authors are left out for a viewer with the flag on.
+    filter = { $and: [filter, viewFilter(currentUserId)] };
+    if (safetyOn(req)) {
+      const meDoc = await User.findById(currentUserId).select('+mutedConfessionAuthors').lean();
+      const muted = (meDoc?.mutedConfessionAuthors || []).map(String);
+      if (muted.length) filter.$and.push({ authorId: { $nin: muted } });
+    }
+
     let query = Confession.find(filter)
       .sort({ createdAt: -1 })
       .populate('comments.user', 'name profileImage')
@@ -1819,7 +1858,7 @@ router.get('/confessions/feed', auth, async (req, res) => {
 
     const formattedConfessions = confessions.map(confession => {
       // Hide user identity of OTHER users' comments
-      const sanitizedComments = (confession.comments || []).map(comment => {
+      const sanitizedComments = (confession.comments || []).filter((c) => commentVisible(c, currentUserId)).map(comment => {
         const commentUserId = comment.user?._id?.toString();
         const isMyComment = !!currentUserId && commentUserId === currentUserId;
 
@@ -1834,12 +1873,16 @@ router.get('/confessions/feed', auth, async (req, res) => {
             profileImage: comment.user.profileImage,
           } : null,
           isMyComment,
+          // my own held comment: "under review" (plan P4-1)
+          ...(isMyComment && comment.status && comment.status !== 'live' ? { status: comment.status } : {}),
         };
       });
 
       return {
         ...confession,
         authorId: undefined,
+        reportedBy: undefined,
+        statusReason: undefined,
         likedBy: undefined, // other students' ids; the app reads likedByCurrentUser
         // same shape as before (id); the name goes in campusName
         university: confession.university?._id || confession.university || null,

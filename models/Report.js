@@ -29,10 +29,28 @@ const ReportSchema = new mongoose.Schema({
       'Misinformation',
       'Inappropriate Content',
       'Fake Account',
-      'Other'
+      'Other',
+      // confession safety (plan P4-1), additive
+      'Identifies A Person',
+      'Personal Info',
+      'Self Harm Risk'
     ],
     required: true
   },
+  // confession safety (plan P4-1), all optional:
+  // a confession comment's id (contentType 'Confession', contentId = the confession)
+  commentId: { type: mongoose.Schema.Types.ObjectId },
+  // the exact words the reporter highlighted (evidence), as found in the content
+  evidenceQuote: { type: String, maxlength: 500 },
+  // what the automatic re-check found: confirmed (true / false), why, when
+  recheck: {
+    confirmed: Boolean,
+    reasons: [String],
+    at: Date,
+    _id: false,
+  },
+  // rejected by the re-check and not backed by other reports
+  falseReport: { type: Boolean },
   description: {
     type: String,
     maxlength: 500
