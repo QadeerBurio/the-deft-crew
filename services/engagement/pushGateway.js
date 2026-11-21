@@ -45,26 +45,32 @@ async function send(userId, msg) {
 
     // N-2 (pushBudgetV1 on for this student): the one budget across senders replaces this gateway's quiet hours
     // and daily / weekly caps (checked below, once the push can actually be sent). Off: exactly as before.
+    // N-5 (notifSettingsV2): the student's mode and digest are checked at the same point; only the budget replaces
+    // this gateway's own quiet hours and caps
     const budget = require('../pushBudget');
     let budgetUser = null;
+    let budgetCaps = false;
     if (!skipCaps && budget.configured()) {
       const u = await User.findById(userId).select('role').lean();
-      if (u && budget.onFor({ _id: userId, role: u.role })) budgetUser = { _id: userId, role: u.role };
+      if (u && budget.onFor({ _id: userId, role: u.role })) {
+        budgetUser = { _id: userId, role: u.role };
+        budgetCaps = budget.budgetOn(budgetUser);
+      }
     }
 
-    if (!budgetUser && !skipCaps && isQuietHour(new Date(), cfg.push)) {
+    if (!budgetCaps && !skipCaps && isQuietHour(new Date(), cfg.push)) {
       return { sent: false, reason: 'quiet_hours' };
     }
 
     const today = dayKey();
     const thisWeek = weekKey();
 
-    if (!budgetUser && !skipCaps && !essential && profile.push?.lastPushDay === today) {
+    if (!budgetCaps && !skipCaps && !essential && profile.push?.lastPushDay === today) {
       return { sent: false, reason: 'daily_cap' };
     }
 
     const weeklyCap = cfg.push.weeklyCap(cfg.STAGE);
-    if (!budgetUser && !skipCaps && !essential) {
+    if (!budgetCaps && !skipCaps && !essential) {
       const sentThisWeek =
         profile.push?.weekKey === thisWeek ? profile.push.sentThisWeek || 0 : 0;
       if (sentThisWeek >= weeklyCap) return { sent: false, reason: 'weekly_cap' };

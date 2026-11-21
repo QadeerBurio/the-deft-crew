@@ -17,6 +17,8 @@ const karachi = require("../utils/karachiTime"); // read at call time (tests can
 const { dayKey } = karachi;
 
 const FLAG = "pushBudgetV1";
+// N-5: the student's mode and digest (notifSettingsV2) act at the same point, for every sender
+const MODES_FLAG = "notifSettingsV2";
 const QUIET = { quietStart: 23, quietEnd: 9 };
 const CLASSES = ["personal", "relevant", "broadcast", "exempt"];
 
@@ -28,8 +30,8 @@ const PERSONAL = [
   // a bell row of type Event is only ever your own ticket (services/events/tickets.js); new events are "new_event"
   "Event", "Security", "Welcome", "Payment", "Booking", "Card",
   "Application Status", "Interview", "Job Application", "Exchange", "transactional",
-  // a friend joined with your code
-  "referral_joined",
+  // a friend joined with your code; the campus digest you turned on (N-5)
+  "referral_joined", "campus_digest",
 ];
 const RELEVANT = [
   "job", "new_job", "Job Posting", "Jobs", "Scholarship", "Course", "Offer", "nearby_deal", "exclusive_offer",
@@ -71,19 +73,41 @@ const intEnv = (name, def, min, max) => {
 };
 const caps = () => ({ relevant: intEnv("PUSH_BUDGET_RELEVANT_MAX", 3, 1, 10), broadcast: intEnv("PUSH_BUDGET_BROADCAST_MAX", 2, 1, 2) });
 
-const configured = () => flags.pilotConfigured(FLAG);
-const onFor = (user) => !!user && flags.isEnabled(FLAG, { id: String(user._id || user.id || user), role: user.role || "student" });
+const who = (user) => ({ id: String(user._id || user.id || user), role: user.role || "student" });
+const budgetOn = (user) => !!user && flags.isEnabled(FLAG, who(user));
+const modesOn = (user) => !!user && flags.isEnabled(MODES_FLAG, who(user));
+const configured = () => flags.pilotConfigured(FLAG) || flags.pilotConfigured(MODES_FLAG);
+/** Does anything here apply to this student (the budget or the modes)? */
+const onFor = (user) => budgetOn(user) || modesOn(user);
+
+/** The student's mode and digest (N-5): { mode: everything | important | quiet, digest } */
+async function prefsOf(userId) {
+  const p = await require("../models/EngagementProfile").findOne({ user: userId }).select("notifPrefs.mode notifPrefs.digest").lean();
+  const mode = ["important", "quiet"].includes(p?.notifPrefs?.mode) ? p.notifPrefs.mode : "everything";
+  return { mode, digest: p?.notifPrefs?.digest === true };
+}
 
 /**
  * May this push go to this student now? Counts it when it may (relevant / broadcast).
  *   user: { _id, role } (or an id: role student)  cls: a class from classify() or a sender's budgetClass
- * → { ok: true, cls, counted? } | { ok: false, cls, reason: 'quiet_hours' | 'budget_relevant' | 'budget_broadcast' }
- * Flag off for the student: { ok: true, off: true }, nothing counted.
+ *   campusActivity: a per-item campus push (new post / confession / listing): skipped when the digest is on
+ * → { ok: true, cls, counted? } | { ok: false, cls, reason: 'mode_quiet' | 'mode_important' | 'digest' |
+ *   'quiet_hours' | 'budget_relevant' | 'budget_broadcast' }
+ * Both flags off for the student: { ok: true, off: true }, nothing read or counted.
  */
-async function allow(user, cls, { now = new Date() } = {}) {
+async function allow(user, cls, { now = new Date(), campusActivity = false } = {}) {
   const u = user && typeof user === "object" ? user : { _id: user, role: "student" };
-  if (!onFor(u)) return { ok: true, off: true };
+  const b = budgetOn(u);
+  const m = modesOn(u);
+  if (!b && !m) return { ok: true, off: true };
   const c = CLASSES.includes(cls) ? cls : "relevant";
+  if (m && c !== "exempt") {
+    const p = await prefsOf(u._id);
+    if (p.mode === "quiet" && c !== "personal") return { ok: false, cls: c, reason: "mode_quiet" };
+    if (p.mode === "important" && c === "broadcast") return { ok: false, cls: c, reason: "mode_important" };
+    if (campusActivity && p.digest) return { ok: false, cls: c, reason: "digest" };
+  }
+  if (!b) return { ok: true, cls: c };
   if (c === "personal" || c === "exempt") return { ok: true, cls: c };
   if (karachi.isQuietHour(now, QUIET)) return { ok: false, cls: c, reason: "quiet_hours" };
   const PushBudget = require("../models/PushBudget");
@@ -108,4 +132,4 @@ async function allowSafe(user, cls, opts) {
   }
 }
 
-module.exports = { FLAG, CLASSES, classify, allow: allowSafe, configured, onFor, caps, _test: { TABLE, unclassified, allowRaw: allow } };
+module.exports = { FLAG, MODES_FLAG, CLASSES, classify, allow: allowSafe, configured, onFor, budgetOn, modesOn, prefsOf, caps, _test: { TABLE, unclassified, allowRaw: allow } };

@@ -106,6 +106,10 @@ const profileSchema = new mongoose.Schema(
       skillshare:       { type: Boolean, default: true },
       // CHAT-1: chat message pushes (services/chatPush.js). Missing on old profiles = on.
       messages:         { type: Boolean },
+      // N-5 (notifSettingsV2): everything (missing = everything) / important (personal + relevant) / quiet
+      // (personal only); digest: one 6 pm campus summary instead of the per-item campus pushes
+      mode:             { type: String, enum: ['everything', 'important', 'quiet'] },
+      digest:           { type: Boolean },
     },
     osPushPermission: {
       type: String,

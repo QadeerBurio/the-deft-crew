@@ -243,6 +243,24 @@ function start() {
   );
 
   // ═════════════════════════════════════════════════════════════
+  // 18:00 PKT — CAMPUS DIGEST (N-5, flag notifSettingsV2): one push to students who turned the digest on.
+  // Nothing happens while the flag is configured nowhere.
+  // ═════════════════════════════════════════════════════════════
+  cron.schedule(
+    '0 18 * * *',
+    async () => {
+      if (!require('../../config/featureFlags').pilotConfigured('notifSettingsV2')) return;
+      if (!(await lock('campus_digest', dayKey()))) return;
+      try {
+        await require('../notifDigest').sendDigests();
+      } catch (e) {
+        console.error('[scheduler] campus_digest failed:', e.message);
+      }
+    },
+    { timezone: cfg.TZ }
+  );
+
+  // ═════════════════════════════════════════════════════════════
   // MON 00:00 PKT — WEEKLY FREEZE RESET
   // Every user gets 1 freeze back
   // ═════════════════════════════════════════════════════════════

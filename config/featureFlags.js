@@ -122,6 +122,10 @@ const FLAGS = {
   // N-4: one inbox for the bell and social notifications (GET /api/notification/unified, tabs for you / campus /
   // system, one unread count). Off = the two lists as today (the new route answers 404).
   unifiedInbox: { default: false, client: true, grant: { roles: ["student"], label: "One inbox" } },
+  // N-5: simpler notification settings: three modes (everything / only important / quiet), a 6 pm campus digest,
+  // the switches under "fine-tune". Modes and the digest act on every sender (services/pushBudget.js). Off = the
+  // settings screen and pushes as today.
+  notifSettingsV2: { default: false, client: true, grant: { roles: ["student"], label: "Notification modes" } },
 };
 
 const JOBS = {

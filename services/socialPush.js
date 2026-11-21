@@ -124,7 +124,7 @@ async function sendToStudents(kind, items, studentsIn) {
     for (const s of studentsIn) {
       if (!budget.onFor(s)) { students.push(s); continue; }
       if (!(s.pushTokens || []).some((e) => e?.token && Expo.isExpoPushToken(e.token))) continue;
-      if ((await budget.allow(s, "broadcast")).ok) students.push(s);
+      if ((await budget.allow(s, "broadcast", { campusActivity: true })).ok) students.push(s);
     }
   }
   const content = buildContent(kind, items);

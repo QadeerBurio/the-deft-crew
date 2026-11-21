@@ -976,10 +976,19 @@ const loyaltySwitch = async (req) => {
 // CHAT-1: the "messages" switch (chat pushes) exists only for accounts with chatPushV1, like loyalty above; everyone
 // else sees exactly the switches they had. Stored in notifPrefs.messages; missing = on.
 const chatOn = (req) => isEnabled('chatPushV1', { id: String(req.userId), role: req.userRole || 'student' });
+// N-5: "mode" and "digest" exist only for accounts with notifSettingsV2 (like messages / loyalty above)
+const modesOn = (req) => isEnabled('notifSettingsV2', { id: String(req.userId), role: req.userRole || 'student' });
+const MODES = ['everything', 'important', 'quiet'];
 const prefsOut = (req, notifPrefs) => {
   const p = { ...NOTIF_PREF_DEFAULTS, ...(notifPrefs || {}) };
   delete p.messages;
+  delete p.mode;
+  delete p.digest;
   if (chatOn(req)) p.messages = notifPrefs?.messages !== false;
+  if (modesOn(req)) {
+    p.mode = MODES.includes(notifPrefs?.mode) ? notifPrefs.mode : 'everything';
+    p.digest = notifPrefs?.digest === true;
+  }
   return p;
 };
 
@@ -1000,6 +1009,10 @@ router.put('/notification-prefs', auth, requireAuth, async (req, res) => {
     if (typeof req.body[k] === 'boolean') set[`notifPrefs.${k}`] = req.body[k];
   }
   if (typeof req.body.messages === 'boolean' && chatOn(req)) set['notifPrefs.messages'] = req.body.messages;
+  if (modesOn(req)) {
+    if (MODES.includes(req.body.mode)) set['notifPrefs.mode'] = req.body.mode;
+    if (typeof req.body.digest === 'boolean') set['notifPrefs.digest'] = req.body.digest;
+  }
   // upsert: a student without an engagement profile could not save any switch before
   if (Object.keys(set).length) {
     await EngagementProfile.updateOne({ user: req.userId }, { $set: set }, { upsert: true });
