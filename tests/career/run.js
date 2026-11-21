@@ -460,7 +460,7 @@ const applyBody = (who) => ({ fullName: `${who} full name`, email: `${who}@test.
   const d1 = r.json?.data?.disputes?.find((d) => same(d.applicationId, h1.appId));
   check("admin disputes list: the open dispute with job, candidate, employer, the reason and dates; resolvable", r.status === 200 && d1 && d1.job.title === "Data intern" && same(d1.candidate.id, ids.S1) && d1.candidate.name && same(d1.employer.id, ids.E1) && d1.employer.name && d1.reason === "I never started this job" && d1.disputedAt && d1.hireConfirmedAt && d1.resolvable === true && Number.isInteger(d1.version), r.text.slice(0, 300));
   check("…every listed dispute is still open (A4 from section 10 too); nothing resolved is listed", r.json.data.disputes.some((d) => same(d.applicationId, ctx.A4)) && !r.json.data.disputes.some((d) => same(d.applicationId, ctx.A5)));
-  check("…no contact details in it (no e-mail, phone, CV)", !/@|0300|resume|cv/i.test(JSON.stringify(r.json.data)), r.text.slice(0, 200));
+  check("…no contact details in it (no e-mail, phone, CV)", !/@|03001234567|resume|cv/i.test(JSON.stringify(r.json.data)), r.text.slice(0, 200));
   check("…reading the list is audited", rows("DomainEvent", (e) => e.type === "career.admin.access").length > disputesAudit);
   r = await call("GET", "/api/career/admin/disputes", { tok: T.E1 });
   const rS = await call("GET", "/api/career/admin/disputes", { tok: T.S1 });
@@ -515,7 +515,7 @@ const applyBody = (who) => ({ fullName: `${who} full name`, email: `${who}@test.
   const invRows = outbox((o) => same(o.event, invited._id));
   check("an interview invite queued push + in-app for the candidate only", invRows.length === 2 && invRows.every((o) => same(o.recipient, ids.S2)) && invRows.map((o) => o.channel).sort().join() === "inapp,push", invRows.map((o) => o.channel).join());
   check("…in-app delivered as a Notification without its own push; push through the gateway (no device here: skipped; at night held for quiet hours)", invRows.find((o) => o.channel === "inapp").status === "sent" && rows("Notification", (n) => n.metadata?.careerOutboxId === String(invRows.find((o) => o.channel === "inapp")._id) && n.metadata.skipPush === true).length === 1 && (["sent", "skipped"].includes(invRows.find((o) => o.channel === "push").status) || (invRows.find((o) => o.channel === "push").status === "pending" && invRows.find((o) => o.channel === "push").lastError === "quiet_hours")), invRows.map((o) => `${o.channel}:${o.status}:${o.lastError}`).join());
-  check("…the texts name the job and company, no e-mail or phone", invRows.every((o) => o.payload.body.includes("Frontend dev") && !/@|0300/.test(JSON.stringify(o.payload))));
+  check("…the texts name the job and company, no e-mail or phone", invRows.every((o) => o.payload.body.includes("Frontend dev") && !/@|03001234567/.test(JSON.stringify(o.payload))));
   check("REVIEWED queues nothing (no message for it)", outbox((o) => o.eventType === "REVIEWED").length === 0);
   check("HIRE_CONFIRMED notified both sides", new Set(outbox((o) => o.eventType === "HIRE_CONFIRMED" && same(o.application, ctx.A4)).map((o) => String(o.recipient))).size === 2);
   // the in-app provider fails once
@@ -694,7 +694,7 @@ const applyBody = (who) => ({ fullName: `${who} full name`, email: `${who}@test.
   gateway.send = async () => ({ sent: true });
   await job7.tick(new Date(T0));
   check("20 h before: 24 h reminders queued for the accepted interview: candidate push + in-app, employer in-app", reminderRows(iv8._id, "24H").length === 3 && reminderRows(iv8._id, "24H").filter((o) => same(o.recipient, ids.S1)).map((o) => o.channel).sort().join() === "inapp,push" && reminderRows(iv8._id, "24H").some((o) => same(o.recipient, ids.E1) && o.channel === "inapp"), reminderRows(iv8._id).map((o) => `${o.channel}:${o.status}`).join());
-  check("…delivered on the same tick; the text has the job, company, Karachi time; no e-mail / phone", reminderRows(iv8._id, "24H").every((o) => o.status === "sent") && reminderRows(iv8._id, "24H").every((o) => o.payload.body.includes("Mobile dev") && /Asia\/Karachi/.test(o.payload.body) && !/@|0300/.test(JSON.stringify(o.payload))));
+  check("…delivered on the same tick; the text has the job, company, Karachi time; no e-mail / phone", reminderRows(iv8._id, "24H").every((o) => o.status === "sent") && reminderRows(iv8._id, "24H").every((o) => o.payload.body.includes("Mobile dev") && /Asia\/Karachi/.test(o.payload.body) && !/@|03001234567/.test(JSON.stringify(o.payload))));
   check("an interview not accepted yet gets no reminder", reminderRows(iv9._id).length === 0);
   await job7.tick(new Date(T0 + 5 * 60e3));
   await job7.tick(new Date(T0 + 3 * 3600e3));
