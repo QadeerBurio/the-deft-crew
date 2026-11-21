@@ -7,6 +7,7 @@ const { body, validationResult } = require("express-validator");
 const multer = require("multer");
 const { storage, uploadLogo, hasCloudinary, deleteFromCloudinary } = require("../config/cloudinary");
 const User = require("../models/User");
+const accountStatus = require("../services/accountStatus"); // plan P0-6: suspended / banned (flag accountStatusEnforce)
 const University = require("../models/University");
 const universities = require("../services/universities");
 const Notification = require("../models/Notification");
@@ -558,6 +559,11 @@ router.post("/login", async (req, res) => {
     if (!match) { loginGuard.fail(req, email); return res.status(401).json({ message: "Invalid password" }); }
     loginGuard.success(req, email);
 
+    // suspended / banned (only while the accountStatusEnforce flag is on; admins never), after the password check so a
+    // wrong password never reveals an account's status
+    const held = accountStatus.lockOf(user);
+    if (held.locked) return res.status(403).json(accountStatus.lockBody(held));
+
     // Signed up but never confirmed the email: send a code, app opens the code screen
     if (user.emailVerified === false) {
       let r = { retryAfter: 0 };
@@ -606,6 +612,8 @@ router.post("/signup/verify-otp", async (req, res) => {
     if (!user) return res.status(404).json({ message: "Account not found." });
 
     const sendLogin = () => {
+      const lock = accountStatus.lockOf(user); // plan P0-6, as in /login
+      if (lock.locked) return res.status(403).json(accountStatus.lockBody(lock));
       const userObj = user.toObject();
       delete userObj.password;
       return res.json({ success: true, token: signToken(user), user: userObj });
