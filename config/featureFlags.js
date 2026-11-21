@@ -101,6 +101,9 @@ const FLAGS = {
   // Off = older apps without a token keep working (logged). Switched on by the owner (FLAG_SOCKET_TOKEN_REQUIRED=on)
   // once most installs send the token.
   socketTokenRequired: { default: false, client: false },
+  // CHAT-1: device pushes for chat messages (services/chatPush.js), per recipient; the app shows the "messages" switch.
+  // Off = no chat pushes, as since 5 Oct 2026. Not in ROLE_DEFAULTS.
+  chatPushV1: { default: false, client: true, grant: { roles: ["student"], label: "Chat pushes" } },
 };
 
 const JOBS = {

@@ -153,6 +153,9 @@ io.on('connection', (socket) => {
       // Emit inbox update to all relevant users
       io.emit('inbox_update');
 
+      // CHAT-1: a device push to the other participants who aren't in this chat (flag chatPushV1, per recipient)
+      setImmediate(() => require('../services/chatPush').pushChatMessage(io, conversationId, senderId, displayMsg || 'new message'));
+
     } catch (err) {
       console.error("Socket Error in send_message:", err);
       socket.emit('message_error', { error: err.message });
