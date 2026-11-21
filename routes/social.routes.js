@@ -1404,6 +1404,28 @@ const myIdOf = (req) => (isGuestReq(req) ? '' : String(req.user?._id || req.user
 // a comment others may see: live (or written before statuses existed); my own held comment is shown to me
 const commentVisible = (c, meId) => Confession.isLive(c) || (!!meId && String(c?.user?._id || c?.user || '') === meId);
 // the confessions a viewer may see: live ones, plus their own held ("under review") ones
+const confessionCheck = require('../services/confessionCheck');
+const confessionStrikes = require('../services/confessionStrikes');
+const safetyAlerts = require('../services/safetyAlerts');
+const safetySettings = require('../services/safetySettings');
+const { perUser } = require('../utils/userRateLimit');
+// per-user limits only for students with the flag on (everyone else: exactly as before)
+const limitIfSafety = (name) => { const lim = perUser(name); return (req, res, next) => (safetyOn(req) ? lim(req, res, next) : next()); };
+const banReply = (res, until) => {
+  const msg = `you can't post confessions or comments until ${until.toISOString().slice(0, 16).replace('T', ' ')} (community rules).`;
+  return res.status(403).json({ code: 'CONFESSION_BANNED', until, error: msg, message: msg });
+};
+// a pre-check that says "edit": 422, with a plain sentence older apps can show (error / message)
+const needsEditReply = (res, result, blocked) => {
+  const first = result.reasons[0]?.message || "this can't be posted as it is. edit it to post.";
+  return res.status(422).json({ code: 'NEEDS_EDIT', reasons: result.reasons, error: first, message: first, warning: true, ...(blocked?.banUntil ? { bannedUntil: blocked.banUntil } : {}) });
+};
+// severe content stopped at the pre-check: the safety e-mail (threats, doxxing), no strike (it was never published)
+const alertIfSevere = (result, userId, text, contentId) => {
+  if (!result.severe) return;
+  const kind = result.reasons.some((r) => r.code === 'personal_info') ? 'doxxing' : 'threat';
+  setImmediate(() => safetyAlerts.send(kind, { userId, reason: `stopped at the pre-check: ${result.reasons.map((r) => r.code).join(', ')}`, content: text, contentId, withActions: true }));
+};
 const viewFilter = (meId) => (meId
   ? { $or: [...Confession.LIVE.$or, { authorId: meId, status: 'pending' }] }
   : Confession.LIVE);
@@ -1620,7 +1642,7 @@ router.put('/confessions/like/:id', auth, async (req, res) => {
 });
 
 // FIXED: Add Comment to Confession
-router.post('/confessions/comment/:id', auth, async (req, res) => {
+router.post('/confessions/comment/:id', auth, limitIfSafety('confession_comment'), async (req, res) => {
   try {
     const { text, parentComment, mentions } = req.body;
 
@@ -1638,6 +1660,24 @@ router.post('/confessions/comment/:id', auth, async (req, res) => {
     }
     if (!canAccessConfession(req, confession)) {
       return res.status(404).json({ error: "Confession not found" });
+    }
+
+    // confession safety (plan P4-1, flag confessionSafety): ban, then the pre-post check. Flag off: as before.
+    let commentStatus = null;
+    if (safetyOn(req)) {
+      const meDoc = await User.findById(req.user._id).select('confessionBanUntil').lean();
+      const banned = confessionStrikes.bannedUntil(meDoc);
+      if (banned) return banReply(res, banned);
+      const result = await confessionCheck.check({ text: text.trim(), universityId: confession.university });
+      if (result.verdict === 'edit') {
+        const blocked = await confessionStrikes.noteBlocked(req.user._id, { reason: result.reasons.map((r) => r.code).join(', '), content: text });
+        alertIfSevere(result, req.user._id, text, String(confession._id));
+        return needsEditReply(res, result, blocked);
+      }
+      commentStatus = result.verdict === 'ok' ? 'live' : 'pending';
+      if (result.verdict === 'selfharm') {
+        setImmediate(() => safetyAlerts.send('self_harm', { userId: req.user._id, reason: 'self-harm signal in a confession comment (held, no strike)', content: text, contentId: String(confession._id), withActions: false }));
+      }
     }
 
     // Validate parentComment
@@ -1668,7 +1708,8 @@ router.post('/confessions/comment/:id', auth, async (req, res) => {
       text: text.trim(),
       parentComment: validParentId,
       mentions: validMentions,
-      createdAt: new Date()
+      createdAt: new Date(),
+      ...(commentStatus ? { status: commentStatus } : {}),
     };
 
     confession.comments.push(newComment);
@@ -1695,19 +1736,22 @@ router.post('/confessions/comment/:id', auth, async (req, res) => {
           profileImage: comment.user.profileImage,
         } : null,
         isMyComment,
+        ...(isMyComment && comment.status && comment.status !== 'live' ? { status: comment.status } : {}),
       };
     });
 
     // ✅ Send MENTION notifications (only for mentions — no auto-reply notify, since anonymous)
     const previewText = text.length > 30 ? text.substring(0, 30) + "..." : text;
-    if (validMentions.length > 0) {
+    const held = commentStatus === 'pending';
+    // held comments notify nobody; with confession safety on the mention doesn't name the commenter (plan P4-1)
+    if (validMentions.length > 0 && !held) {
       for (const mentionedId of validMentions) {
         try {
           await createNotification(
             mentionedId,
             req.user._id,
             'mention',
-            `${req.user.name} mentioned you in a confession: "${previewText}"`,
+            commentStatus ? `someone mentioned you in a confession: "${previewText}"` : `${req.user.name} mentioned you in a confession: "${previewText}"`,
             null // No postId since it's a confession
           );
         } catch (notifErr) {
@@ -1715,7 +1759,7 @@ router.post('/confessions/comment/:id', auth, async (req, res) => {
         }
       }
     }
-setImmediate(async () => {
+if (!held) setImmediate(async () => {
       try {
         const r = await awardDaily(req.userId, 'daily_comment');
         if (r.awarded) {
@@ -1730,6 +1774,7 @@ setImmediate(async () => {
       _id: updatedConfession._id,
       comments: sanitizedComments,
       newCommentId: updatedConfession.comments[updatedConfession.comments.length - 1]._id,
+      ...(held ? { held: true, status: 'pending', message: "your comment is under review. it'll show once it's checked." } : {}),
     });
   } catch (err) {
     console.error("Comment Confession Error:", err);
@@ -1907,7 +1952,7 @@ router.get('/confessions/feed', auth, async (req, res) => {
 
 
 // FIXED: Create Confession
-router.post('/confessions/create', auth, async (req, res) => {
+router.post('/confessions/create', auth, limitIfSafety('confession_post'), async (req, res) => {
   try {
     const { text, image, visibility } = req.body;
     // Old app builds send nothing → public
@@ -1931,6 +1976,24 @@ router.post('/confessions/create', auth, async (req, res) => {
       return res.status(400).json({ error: "add your university in your profile to post confessions" });
     }
 
+    // confession safety (plan P4-1, flag confessionSafety): ban, then the pre-post check. Flag off: as before.
+    let safety = null; // { status, statusReason, support }
+    if (safetyOn(req)) {
+      const banned = confessionStrikes.bannedUntil(currentUser);
+      if (banned) return banReply(res, banned);
+      const result = await confessionCheck.check({ text: text || '', image: image || '', universityId: currentUser.university?._id });
+      if (result.verdict === 'edit') {
+        const blocked = await confessionStrikes.noteBlocked(req.user._id, { reason: result.reasons.map((r) => r.code).join(', '), content: text });
+        alertIfSevere(result, req.user._id, text, '');
+        return needsEditReply(res, result, blocked);
+      }
+      if (result.verdict === 'hold' || result.verdict === 'selfharm') {
+        safety = { status: 'pending', statusReason: result.verdict === 'selfharm' ? 'self_harm_signal' : 'check_unavailable', selfHarm: result.verdict === 'selfharm' };
+      } else {
+        safety = { status: 'live' };
+      }
+    }
+
     const confession = new Confession({
       authorId: req.user._id,
       text: text || "",
@@ -1940,10 +2003,32 @@ router.post('/confessions/create', auth, async (req, res) => {
       visibility: vis,
       likes: 0,
       likedBy: [],
-      comments: []
+      comments: [],
+      ...(safety ? { status: safety.status, statusAt: new Date(), ...(safety.statusReason ? { statusReason: safety.statusReason } : {}) } : {}),
     });
 
     await confession.save();
+
+    // held ("under review"): no push, no points, nothing public. Self-harm: support for the author, e-mail to admins.
+    if (safety && safety.status === 'pending') {
+      if (safety.selfHarm) {
+        setImmediate(() => safetyAlerts.send('self_harm', { userId: req.user._id, reason: 'self-harm signal in a new confession (held, no strike)', content: text, contentId: String(confession._id), withActions: false }));
+      }
+      const msg = safety.selfHarm
+        ? "your post is held for now. you're not alone: if you're going through something hard, talk to someone today."
+        : "your confession is under review. it'll show once it's checked.";
+      return res.status(201).json({
+        message: msg,
+        held: true,
+        status: 'pending',
+        ...(safety.selfHarm ? { support: { helplines: (await safetySettings.get()).helplines } } : {}),
+        confession: {
+          _id: confession._id, text: confession.text, image: confession.image, university: confession.university,
+          location: confession.location, campusName: currentUser.university?.name || null, visibility: confession.visibility,
+          likes: confession.likes, likedBy: confession.likedBy, comments: confession.comments, createdAt: confession.createdAt, status: 'pending',
+        },
+      });
+    }
 
     // push to students of the author's university only, in the background
     // (no text, author or university in the push; services/socialPush.js)

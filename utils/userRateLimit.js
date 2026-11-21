@@ -17,6 +17,9 @@ const LIMITS = {
   resume_pdf: { max: 30, windowMin: 10 }, // draft previews, approved exports, the employer's snapshot PDF
   analytics: { max: 60, windowMin: 10 }, // /api/analytics/*
   funnel_events: { max: 120, windowMin: 10 }, // upgrade v2 funnel events on POST /api/engagement/events
+  confession_post: { max: 5, windowMin: 60 }, // new confessions (flag confessionSafety, plan P4-1)
+  confession_comment: { max: 30, windowMin: 60 }, // confession comments (flag confessionSafety)
+  confession_report: { max: 20, windowMin: 60 }, // confession / comment reports (flag confessionSafety)
 };
 
 const envKey = (name, part) => `RATE_LIMIT_${name.toUpperCase()}_${part}`;
