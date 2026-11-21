@@ -27,9 +27,16 @@ function lockOf(user, now = new Date()) {
   return { locked: false };
 }
 
+/** Where a student appeals (Railway SAFETY_APPEAL_EMAIL, e.g. safety@gettdc.pk), or null when unset. */
+const appealEmail = () => {
+  const v = String(process.env.SAFETY_APPEAL_EMAIL || "").trim();
+  return /^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(v) ? v : null;
+};
+
 /** The JSON body for a locked account. `message` and `error` both carry the sentence (older apps read either). */
 function lockBody(lock) {
-  return { code: lock.code, accountStatus: lock.status, until: lock.until, message: lock.message, error: lock.message };
+  const appeal = appealEmail();
+  return { code: lock.code, accountStatus: lock.status, until: lock.until, message: lock.message, error: lock.message, ...(appeal ? { appealEmail: appeal } : {}) };
 }
 
-module.exports = { lockOf, lockBody };
+module.exports = { lockOf, lockBody, appealEmail };

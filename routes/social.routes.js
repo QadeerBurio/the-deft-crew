@@ -1415,7 +1415,8 @@ const { perUser } = require('../utils/userRateLimit');
 const limitIfSafety = (name) => { const lim = perUser(name); return (req, res, next) => (safetyOn(req) ? lim(req, res, next) : next()); };
 const banReply = (res, until) => {
   const msg = `you can't post confessions or comments until ${until.toISOString().slice(0, 16).replace('T', ' ')} (community rules).`;
-  return res.status(403).json({ code: 'CONFESSION_BANNED', until, error: msg, message: msg });
+  const appeal = require('../services/accountStatus').appealEmail();
+  return res.status(403).json({ code: 'CONFESSION_BANNED', until, error: msg, message: msg, ...(appeal ? { appealEmail: appeal } : {}) });
 };
 // a pre-check that says "edit": 422, with a plain sentence older apps can show (error / message)
 const needsEditReply = (res, result, blocked) => {
