@@ -89,7 +89,7 @@ async function deliver(rowId, now = new Date()) {
     else if (!isEnabled("surplusBoxes", { id: String(row.student), role: "student" }) || !isEnabled("surplusBoxes", { id: String(row.brand), role: "brand" })) r = { status: "skipped", error: "outside the pilot" };
     else {
       const gateway = require("../engagement/pushGateway");
-      const sent = await gateway.send(row.student, { type: "nearby_deal", pref: "deals", title: row.payload.title, body: row.payload.body, data: row.payload.data });
+      const sent = await gateway.send(row.student, { type: "nearby_deal", budgetClass: "relevant", pref: "deals", title: row.payload.title, body: row.payload.body, data: row.payload.data });
       if (sent?.sent) {
         await Notification.create({ recipient: row.student, title: row.payload.title, description: row.payload.body, type: "Offer", metadata: { ...row.payload.data, skipPush: true, surplusAnnouncementId: String(row._id) } });
         r = { status: "sent" };

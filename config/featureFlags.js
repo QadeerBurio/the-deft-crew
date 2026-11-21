@@ -112,6 +112,10 @@ const FLAGS = {
   // N-6: push open tracking (services/pushTracking.js), per recipient: every push to the account gets a PushLog
   // row and carries its id; the app reports the tap. Off = no rows, no extra data: pushes exactly as before.
   pushOpenTracking: { default: false, client: true, grant: { roles: ["student"], label: "Push open tracking" } },
+  // N-2: one daily push budget across all senders (services/pushBudget.js), per recipient: personal no cap,
+  // relevant 3 a day, broadcast 1–2 a day, quiet hours for relevant and broadcast only. Off = every sender keeps its
+  // own rules, exactly as before.
+  pushBudgetV1: { default: false, client: true, grant: { roles: ["student"], label: "Push budget" } },
 };
 
 const JOBS = {

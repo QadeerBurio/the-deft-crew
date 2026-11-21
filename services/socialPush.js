@@ -113,8 +113,20 @@ async function findRecipients(kind, { universityId = null, excludeUserIds = [] }
 
 // Build and send one push to these students. Returns { students, devices, delivered, failed }
 // and the ids of the students that got it on at least one device.
-async function sendToStudents(kind, items, students) {
+async function sendToStudents(kind, items, studentsIn) {
   const k = KINDS[kind];
+  // N-2 (pushBudgetV1): a social push is a broadcast; students over their budget (or in quiet hours) are skipped.
+  // Off for everyone: the list is used as it is.
+  let students = studentsIn;
+  const budget = require("./pushBudget");
+  if (budget.configured()) {
+    students = [];
+    for (const s of studentsIn) {
+      if (!budget.onFor(s)) { students.push(s); continue; }
+      if (!(s.pushTokens || []).some((e) => e?.token && Expo.isExpoPushToken(e.token))) continue;
+      if ((await budget.allow(s, "broadcast")).ok) students.push(s);
+    }
+  }
   const content = buildContent(kind, items);
   const mood = featureMood(k.type);
   const soundKey = safeSoundKey(resolveSoundKey(k.type, mood));
@@ -145,14 +157,14 @@ async function sendToStudents(kind, items, students) {
       });
     }
   }
-  if (!messages.length) return { students: students.length, devices: 0, delivered: 0, failed: 0, reached: [] };
+  if (!messages.length) return { students: studentsIn.length, devices: 0, delivered: 0, failed: 0, reached: [] };
 
   const tickets = await sendAllSafe(null, messages, projectOfEntries(entries));
   const reached = new Set();
   tickets.forEach((t, i) => { if (t?.status === "ok") reached.add(ownerOf[i]); });
   // readable log per failed device, removes only dead tokens, receipts later (never throws)
   const r = await handleTickets(messages, tickets, null, "[socialPush]");
-  return { students: students.length, devices: messages.length, delivered: r.ok, failed: r.failed, reached: [...reached] };
+  return { students: studentsIn.length, devices: messages.length, delivered: r.ok, failed: r.failed, reached: [...reached] };
 }
 
 // ── Daily ceiling ──

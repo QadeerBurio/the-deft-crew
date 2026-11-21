@@ -20,6 +20,8 @@ async function send(userId, msg) {
     // essential: a reminder the user asked for (streak about to expire / just broke). It skips the
     // daily and weekly marketing caps and does not use them up, but keeps the pref and quiet hours.
     essential = false,
+    // N-2: the sender's class for the push budget (personal / relevant / broadcast); default from the type
+    budgetClass = null,
   } = msg;
   // Emoji / dot / sound follow the feature (new offer = 🤑 + deal sound)
   const mood = featureMood(type, msg.mood);
@@ -41,19 +43,28 @@ async function send(userId, msg) {
       return { sent: false, reason: 'pref_off' };
     }
 
-    if (!skipCaps && isQuietHour(new Date(), cfg.push)) {
+    // N-2 (pushBudgetV1 on for this student): the one budget across senders replaces this gateway's quiet hours
+    // and daily / weekly caps (checked below, once the push can actually be sent). Off: exactly as before.
+    const budget = require('../pushBudget');
+    let budgetUser = null;
+    if (!skipCaps && budget.configured()) {
+      const u = await User.findById(userId).select('role').lean();
+      if (u && budget.onFor({ _id: userId, role: u.role })) budgetUser = { _id: userId, role: u.role };
+    }
+
+    if (!budgetUser && !skipCaps && isQuietHour(new Date(), cfg.push)) {
       return { sent: false, reason: 'quiet_hours' };
     }
 
     const today = dayKey();
     const thisWeek = weekKey();
 
-    if (!skipCaps && !essential && profile.push?.lastPushDay === today) {
+    if (!budgetUser && !skipCaps && !essential && profile.push?.lastPushDay === today) {
       return { sent: false, reason: 'daily_cap' };
     }
 
     const weeklyCap = cfg.push.weeklyCap(cfg.STAGE);
-    if (!skipCaps && !essential) {
+    if (!budgetUser && !skipCaps && !essential) {
       const sentThisWeek =
         profile.push?.weekKey === thisWeek ? profile.push.sentThisWeek || 0 : 0;
       if (sentThisWeek >= weeklyCap) return { sent: false, reason: 'weekly_cap' };
@@ -101,6 +112,11 @@ async function send(userId, msg) {
       }));
 
     if (messages.length === 0) return { sent: false, reason: 'no_valid_token' };
+
+    if (budgetUser) {
+      const b = await budget.allow(budgetUser, budgetClass || budget.classify(type));
+      if (!b.ok) return { sent: false, reason: b.reason, budgetClass: b.cls };
+    }
 
     const log = await PushLog.create({
       ...(trackedId ? { _id: trackedId, tracked: true, sender: 'gateway' } : {}),

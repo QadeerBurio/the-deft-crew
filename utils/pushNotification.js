@@ -400,12 +400,20 @@ async function socialPushOff(userId, type) {
   }
 }
 
-const sendToUser = async (userId, title, body, extraData = {}) => {
+const sendToUser = async (userId, title, body, extraDataIn = {}) => {
   try {
+    // N-2: budgetClass is for the push budget only, never sent to the phone
+    const { budgetClass = null, ...extraData } = extraDataIn || {};
     if (await socialPushOff(userId, extraData.type || 'System')) {
       return { sent: false, reason: 'pref_off' };
     }
-    const user = await User.findById(userId).select('pushTokens').lean();
+    const budget = require('../services/pushBudget');
+    const user = await User.findById(userId).select(budget.configured() ? 'pushTokens role' : 'pushTokens').lean();
+    // N-2 (pushBudgetV1 on for this account): the shared daily budget and quiet hours (not for personal pushes)
+    if (user && budget.configured() && budget.onFor({ _id: userId, role: user.role }) && (user.pushTokens || []).some((e) => e?.token && Expo.isExpoPushToken(e.token))) {
+      const b = await budget.allow({ _id: userId, role: user.role }, budgetClass || budget.classify(extraData.type, extraData.notificationType));
+      if (!b.ok) return { sent: false, reason: b.reason, budgetClass: b.cls };
+    }
     const seen = new Set();
     const entries = (user?.pushTokens || []).filter((e) => {
       if (!e?.token || seen.has(e.token) || !Expo.isExpoPushToken(e.token)) return false;
