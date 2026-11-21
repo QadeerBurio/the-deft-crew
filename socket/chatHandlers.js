@@ -8,14 +8,23 @@ const { Message, Conversation } = require('../models/Chat');
 const onlineUsers = new Map(); // { userId: socketId }
 const userCallStatus = new Map(); // Track if user is in a call
 
+// SEC-1: the acting user comes from a verified token (socket/socketAuth.js), never from an id the client sends
+const sec = require('./socketAuth');
+
 function attach(io) {
 io.on('connection', (socket) => {
   console.log('New client connected:', socket.id);
+  // SEC-1: a token at the handshake (io(url, { auth: { token } })) identifies the socket at once
+  if (socket.handshake?.auth?.token) sec.identify(socket, socket.handshake.auth.token);
+
+  // SEC-1: newer apps send their token right after connecting (older servers ignore this event)
+  socket.on('authenticate', (token) => { sec.identify(socket, token); });
 
   // --- TRACK ONLINE STATUS ---
   // plan P4-1b: the id comes from the sign-in token, never from the client (socket/socketIdentity.js). Older apps
   // without a token keep working only while FLAG_ACCOUNT_STATUS_ENFORCE is off.
   socket.on('user_online', async (clientUserId, tokenArg) => {
+    if (typeof tokenArg === 'string' && tokenArg) sec.identify(socket, tokenArg);
     const who = await require('./socketIdentity').resolveOnline(socket, clientUserId, tokenArg).catch(() => ({ refused: true }));
     if (who.refused) return;
     const userId = who.userId;
@@ -34,7 +43,8 @@ io.on('connection', (socket) => {
   });
 
   // --- GET USER STATUS ---
-  socket.on('get_user_status', (userId) => {
+  socket.on('get_user_status', async (userId) => {
+    if (!(await sec.actorOf(socket, 'get_user_status'))) return;
     const isOnline = onlineUsers.has(userId);
     socket.emit('user_status_response', {
       userId,
@@ -43,13 +53,22 @@ io.on('connection', (socket) => {
   });
 
   // --- JOIN CHAT ROOM ---
-  socket.on('join_chat', (conversationId) => {
+  socket.on('join_chat', async (conversationId) => {
+    const me = await sec.actorOf(socket, 'join_chat');
+    if (!me) return;
+    // a verified user joins only their own conversations (reading a room = reading its messages)
+    if (me.verified && !(await sec.isMember(socket, conversationId, me.id))) {
+      console.warn(`[sec-1] join_chat refused: ${me.id} is not in conversation ${String(conversationId).slice(0, 40)}`);
+      socket.emit('join_refused', { conversationId });
+      return;
+    }
     socket.join(conversationId);
     console.log(`Socket ${socket.id} joined room ${conversationId}`);
   });
 
   // --- LEAVE CHAT ROOM ---
-  socket.on('leave_chat', (conversationId) => {
+  socket.on('leave_chat', async (conversationId) => {
+    if (!(await sec.actorOf(socket, 'leave_chat'))) return;
     socket.leave(conversationId);
     console.log(`Socket ${socket.id} left room ${conversationId}`);
   });
@@ -57,16 +76,23 @@ io.on('connection', (socket) => {
   // --- SEND MESSAGE ---
   socket.on('send_message', async (data) => {
     try {
-      const { 
-        conversationId, 
-        senderId, 
-        text, 
+      const me = await sec.actorOf(socket, 'send_message', data?.senderId);
+      if (!me) return;
+      const {
+        conversationId,
+        text,
         messageType, 
         mediaUrl,
         mediaMetadata, 
         location, 
         duration 
       } = data;
+      const senderId = me.id; // the token's account (older apps: the id they send)
+      if (me.verified && !(await sec.isMember(socket, conversationId, senderId))) {
+        console.warn(`[sec-1] send_message refused: ${senderId} is not in conversation ${String(conversationId).slice(0, 40)}`);
+        socket.emit('message_error', { error: 'not a member of this conversation' });
+        return;
+      }
 
       // Validate required fields
       if (!conversationId || !senderId) {
@@ -134,8 +160,12 @@ io.on('connection', (socket) => {
   });
 
   // --- MARK MESSAGES AS READ (Socket) ---
-  socket.on('mark_messages_read', async ({ conversationId, userId }) => {
+  socket.on('mark_messages_read', async ({ conversationId, userId: claimedUserId } = {}) => {
     try {
+      const me = await sec.actorOf(socket, 'mark_messages_read', claimedUserId);
+      if (!me) return;
+      const userId = me.id;
+      if (me.verified && !(await sec.isMember(socket, conversationId, userId))) return;
       await Message.updateMany(
         {
           conversationId: conversationId,
@@ -160,8 +190,18 @@ io.on('connection', (socket) => {
   });
 
   // --- DELETE MESSAGE ---
-  socket.on('delete_message', async ({ messageId, conversationId }) => {
+  socket.on('delete_message', async ({ messageId, conversationId } = {}) => {
     try {
+      const me = await sec.actorOf(socket, 'delete_message');
+      if (!me) return;
+      // a verified user deletes only their own message, in that conversation
+      if (me.verified) {
+        const m = await Message.findById(messageId).select('sender conversationId').lean().catch(() => null);
+        if (m && (String(m.sender) !== me.id || String(m.conversationId) !== String(conversationId))) {
+          console.warn(`[sec-1] delete_message refused: ${me.id} is not the sender`);
+          return;
+        }
+      }
       console.log('Delete message socket:', messageId);
       const result = await Message.findByIdAndDelete(messageId);
       if (result) {
@@ -187,8 +227,11 @@ io.on('connection', (socket) => {
   });
 
   // --- DELETE CONVERSATION ---
-  socket.on('delete_conversation', async ({ conversationId }) => {
+  socket.on('delete_conversation', async ({ conversationId } = {}) => {
     try {
+      const me = await sec.actorOf(socket, 'delete_conversation');
+      if (!me) return;
+      if (me.verified && !(await sec.isMember(socket, conversationId, me.id))) return;
       console.log('Delete conversation socket:', conversationId);
       io.emit('conversation_deleted', { conversationId });
       io.emit('inbox_update');
@@ -199,19 +242,32 @@ io.on('connection', (socket) => {
   });
 
   // --- TYPING INDICATORS ---
-  socket.on('typing_start', ({ conversationId, userId, userName }) => {
+  socket.on('typing_start', async ({ conversationId, userId: claimedUserId, userName: claimedName } = {}) => {
+    const me = await sec.actorOf(socket, 'typing_start', claimedUserId);
+    if (!me) return;
+    if (me.verified && !(await sec.isMember(socket, conversationId, me.id))) return;
+    const userId = me.id;
+    const userName = me.verified ? me.name : claimedName;
     socket.to(conversationId).emit('user_typing', { userId, userName, typing: true });
   });
 
-  socket.on('typing_stop', ({ conversationId, userId }) => {
+  socket.on('typing_stop', async ({ conversationId, userId: claimedUserId } = {}) => {
+    const me = await sec.actorOf(socket, 'typing_stop', claimedUserId);
+    if (!me) return;
+    if (me.verified && !(await sec.isMember(socket, conversationId, me.id))) return;
+    const userId = me.id;
     socket.to(conversationId).emit('user_typing', { userId, typing: false });
   });
 
   // ========== WEBRTC CALLING SYSTEM ==========
 
   // 1. Initiate Call
-  socket.on('start_call', ({ senderId, receiverId, senderName, type }) => {
-    console.log('Start call:', { senderId, receiverId, senderName, type });
+  socket.on('start_call', async ({ senderId: claimedSenderId, receiverId, senderName: claimedName, type } = {}) => {
+    const me = await sec.actorOf(socket, 'start_call', claimedSenderId);
+    if (!me) return;
+    const senderId = me.id;
+    const senderName = me.verified ? me.name : claimedName;
+    console.log('Start call:', { senderId, receiverId, type });
 
     // Check if user is already in a call
     if (userCallStatus.get(senderId)) {
@@ -243,7 +299,10 @@ io.on('connection', (socket) => {
   });
 
   // 2. Accept Call
-  socket.on('accept_call', ({ to, callerId }) => {
+  socket.on('accept_call', async ({ to, callerId } = {}) => {
+    const me = await sec.actorOf(socket, 'accept_call');
+    if (!me) return;
+    if (me.verified) socket.userId = me.id; // SEC-1: the token's account, not what the client said
     console.log('Accept call:', { to, callerId });
     const callerSocketId = onlineUsers.get(callerId || to);
     if (callerSocketId) {
@@ -259,7 +318,10 @@ io.on('connection', (socket) => {
   });
 
   // 3. Reject Call
-  socket.on('reject_call', ({ to }) => {
+  socket.on('reject_call', async ({ to } = {}) => {
+    const me = await sec.actorOf(socket, 'reject_call');
+    if (!me) return;
+    if (me.verified) socket.userId = me.id; // SEC-1: the token's account, not what the client said
     console.log('Reject call:', { to });
     const callerSocketId = onlineUsers.get(to);
     if (callerSocketId) {
@@ -269,7 +331,10 @@ io.on('connection', (socket) => {
   });
 
   // 4. End Call
-  socket.on('end_call', ({ to }) => {
+  socket.on('end_call', async ({ to } = {}) => {
+    const me = await sec.actorOf(socket, 'end_call');
+    if (!me) return;
+    if (me.verified) socket.userId = me.id; // SEC-1: the token's account, not what the client said
     console.log('End call:', { to });
     const targetSocketId = onlineUsers.get(to);
     if (targetSocketId) {
@@ -280,7 +345,10 @@ io.on('connection', (socket) => {
   });
 
   // 5. WebRTC Signaling
-  socket.on('offer', ({ offer, to }) => {
+  socket.on('offer', async ({ offer, to } = {}) => {
+    const me = await sec.actorOf(socket, 'offer');
+    if (!me) return;
+    if (me.verified) socket.userId = me.id; // SEC-1: the token's account, not what the client said
     console.log('Offer from:', socket.userId, 'to:', to);
     const targetSocketId = onlineUsers.get(to);
     if (targetSocketId) {
@@ -291,7 +359,10 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('answer', ({ answer, to }) => {
+  socket.on('answer', async ({ answer, to } = {}) => {
+    const me = await sec.actorOf(socket, 'answer');
+    if (!me) return;
+    if (me.verified) socket.userId = me.id; // SEC-1: the token's account, not what the client said
     console.log('Answer from:', socket.userId, 'to:', to);
     const targetSocketId = onlineUsers.get(to);
     if (targetSocketId) {
@@ -302,7 +373,10 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('ice_candidate', ({ candidate, to }) => {
+  socket.on('ice_candidate', async ({ candidate, to } = {}) => {
+    const me = await sec.actorOf(socket, 'ice_candidate');
+    if (!me) return;
+    if (me.verified) socket.userId = me.id; // SEC-1: the token's account, not what the client said
     console.log('ICE candidate from:', socket.userId, 'to:', to);
     const targetSocketId = onlineUsers.get(to);
     if (targetSocketId) {

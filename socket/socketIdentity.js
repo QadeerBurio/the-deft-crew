@@ -28,7 +28,7 @@ async function resolveOnline(socket, clientUserId, tokenArg) {
     if (lockOf(u).locked) return { refused: true, why: "account locked" };
     return { userId: String(u._id), verified: true };
   }
-  if (flags.isEnabled("accountStatusEnforce")) return { refused: true, why: "no valid token" };
+  if (flags.isEnabled("accountStatusEnforce") || flags.isEnabled("socketTokenRequired")) return { refused: true, why: "no valid token" };
   const legacy = String(clientUserId || "");
   if (!mongoose.Types.ObjectId.isValid(legacy)) return { refused: true, why: "no valid id" };
   return { userId: legacy, verified: false };
