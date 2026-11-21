@@ -149,6 +149,7 @@ app.use("/api/loyalty", reqS("./routes/loyalty.routes"));
 const oid = () => new mongoose.Types.ObjectId();
 const ids = {};
 for (const k of ["R", "P", "M", "T", "S1", "S2", "S3", "admin", "oR", "oP", "oM", "oT", "oR2", "U", "b1", "b2"]) ids[k] = oid();
+// (the reply checks below look for this exact phone, not a prefix: random ObjectIds can contain "0300")
 const user = (id, role, name, extra = {}) => ({ _id: id, name, email: `${name}@test.local`, phone: "03005550142", role, status: "Verified", accountStatus: "active", brandApprovalStatus: role === "brand" ? "approved" : undefined, createdAt: new Date(), updatedAt: new Date(), ...extra });
 fake.seed(coll("User"), [
   user(ids.R, "brand", "roast", { brandName: "Roast Cafe" }), user(ids.P, "brand", "pizza", { brandName: "Pizza Point" }), user(ids.M, "brand", "mart", { brandName: "Mini Mart" }), user(ids.T, "brand", "tiers", { brandName: "Old Tiers" }),
@@ -302,14 +303,14 @@ const setDay = (n) => { if (n > 0) nextDay(); };
   check("Roast's members: S1 with 1 of 2 visits, 1 reward earned, 1 used, a last visit date, 'tdc verified user · university'", r.status === 200 && s1 && s1.visits === 1 && s1.visitsNeeded === 2 && s1.rewardsEarned === 1 && s1.rewardsUsed === 1 && !!s1.lastVisitAt && s1.label === "tdc verified user" && s1.university === "NED University", JSON.stringify(s1));
   check("…only Roast's students (S2 was there only with an offer outside the program, S3 never)", v.members.every((m) => m.studentId === String(ids.S1)), JSON.stringify(v.members.map((m) => m.studentId)));
   check("…totals: 1 member, 3 visits this month, 1 reward earned, 1 used", v.totals.members === 1 && v.totals.visitsThisMonth === 3 && v.totals.rewardsEarned === 1 && v.totals.rewardsUsed === 1, JSON.stringify(v.totals));
-  check("…no name, phone or e-mail in the reply", !/sana|@test\.local|0300/.test(JSON.stringify(v)));
+  check("…no name, phone or e-mail in the reply", !/sana|@test\.local|03005550142/.test(JSON.stringify(v)));
   r = await call("GET", "/api/loyalty/brands/me/members?filter=reward-ready", { tok: T.R });
   check("filter 'reward ready': nobody (S1 used theirs)", r.json?.data?.members?.length === 0);
   r = await call("GET", "/api/loyalty/brands/me/members?filter=reward-used", { tok: T.R });
   check("filter 'reward used': S1", r.json?.data?.members?.length === 1);
   r = await call("GET", "/api/loyalty/brands/me/members?format=csv", { tok: T.R });
   const lines = r.text.trim().split("\n");
-  check("CSV export: the same fields, no phone or e-mail", r.status === 200 && lines[0] === "student,university,visits,visits needed,rewards earned,rewards used,saved with rewards (PKR),reward ready,last visit" && lines.length === 2 && /^tdc verified user,NED University,1,2,1,1,\d+,no,\d{4}-\d\d-\d\d$/.test(lines[1]) && !/@|0300/.test(r.text), r.text);
+  check("CSV export: the same fields, no phone or e-mail", r.status === 200 && lines[0] === "student,university,visits,visits needed,rewards earned,rewards used,saved with rewards (PKR),reward ready,last visit" && lines.length === 2 && /^tdc verified user,NED University,1,2,1,1,\d+,no,\d{4}-\d\d-\d\d$/.test(lines[1]) && !/@|03005550142/.test(r.text), r.text);
   r = await call("GET", "/api/loyalty/brands/me/members", { tok: T.S1 });
   check("students can't see members", r.status === 403, r.status);
   r = await call("GET", `/api/loyalty/admin/programs/${pR.id}/members`, { tok: T.admin });
