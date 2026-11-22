@@ -72,7 +72,7 @@ function start() {
         let sent = 0;
         for (const c of candidates) {
           const r = await pushGateway
-            .sendFromCopy(c.user, 'daily_drop', 'dailyDrop', {}, {
+            .sendFromCopy(c.user, 'daily_drop', 'dailyDrop', { title: drop.title }, {
               route: target?.route || 'Home',
               params: { ...(target?.params || {}), dayKey: today },
             })

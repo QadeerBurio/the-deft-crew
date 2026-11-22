@@ -126,6 +126,9 @@ const FLAGS = {
   // the switches under "fine-tune". Modes and the digest act on every sender (services/pushBudget.js). Off = the
   // settings screen and pushes as today.
   notifSettingsV2: { default: false, client: true, grant: { roles: ["student"], label: "Notification modes" } },
+  // N-7: push copy that names the specific thing, with real numbers only (services/engagement/copy.js fillV2);
+  // nothing specific and real to say → no push. Off = today's copy.
+  pushCopyV2: { default: false, client: true, grant: { roles: ["student"], label: "Push copy v2" } },
 };
 
 const JOBS = {

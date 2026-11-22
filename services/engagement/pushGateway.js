@@ -207,6 +207,12 @@ async function send(userId, msg) {
 // ── COPY-BANK + USER-ID-AWARE VARIANT ──
 // opts.copyKey picks another copy bank for the line while the push keeps its type
 async function sendFromCopy(userId, type, pref, vars, data, opts = {}) {
+  // N-7 (pushCopyV2 on for this student): specific copy with real numbers only; nothing to say → no push
+  if (require('../../config/featureFlags').isEnabled('pushCopyV2', { id: String(userId), role: 'student' })) {
+    const v2 = copy.fillV2(opts.copyKey || type, vars, userId);
+    if (!v2) return { sent: false, reason: 'no_specific_copy' };
+    return send(userId, { type, pref, body: v2.body, mood: v2.mood, data, essential: !!opts.essential });
+  }
   const { body, mood } = copy.fill(opts.copyKey || type, vars, userId);
   return send(userId, { type, pref, body, mood, data, essential: !!opts.essential });
 }
@@ -241,7 +247,7 @@ async function sendDailyDropPush(drop) {
         p.user,
         'daily_drop',
         'dailyDrop',
-        {},
+        { title: drop.title }, // N-7 (pushCopyV2): the drop names itself; today's variants have no {title}
         {
           route: target?.route || 'Home',
           params: { ...(target?.params || {}), dayKey: drop.dayKey },
