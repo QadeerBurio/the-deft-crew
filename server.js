@@ -92,6 +92,12 @@ connectDB().then(() => {
     require("./services/socialPush").startScheduler();
   }
 
+  // push receipts every 30 minutes (JOB_PUSH_RECEIPTS): delivered / failed on PushLog rows (the engagement gateway's
+  // and every tracked push), dead tokens removed; the first pass 2 minutes after start
+  if (jobEnabled("pushReceipts")) {
+    require("./services/engagement/pushGateway").startReceiptChecks();
+  }
+
   if (jobEnabled("jobCleanup")) {
     // Imported jobs outside Pakistan leave the feed: archived (hidden, kept), never deleted, and never a
     // job an employer posted (only isExternal imports with no postedBy). Applications stay with the job.

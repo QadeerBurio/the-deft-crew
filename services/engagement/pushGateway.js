@@ -264,6 +264,29 @@ async function sendDailyDropPush(drop) {
 }
 
 // ── RECEIPTS ──
+// every 30 minutes (server.js, JOB_PUSH_RECEIPTS); overlapping runs are skipped; returns a stop function
+let receiptTimer = null;
+let receiptRunning = false;
+function startReceiptChecks(everyMs = 30 * 60 * 1000, firstMs = 2 * 60 * 1000) {
+  if (receiptTimer) return () => {};
+  const run = async () => {
+    if (receiptRunning) return;
+    receiptRunning = true;
+    try {
+      const r = await checkReceipts();
+      if (r?.checked) console.log(`[pushGateway] receipts: ${r.checked} checked, ${r.ok || 0} delivered, ${r.error || 0} failed`);
+    } catch (e) {
+      console.error('[pushGateway] receipt check failed:', e.message);
+    } finally {
+      receiptRunning = false;
+    }
+  };
+  const first = setTimeout(run, firstMs);
+  receiptTimer = setInterval(run, everyMs);
+  first.unref?.(); receiptTimer.unref?.();
+  return () => { clearTimeout(first); clearInterval(receiptTimer); receiptTimer = null; };
+}
+
 async function checkReceipts() {
   try {
     const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
@@ -449,6 +472,7 @@ module.exports = {
   sendPushToUser,
   sendDailyDropPush,
   checkReceipts,
+  startReceiptChecks,
   markOpened,
   broadcastToAll,
   broadcastToRole,
