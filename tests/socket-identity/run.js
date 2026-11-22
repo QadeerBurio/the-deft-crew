@@ -53,9 +53,9 @@ const sock = (tok) => ({ handshake: { auth: tok ? { token: tok } : {} } });
   check("valid token → the token's account", r.userId === String(ids.s));
   delete process.env.FLAG_ACCOUNT_STATUS_ENFORCE;
 
-  console.log("-- server.js wiring");
-  const src = fs.readFileSync(path.join(SERVER, "server.js"), "utf8");
-  check("user_online goes through resolveOnline and returns when refused", /socket\.on\('user_online', async \(clientUserId, tokenArg\) => \{[\s\S]{0,300}resolveOnline\(socket, clientUserId, tokenArg\)[\s\S]{0,120}if \(who\.refused\) return;\s*const userId = who\.userId;/.test(src));
+  console.log("-- socket/chatHandlers.js wiring");
+  const src = fs.readFileSync(path.join(SERVER, "socket/chatHandlers.js"), "utf8"); // moved from server.js (SEC-1)
+  check("user_online (socket/chatHandlers.js) goes through resolveOnline and returns when refused", /socket\.on\('user_online', async \(clientUserId, tokenArg\) => \{[\s\S]{0,300}resolveOnline\(socket, clientUserId, tokenArg\)[\s\S]{0,120}if \(who\.refused\) return;\s*const userId = who\.userId;/.test(src));
 
   console.log("-- chat service middleware (dist, the file that runs)");
   const users = { [String(ids.banned)]: { _id: ids.banned, role: "student", accountStatus: "banned", email: "b@test.local", name: "Banned Bano" }, [String(ids.adminB)]: { _id: ids.adminB, role: "admin", accountStatus: "banned", email: "a@test.local", name: "Banned Admin" } };

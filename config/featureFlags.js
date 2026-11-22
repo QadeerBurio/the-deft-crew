@@ -97,6 +97,10 @@ const FLAGS = {
   // Off = accountStatus is ignored, exactly as before. Admins are never locked out by it. Switched on by the owner
   // (FLAG_ACCOUNT_STATUS_ENFORCE=on) only after reviewing scripts/count-account-status.js.
   accountStatusEnforce: { default: false, client: false },
+  // Server only (SEC-1 stage 2): every socket.io event needs a verified sign-in token; without one it is refused.
+  // Off = older apps without a token keep working (logged). Switched on by the owner (FLAG_SOCKET_TOKEN_REQUIRED=on)
+  // once most installs send the token.
+  socketTokenRequired: { default: false, client: false },
 };
 
 const JOBS = {
