@@ -3447,7 +3447,8 @@ router.post('/notifications/create-message-notif', auth, async (req, res) => {
       io.to(recipientId.toString()).emit('new_notification', populated);
     }
 
-    // Device push for chat messages is sent from socket/chatSocket.js (send_message)
+    // Device push for chat messages: socket/chatHandlers.js send_message → services/chatPush.js (CHAT-1, flag chatPushV1).
+    // (socket/chatSocket.js, named here before, has never been loaded.)
 
     res.json({ success: true, notification: populated });
   } catch (err) {

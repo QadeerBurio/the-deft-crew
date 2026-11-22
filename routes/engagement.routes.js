@@ -497,7 +497,7 @@ router.get('/me', auth, async (req, res) => {
           cta: p.cta,
         })),
 
-      notifPrefs: { ...NOTIF_PREF_DEFAULTS, ...(profile?.notifPrefs || {}) },
+      notifPrefs: prefsOut(req, profile?.notifPrefs),
 
       askPushPermission: !profile?.pushPermissionAskedAt && sortedCount >= 1,
     });
@@ -973,14 +973,22 @@ const loyaltySwitch = async (req) => {
   if (!isEnabled('loyaltyV2', { id: String(req.userId), role: 'student' })) return {};
   return { loyalty: await require('../services/loyaltyNotify').loyaltyPushOn(req.userId) };
 };
+// CHAT-1: the "messages" switch (chat pushes) exists only for accounts with chatPushV1, like loyalty above; everyone
+// else sees exactly the switches they had. Stored in notifPrefs.messages; missing = on.
+const chatOn = (req) => isEnabled('chatPushV1', { id: String(req.userId), role: req.userRole || 'student' });
+const prefsOut = (req, notifPrefs) => {
+  const p = { ...NOTIF_PREF_DEFAULTS, ...(notifPrefs || {}) };
+  delete p.messages;
+  if (chatOn(req)) p.messages = notifPrefs?.messages !== false;
+  return p;
+};
 
 router.get('/notification-prefs', auth, requireAuth, async (req, res) => {
   const profile = await EngagementProfile.findOne({ user: req.userId })
     .select('notifPrefs osPushPermission')
     .lean();
   res.json({
-    ...NOTIF_PREF_DEFAULTS,
-    ...(profile?.notifPrefs || {}),
+    ...prefsOut(req, profile?.notifPrefs),
     ...(await loyaltySwitch(req)),
     osPermission: profile?.osPushPermission || 'undetermined',
   });
@@ -991,6 +999,7 @@ router.put('/notification-prefs', auth, requireAuth, async (req, res) => {
   for (const k of Object.keys(NOTIF_PREF_DEFAULTS)) {
     if (typeof req.body[k] === 'boolean') set[`notifPrefs.${k}`] = req.body[k];
   }
+  if (typeof req.body.messages === 'boolean' && chatOn(req)) set['notifPrefs.messages'] = req.body.messages;
   // upsert: a student without an engagement profile could not save any switch before
   if (Object.keys(set).length) {
     await EngagementProfile.updateOne({ user: req.userId }, { $set: set }, { upsert: true });
@@ -1006,8 +1015,7 @@ router.put('/notification-prefs', auth, requireAuth, async (req, res) => {
     .select('notifPrefs osPushPermission')
     .lean();
   res.json({
-    ...NOTIF_PREF_DEFAULTS,
-    ...(profile?.notifPrefs || {}),
+    ...prefsOut(req, profile?.notifPrefs),
     ...(await loyaltySwitch(req)),
     osPermission: profile?.osPushPermission || 'undetermined',
   });

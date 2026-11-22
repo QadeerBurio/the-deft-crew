@@ -104,6 +104,8 @@ const profileSchema = new mongoose.Schema(
       posts:            { type: Boolean, default: true },
       confessions:      { type: Boolean, default: true },
       skillshare:       { type: Boolean, default: true },
+      // CHAT-1: chat message pushes (services/chatPush.js). Missing on old profiles = on.
+      messages:         { type: Boolean },
     },
     osPushPermission: {
       type: String,
