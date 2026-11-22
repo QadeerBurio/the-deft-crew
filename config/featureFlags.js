@@ -104,6 +104,31 @@ const FLAGS = {
   // CHAT-1: device pushes for chat messages (services/chatPush.js), per recipient; the app shows the "messages" switch.
   // Off = no chat pushes, as since 5 Oct 2026. Not in ROLE_DEFAULTS.
   chatPushV1: { default: false, client: true, grant: { roles: ["student"], label: "Chat pushes" } },
+  // Server only (P1 follow-up, owner): referral rewards (referrer +150, new student +100) are paid when the new
+  // student confirms their e-mail code, not at signup. Checked for the referrer's account, so a test can use
+  // FLAG_REFERRAL_VERIFY_GATE="ids:<test referrer id>"; FLAG_REFERRAL_VERIFY_GATE=on for everyone. Off = paid at
+  // signup, as today. Rewards already paid are never touched (the awards are idempotent).
+  referralVerifyGate: { default: false, client: false },
+  // N-6: push open tracking (services/pushTracking.js), per recipient: every push to the account gets a PushLog
+  // row and carries its id; the app reports the tap. Off = no rows, no extra data: pushes exactly as before.
+  pushOpenTracking: { default: false, client: true, grant: { roles: ["student"], label: "Push open tracking" } },
+  // N-2: one daily push budget across all senders (services/pushBudget.js), per recipient: personal no cap,
+  // relevant 3 a day, broadcast 1–2 a day, quiet hours for relevant and broadcast only. Off = every sender keeps its
+  // own rules, exactly as before.
+  pushBudgetV1: { default: false, client: true, grant: { roles: ["student"], label: "Push budget" } },
+  // N-3 (app only): no notification prompt on login; a small sheet asks after a good moment (first deal claimed,
+  // confession posted, job applied); Settings shows "turn on" / "turn on in settings". Off = the prompt on login.
+  pushAskV2: { default: false, client: true, grant: { roles: ["student"], label: "Push ask v2" } },
+  // N-4: one inbox for the bell and social notifications (GET /api/notification/unified, tabs for you / campus /
+  // system, one unread count). Off = the two lists as today (the new route answers 404).
+  unifiedInbox: { default: false, client: true, grant: { roles: ["student"], label: "One inbox" } },
+  // N-5: simpler notification settings: three modes (everything / only important / quiet), a 6 pm campus digest,
+  // the switches under "fine-tune". Modes and the digest act on every sender (services/pushBudget.js). Off = the
+  // settings screen and pushes as today.
+  notifSettingsV2: { default: false, client: true, grant: { roles: ["student"], label: "Notification modes" } },
+  // N-7: push copy that names the specific thing, with real numbers only (services/engagement/copy.js fillV2);
+  // nothing specific and real to say → no push. Off = today's copy.
+  pushCopyV2: { default: false, client: true, grant: { roles: ["student"], label: "Push copy v2" } },
 };
 
 const JOBS = {
@@ -116,6 +141,7 @@ const JOBS = {
   careerOutbox: "career/careerOutboxJob: hiring-timeline notifications (retries, interview reminders), every 5 minutes",
   surplusSweep: "surplus/sweep: Surprise Box holds expiry, listing close, no-shows, pickup reminders, notifications, every minute",
   careerRetention: "career/careerRetentionJob: daily, anonymises hiring-timeline data 2 years after an application's last event (a dry run unless CAREER_RETENTION_MODE=apply)",
+  pushReceipts: "engagement/pushGateway.checkReceipts: every 30 minutes, push receipts for logged pushes (delivered / failed) and dead tokens removed",
 };
 
 const envName = (prefix, name) => `${prefix}_${name.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toUpperCase()}`;

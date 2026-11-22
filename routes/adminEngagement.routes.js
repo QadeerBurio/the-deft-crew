@@ -397,6 +397,16 @@ router.get('/drops/:dayKey/results', async (req, res) => {
 
 // the engagement page: last N weeks in Karachi days, test accounts left out, delivered pushes, used reward codes
 // (services/analytics/engagementMetrics.js)
+// N-6: the push report (services/analytics/pushReport.js): tracked pushes only; rates only with enough data
+router.get('/push-report', async (req, res) => {
+  try {
+    res.json(await require('../services/analytics/pushReport').pushReport({ days: req.query.days }));
+  } catch (err) {
+    console.error('[admin/push-report]', err.message);
+    res.status(500).json({ message: 'Could not build the push report' });
+  }
+});
+
 router.get('/metrics', async (req, res) => {
   try {
     res.json(await require('../services/analytics/engagementMetrics').engagementMetrics({ weeks: req.query.weeks }));

@@ -86,7 +86,7 @@ async function onOrderEvent(order, type, { kind = "event", drainNow = true } = {
 const providers = {
   async push(row) {
     const gateway = require("../engagement/pushGateway");
-    const r = await gateway.send(row.recipient, { type: "nearby_deal", pref: "deals", essential: true, title: row.payload.title, body: row.payload.body, data: row.payload.data });
+    const r = await gateway.send(row.recipient, { type: "nearby_deal", budgetClass: "personal", pref: "deals", essential: true, title: row.payload.title, body: row.payload.body, data: row.payload.data });
     if (r?.sent) return { status: "sent" };
     if (r?.reason === "quiet_hours") return { status: "defer", error: "quiet_hours" };
     return { status: "skipped", error: r?.reason || "not sent" };

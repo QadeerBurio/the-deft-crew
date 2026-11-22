@@ -72,7 +72,7 @@ function start() {
         let sent = 0;
         for (const c of candidates) {
           const r = await pushGateway
-            .sendFromCopy(c.user, 'daily_drop', 'dailyDrop', {}, {
+            .sendFromCopy(c.user, 'daily_drop', 'dailyDrop', { title: drop.title }, {
               route: target?.route || 'Home',
               params: { ...(target?.params || {}), dayKey: today },
             })
@@ -237,6 +237,24 @@ function start() {
         );
       } catch (err) {
         console.error('[scheduler] streak_rollover failed:', err.message);
+      }
+    },
+    { timezone: cfg.TZ }
+  );
+
+  // ═════════════════════════════════════════════════════════════
+  // 18:00 PKT — CAMPUS DIGEST (N-5, flag notifSettingsV2): one push to students who turned the digest on.
+  // Nothing happens while the flag is configured nowhere.
+  // ═════════════════════════════════════════════════════════════
+  cron.schedule(
+    '0 18 * * *',
+    async () => {
+      if (!require('../../config/featureFlags').pilotConfigured('notifSettingsV2')) return;
+      if (!(await lock('campus_digest', dayKey()))) return;
+      try {
+        await require('../notifDigest').sendDigests();
+      } catch (e) {
+        console.error('[scheduler] campus_digest failed:', e.message);
       }
     },
     { timezone: cfg.TZ }

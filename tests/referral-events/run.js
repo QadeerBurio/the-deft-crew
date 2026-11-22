@@ -33,8 +33,8 @@ const quiet = (fn) => async (...a) => { const l = console.log; console.log = () 
   console.log("-- the schema");
   check("EngagementEvent source enum is unchanged (server, client)", JSON.stringify(EngagementEvent.schema.path("source").enumValues) === '["server","client"]');
   check("…'system' is still rejected (so nothing may write it)", !!new EngagementEvent({ user: A, name: "x", source: "system" }).validateSync());
-  const writers = ["services/engagement/referral.js", "routes/auth.routes.js"].filter((f) => /source:\s*['"]system['"]/.test(fs.readFileSync(path.join(SERVER, f), "utf8")));
-  check("no source 'system' in referral.js or auth.routes.js", writers.length === 0, writers.join(", "));
+  const writers = ["services/engagement/referral.js", "services/engagement/referralSignup.js", "routes/auth.routes.js"].filter((f) => /source:\s*['"]system['"]/.test(fs.readFileSync(path.join(SERVER, f), "utf8")));
+  check("no source 'system' in referral.js, referralSignup.js or auth.routes.js", writers.length === 0, writers.join(", "));
 
   console.log("-- stage 1: signup bonus");
   let r = await quiet(referral.creditReferralOnSignup)(B);

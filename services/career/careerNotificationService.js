@@ -101,7 +101,7 @@ async function enqueue(event, ctx) {
 const providers = {
   async push(row) {
     const gateway = require("../engagement/pushGateway");
-    const r = await gateway.send(row.recipient, { type: "job", pref: "jobsScholarships", essential: true, title: row.payload.title, body: row.payload.body, data: row.payload.data });
+    const r = await gateway.send(row.recipient, { type: "job", budgetClass: "personal", pref: "jobsScholarships", essential: true, title: row.payload.title, body: row.payload.body, data: row.payload.data });
     if (r?.sent) return { status: "sent" };
     // quiet hours: held back until later (not a failure); no profile / switched off by the student: nothing to send
     if (r?.reason === "quiet_hours") return { status: "defer", error: "quiet_hours" };

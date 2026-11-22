@@ -106,7 +106,7 @@ async function deliver(rowId, now = new Date()) {
     else if (await JobApplication.exists({ jobId: row.job, userId: row.student })) r = { status: "skipped", error: "already applied" };
     else {
       const gateway = require("../engagement/pushGateway");
-      const sent = await gateway.send(row.student, { type: "job", pref: "jobsScholarships", title: row.payload.title, body: row.payload.body, data: row.payload.data });
+      const sent = await gateway.send(row.student, { type: "job", budgetClass: "relevant", pref: "jobsScholarships", title: row.payload.title, body: row.payload.body, data: row.payload.data });
       if (sent?.sent) {
         await Notification.create({ recipient: row.student, title: row.payload.title, description: row.payload.body, type: "Job Posting", metadata: { ...row.payload.data, jobId: String(row.job), skipPush: true, careerJobAlertId: String(row._id) } });
         r = { status: "sent" };

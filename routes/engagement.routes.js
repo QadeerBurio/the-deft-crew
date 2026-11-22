@@ -976,10 +976,19 @@ const loyaltySwitch = async (req) => {
 // CHAT-1: the "messages" switch (chat pushes) exists only for accounts with chatPushV1, like loyalty above; everyone
 // else sees exactly the switches they had. Stored in notifPrefs.messages; missing = on.
 const chatOn = (req) => isEnabled('chatPushV1', { id: String(req.userId), role: req.userRole || 'student' });
+// N-5: "mode" and "digest" exist only for accounts with notifSettingsV2 (like messages / loyalty above)
+const modesOn = (req) => isEnabled('notifSettingsV2', { id: String(req.userId), role: req.userRole || 'student' });
+const MODES = ['everything', 'important', 'quiet'];
 const prefsOut = (req, notifPrefs) => {
   const p = { ...NOTIF_PREF_DEFAULTS, ...(notifPrefs || {}) };
   delete p.messages;
+  delete p.mode;
+  delete p.digest;
   if (chatOn(req)) p.messages = notifPrefs?.messages !== false;
+  if (modesOn(req)) {
+    p.mode = MODES.includes(notifPrefs?.mode) ? notifPrefs.mode : 'everything';
+    p.digest = notifPrefs?.digest === true;
+  }
   return p;
 };
 
@@ -994,15 +1003,40 @@ router.get('/notification-prefs', auth, requireAuth, async (req, res) => {
   });
 });
 
+// N-6 (pushOpenTracking): an opt-out (a switch turned off, a quieter mode, the phone's permission taken away) is
+// recorded with its time, so the push report can count opt-outs within 24 h of a push type. Tracked accounts only.
+async function recordOptOuts(req, keys) {
+  try {
+    if (!keys.length || !require('../services/pushTracking').forUser({ _id: req.userId, role: req.userRole || 'student' })) return;
+    const { dayKey } = require('../utils/karachiTime');
+    await require('../models/EngagementEvent').insertMany(keys.map((key) => ({ user: req.userId, name: 'notif_opt_out', feature: null, dayKey: dayKey(), meta: { key }, source: 'server' })));
+  } catch (e) {
+    console.warn('[notifications] opt-out not recorded:', e.message);
+  }
+}
+
 router.put('/notification-prefs', auth, requireAuth, async (req, res) => {
+  const before = await EngagementProfile.findOne({ user: req.userId }).select('notifPrefs').lean();
   const set = {};
   for (const k of Object.keys(NOTIF_PREF_DEFAULTS)) {
     if (typeof req.body[k] === 'boolean') set[`notifPrefs.${k}`] = req.body[k];
   }
   if (typeof req.body.messages === 'boolean' && chatOn(req)) set['notifPrefs.messages'] = req.body.messages;
+  if (modesOn(req)) {
+    if (MODES.includes(req.body.mode)) set['notifPrefs.mode'] = req.body.mode;
+    if (typeof req.body.digest === 'boolean') set['notifPrefs.digest'] = req.body.digest;
+  }
   // upsert: a student without an engagement profile could not save any switch before
   if (Object.keys(set).length) {
     await EngagementProfile.updateOne({ user: req.userId }, { $set: set }, { upsert: true });
+    const was = before?.notifPrefs || {};
+    const RANK = { everything: 0, important: 1, quiet: 2 };
+    await recordOptOuts(req, Object.entries(set).filter(([k, v]) => {
+      const key = k.replace('notifPrefs.', '');
+      if (key === 'mode') return (RANK[v] || 0) > (RANK[was.mode] || 0);
+      if (key === 'digest') return false;
+      return v === false && was[key] !== false;
+    }).map(([k, v]) => (k === 'notifPrefs.mode' ? `mode:${v}` : k.replace('notifPrefs.', ''))));
   }
   if (typeof req.body.loyalty === 'boolean' && isEnabled('loyaltyV2', { id: String(req.userId), role: 'student' })) {
     await require('../models/UserNotificationSetting').updateOne(
@@ -1026,10 +1060,12 @@ router.post('/push-permission', auth, requireAuth, async (req, res) => {
   if (!['granted', 'denied', 'undetermined'].includes(status)) {
     return res.status(400).json({ message: 'invalid status' });
   }
+  const before = status === 'denied' ? await EngagementProfile.findOne({ user: req.userId }).select('osPushPermission').lean() : null;
   await EngagementProfile.updateOne(
     { user: req.userId },
     { $set: { osPushPermission: status, pushPermissionAskedAt: new Date() } }
   );
+  if (status === 'denied' && before?.osPushPermission === 'granted') await recordOptOuts(req, ['os_permission']);
   res.status(204).end();
 });
 

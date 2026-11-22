@@ -326,4 +326,56 @@ function fill(key, vars = {}, userId = null) {
   return { title: '', body, mood: featureMood(key, entry.mood || 'sorted') };
 }
 
-module.exports = { BANK, fill, pickVariant };
+// ─────────────────────────────────────────────────
+// N-7 (flag pushCopyV2): every push names the specific thing, with real numbers only. For these types the
+// variants below replace the bank's; for every other type, the bank's variants are used minus any whose
+// placeholders aren't all given (no "{n}" left in a push, no made-up number). A placeholder must be given and,
+// for a number, above 0. Nothing left → null (the caller sends no push).
+// ─────────────────────────────────────────────────
+const BANK_V2 = {
+  referral_joined: [
+    "{friend_name} just joined with YOUR code. that's 100 points, straight up.",
+    'you put someone on. {friend_name} joined tdc because of you. +100 pts',
+    "{friend_name} joined on your code. you're basically a talent scout now. +100 pts.",
+  ],
+  nearby_deal: [
+    '{brand} nearby, {discount}% off with your tdc code.',
+    "{brand} is close by: {discount}% off. don't walk past it.",
+  ],
+  // win-back: real counts since the student's last visit (services/engagement/inactivity.js)
+  win_back_soft: [
+    '{deals} new deals since you were last here.',
+    '{confessions} new confessions at your campus since you left.',
+  ],
+  win_back_ghost: [
+    "it's been {days} days. {deals} new deals are waiting.",
+    "{days} days away. {confessions} confessions at your campus you haven't read.",
+  ],
+  exclusive_offer: [
+    '{brand}: {discount}% off right now. claim in 1 tap.',
+  ],
+  daily_drop: [
+    "today's drop: {title}",
+  ],
+  new_for_you: [],
+};
+const PLACEHOLDER = /\{(\w+)\}/g;
+const usable = (variant, vars) => [...variant.matchAll(PLACEHOLDER)].every(([, k]) => {
+  const v = vars?.[k];
+  if (v == null || v === '') return false;
+  return typeof v === 'number' ? v > 0 : true;
+});
+
+/** Like fill(), but only specific, real copy (N-7). → { title, body, mood } or null */
+function fillV2(key, vars = {}, userId = null) {
+  const entry = BANK[key];
+  if (!entry) return null;
+  const pool = (BANK_V2[key] || entry.variants || []).filter((v) => usable(v, vars));
+  if (!pool.length) return null;
+  let body = pickVariant(`v2:${key}`, pool, userId);
+  for (const [k, v] of Object.entries(vars || {})) body = body.replace(new RegExp(`\\{${k}\\}`, 'g'), String(v));
+  const { featureMood } = require('../../utils/notificationFeatures');
+  return { title: '', body, mood: featureMood(key, entry.mood || 'sorted') };
+}
+
+module.exports = { BANK, BANK_V2, fill, fillV2, pickVariant };

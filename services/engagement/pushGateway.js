@@ -20,6 +20,8 @@ async function send(userId, msg) {
     // essential: a reminder the user asked for (streak about to expire / just broke). It skips the
     // daily and weekly marketing caps and does not use them up, but keeps the pref and quiet hours.
     essential = false,
+    // N-2: the sender's class for the push budget (personal / relevant / broadcast); default from the type
+    budgetClass = null,
   } = msg;
   // Emoji / dot / sound follow the feature (new offer = 🤑 + deal sound)
   const mood = featureMood(type, msg.mood);
@@ -41,25 +43,43 @@ async function send(userId, msg) {
       return { sent: false, reason: 'pref_off' };
     }
 
-    if (!skipCaps && isQuietHour(new Date(), cfg.push)) {
+    // N-2 (pushBudgetV1 on for this student): the one budget across senders replaces this gateway's quiet hours
+    // and daily / weekly caps (checked below, once the push can actually be sent). Off: exactly as before.
+    // N-5 (notifSettingsV2): the student's mode and digest are checked at the same point; only the budget replaces
+    // this gateway's own quiet hours and caps
+    const budget = require('../pushBudget');
+    let budgetUser = null;
+    let budgetCaps = false;
+    if (!skipCaps && budget.configured()) {
+      const u = await User.findById(userId).select('role').lean();
+      if (u && budget.onFor({ _id: userId, role: u.role })) {
+        budgetUser = { _id: userId, role: u.role };
+        budgetCaps = budget.budgetOn(budgetUser);
+      }
+    }
+
+    if (!budgetCaps && !skipCaps && isQuietHour(new Date(), cfg.push)) {
       return { sent: false, reason: 'quiet_hours' };
     }
 
     const today = dayKey();
     const thisWeek = weekKey();
 
-    if (!skipCaps && !essential && profile.push?.lastPushDay === today) {
+    if (!budgetCaps && !skipCaps && !essential && profile.push?.lastPushDay === today) {
       return { sent: false, reason: 'daily_cap' };
     }
 
     const weeklyCap = cfg.push.weeklyCap(cfg.STAGE);
-    if (!skipCaps && !essential) {
+    if (!budgetCaps && !skipCaps && !essential) {
       const sentThisWeek =
         profile.push?.weekKey === thisWeek ? profile.push.sentThisWeek || 0 : 0;
       if (sentThisWeek >= weeklyCap) return { sent: false, reason: 'weekly_cap' };
     }
 
-    const user = await User.findById(userId).select('pushTokens').lean();
+    const user = await User.findById(userId).select('pushTokens role').lean();
+    // N-6 (pushOpenTracking): this row's id travels in the push so the tap can be recorded
+    const tracking = require('../pushTracking');
+    const trackedId = tracking.forUser({ _id: userId, role: user?.role }) ? new (require('mongoose').Types.ObjectId)() : null;
     const seen = new Set();
     const entries = (user?.pushTokens || []).filter((t) => {
       if (!t?.token || seen.has(t.token)) return false; // one push per device
@@ -93,12 +113,19 @@ async function send(userId, msg) {
           channelId,
           soundKey,
           ...data,
+          ...(trackedId ? { pushLogId: String(trackedId) } : {}),
         },
       }));
 
     if (messages.length === 0) return { sent: false, reason: 'no_valid_token' };
 
+    if (budgetUser) {
+      const b = await budget.allow(budgetUser, budgetClass || budget.classify(type));
+      if (!b.ok) return { sent: false, reason: b.reason, budgetClass: b.cls };
+    }
+
     const log = await PushLog.create({
+      ...(trackedId ? { _id: trackedId, tracked: true, sender: 'gateway' } : {}),
       user: userId, type, priority,
       title: title || '', body: body || '', mood,
       dayKey: today, weekKey: thisWeek, data,
@@ -180,6 +207,12 @@ async function send(userId, msg) {
 // ── COPY-BANK + USER-ID-AWARE VARIANT ──
 // opts.copyKey picks another copy bank for the line while the push keeps its type
 async function sendFromCopy(userId, type, pref, vars, data, opts = {}) {
+  // N-7 (pushCopyV2 on for this student): specific copy with real numbers only; nothing to say → no push
+  if (require('../../config/featureFlags').isEnabled('pushCopyV2', { id: String(userId), role: 'student' })) {
+    const v2 = copy.fillV2(opts.copyKey || type, vars, userId);
+    if (!v2) return { sent: false, reason: 'no_specific_copy' };
+    return send(userId, { type, pref, body: v2.body, mood: v2.mood, data, essential: !!opts.essential });
+  }
   const { body, mood } = copy.fill(opts.copyKey || type, vars, userId);
   return send(userId, { type, pref, body, mood, data, essential: !!opts.essential });
 }
@@ -214,7 +247,7 @@ async function sendDailyDropPush(drop) {
         p.user,
         'daily_drop',
         'dailyDrop',
-        {},
+        { title: drop.title }, // N-7 (pushCopyV2): the drop names itself; today's variants have no {title}
         {
           route: target?.route || 'Home',
           params: { ...(target?.params || {}), dayKey: drop.dayKey },
@@ -231,6 +264,29 @@ async function sendDailyDropPush(drop) {
 }
 
 // ── RECEIPTS ──
+// every 30 minutes (server.js, JOB_PUSH_RECEIPTS); overlapping runs are skipped; returns a stop function
+let receiptTimer = null;
+let receiptRunning = false;
+function startReceiptChecks(everyMs = 30 * 60 * 1000, firstMs = 2 * 60 * 1000) {
+  if (receiptTimer) return () => {};
+  const run = async () => {
+    if (receiptRunning) return;
+    receiptRunning = true;
+    try {
+      const r = await checkReceipts();
+      if (r?.checked) console.log(`[pushGateway] receipts: ${r.checked} checked, ${r.ok || 0} delivered, ${r.error || 0} failed`);
+    } catch (e) {
+      console.error('[pushGateway] receipt check failed:', e.message);
+    } finally {
+      receiptRunning = false;
+    }
+  };
+  const first = setTimeout(run, firstMs);
+  receiptTimer = setInterval(run, everyMs);
+  first.unref?.(); receiptTimer.unref?.();
+  return () => { clearTimeout(first); clearInterval(receiptTimer); receiptTimer = null; };
+}
+
 async function checkReceipts() {
   try {
     const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
@@ -291,11 +347,12 @@ async function checkReceipts() {
   }
 }
 
-async function markOpened(logId) {
-  if (!logId) return false;
+// the first tap only, and only by the push's own recipient (N-6)
+async function markOpened(logId, userId = null) {
+  if (!logId || !require('mongoose').Types.ObjectId.isValid(String(logId))) return false;
   try {
-    await PushLog.updateOne({ _id: logId }, { $set: { openedAt: new Date() } });
-    return true;
+    const r = await PushLog.updateOne({ _id: logId, ...(userId ? { user: userId } : {}), openedAt: null }, { $set: { openedAt: new Date() } });
+    return (r.matchedCount ?? r.n ?? 0) > 0;
   } catch (err) {
     console.error('[pushGateway] markOpened error:', err.message);
     return false;
@@ -415,6 +472,7 @@ module.exports = {
   sendPushToUser,
   sendDailyDropPush,
   checkReceipts,
+  startReceiptChecks,
   markOpened,
   broadcastToAll,
   broadcastToRole,

@@ -265,9 +265,14 @@ function rememberProjects(learned) {
 }
 
 // (client is ignored: kept so older callers keep working)
+// N-6 (pushOpenTracking): recipients with the flag get a PushLog row and its id in the data (stamp writes the id
+// into the caller's messages array, so handleTickets later sees the same messages). Flag off: untouched.
 async function sendAllSafe(client, messages, projectOf = {}) {
+  const tracking = require('../services/pushTracking');
+  const ctx = await tracking.stamp(messages);
   const { tickets, learned } = await sendByProject(messages, projectOf);
   rememberProjects(learned);
+  await tracking.afterSend(ctx, tickets);
   return tickets;
 }
 
@@ -325,6 +330,8 @@ async function checkReceiptsFor(okPairs, userId, tag = '[push]') {
     console.warn(`${tag} receipts not available:`, err.message);
     return;
   }
+  // N-6: delivered, for tracked rows only (pushOpenTracking)
+  await require('../services/pushTracking').markDelivered(Object.entries(receipts).filter(([, r]) => r?.status === 'ok').map(([id]) => id));
   for (const [id, receipt] of Object.entries(receipts)) {
     if (receipt?.status !== 'error') continue;
     const pair = okPairs.find((p) => p.id === id);
@@ -393,12 +400,20 @@ async function socialPushOff(userId, type) {
   }
 }
 
-const sendToUser = async (userId, title, body, extraData = {}) => {
+const sendToUser = async (userId, title, body, extraDataIn = {}) => {
   try {
+    // N-2: budgetClass is for the push budget only, never sent to the phone
+    const { budgetClass = null, ...extraData } = extraDataIn || {};
     if (await socialPushOff(userId, extraData.type || 'System')) {
       return { sent: false, reason: 'pref_off' };
     }
-    const user = await User.findById(userId).select('pushTokens').lean();
+    const budget = require('../services/pushBudget');
+    const user = await User.findById(userId).select(budget.configured() ? 'pushTokens role' : 'pushTokens').lean();
+    // N-2 (pushBudgetV1 on for this account): the shared daily budget and quiet hours (not for personal pushes)
+    if (user && budget.configured() && budget.onFor({ _id: userId, role: user.role }) && (user.pushTokens || []).some((e) => e?.token && Expo.isExpoPushToken(e.token))) {
+      const b = await budget.allow({ _id: userId, role: user.role }, budgetClass || budget.classify(extraData.type, extraData.notificationType));
+      if (!b.ok) return { sent: false, reason: b.reason, budgetClass: b.cls };
+    }
     const seen = new Set();
     const entries = (user?.pushTokens || []).filter((e) => {
       if (!e?.token || seen.has(e.token) || !Expo.isExpoPushToken(e.token)) return false;

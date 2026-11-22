@@ -120,7 +120,7 @@ async function invite(jobId, employerId, token, now = new Date()) {
   const body = `${company} invites you to apply for ${job.title}. They saw your skills only, not your name. You decide.`;
   const data = { careerInviteId: String(inv._id), screen: "Career", params: { openJobId: String(job._id) } };
   await Notification.create({ recipient: c.sid, title, description: body, type: "Job Posting", metadata: { ...data, jobId: String(job._id), skipPush: true } });
-  try { await require("../engagement/pushGateway").send(c.sid, { type: "job", pref: "jobsScholarships", title, body, data }); } catch (err) { console.error(`[career] invite push failed: ${err.message}`); }
+  try { await require("../engagement/pushGateway").send(c.sid, { type: "job", budgetClass: "relevant", pref: "jobsScholarships", title, body, data }); } catch (err) { console.error(`[career] invite push failed: ${err.message}`); }
   return { invite: { status: "sent", sentAt: inv.createdAt } };
 }
 
