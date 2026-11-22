@@ -9,6 +9,7 @@ const Notification = require("../models/Notification");
 const Job = require("../models/Job");
 const User = require("../models/User");
 const auth = require("../middleware/auth.middleware");
+const superAdmin = require("../services/superAdmin"); // SEC-2: who may create / promote / demote admins
 const Exchange = require("../models/Exchange");
 const Application = require("../models/Application");
 const Package = require("../models/Package");
@@ -178,6 +179,8 @@ router.post("/approve-user/:id", auth, isAdmin, async (req, res) => {
 });
 
 // ✅ Update user role (Admin only)
+// SEC-2: making someone an admin, or changing an admin's role, only for accounts in SUPER_ADMIN_IDS (empty = nobody);
+// every such attempt is logged. Other role changes: any admin, as before.
 router.put("/users/role/:id", auth, isAdmin, async (req, res) => {
   try {
     const { role } = req.body;
@@ -185,6 +188,13 @@ router.put("/users/role/:id", auth, isAdmin, async (req, res) => {
     
     if (!validRoles.includes(role)) {
       return res.status(400).json({ message: "Invalid role" });
+    }
+
+    const target = mongoose.Types.ObjectId.isValid(String(req.params.id)) ? await User.findById(req.params.id).select("role").lean() : null;
+    if (target && (role === "admin" || target.role === "admin")) {
+      const allowed = superAdmin.isSuperAdmin(req.userId);
+      await superAdmin.logAttempt({ req, action: role === "admin" ? "admin.promote" : "admin.demote", targetId: req.params.id, before: { role: target.role }, after: { role }, allowed });
+      if (!allowed) return res.status(403).json(superAdmin.REFUSED);
     }
 
     const user = await User.findByIdAndUpdate(
@@ -240,10 +250,30 @@ router.delete("/users/:id", auth, isAdmin, async (req, res) => {
   }
 });
 
+// the User fields hidden by default (select: false): push tokens, ID-card images, webhook secret, safety fields…
+const HIDDEN_USER_PATHS = Object.entries(User.schema.paths).filter(([, t]) => t.options?.select === false).map(([p]) => p);
+function withoutHiddenFields(obj) {
+  const out = { ...obj };
+  for (const p of HIDDEN_USER_PATHS) {
+    const parts = p.split(".");
+    let o = out;
+    for (let i = 0; i < parts.length - 1 && o; i++) { o[parts[i]] = o[parts[i]] && typeof o[parts[i]] === "object" ? { ...o[parts[i]] } : o[parts[i]]; o = o[parts[i]]; }
+    if (o && typeof o === "object") delete o[parts[parts.length - 1]];
+  }
+  return out;
+}
+
 // ✅ Create user (Admin only - for adding brands/employees)
 router.post("/users/create", auth, isAdmin, async (req, res) => {
   try {
     const { name, email, password, role, phone, address, company, designation } = req.body;
+
+    // SEC-2: creating an admin only for accounts in SUPER_ADMIN_IDS (empty = nobody); every attempt logged
+    const wantsAdmin = String(role || "").trim().toLowerCase() === "admin";
+    if (wantsAdmin && !superAdmin.isSuperAdmin(req.userId)) {
+      await superAdmin.logAttempt({ req, action: "admin.create", targetId: "new", after: { role: "admin" }, allowed: false });
+      return res.status(403).json(superAdmin.REFUSED);
+    }
 
     const existingUser = await User.findOne({ email });
     if (existingUser) {
@@ -257,7 +287,7 @@ router.post("/users/create", auth, isAdmin, async (req, res) => {
       name,
       email,
       password: hashedPassword,
-      role: role || "employee",
+      role: wantsAdmin ? "admin" : role || "employee",
       phone: phone || "",
       address: address || "",
       company: company || "",
@@ -266,6 +296,7 @@ router.post("/users/create", auth, isAdmin, async (req, res) => {
     });
 
     await newUser.save();
+    if (wantsAdmin) await superAdmin.logAttempt({ req, action: "admin.create", targetId: newUser._id, after: { role: newUser.role }, allowed: true });
 
     await Notification.create({
       recipient: newUser._id,
@@ -277,7 +308,8 @@ router.post("/users/create", auth, isAdmin, async (req, res) => {
 
     res.status(201).json({
       message: "User created successfully",
-      user: { ...newUser.toObject(), password: undefined }
+      // SEC-2: without the fields the User schema hides (select: false), as the password already was
+      user: { ...withoutHiddenFields(newUser.toObject()), password: undefined }
     });
   } catch (err) {
     console.error("Error creating user:", err);
