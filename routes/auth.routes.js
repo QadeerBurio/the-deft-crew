@@ -373,7 +373,7 @@ if (referrer) {
         feature: null,
         dayKey: new Date().toISOString().split('T')[0],
         meta: { refereeId: String(user._id) },
-        source: 'system',
+        source: 'server',
         dedupeKey: signupKey,
       });
     } catch (e) {

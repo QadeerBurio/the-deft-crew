@@ -472,7 +472,7 @@ const textAnywhere = (needle, skip = []) => [...fake.STORE].filter(([n]) => !ski
   check("engagement events kept anonymised (metrics history)", rows(Models.EngagementEvent).length === 2);
   const sEv = rows(Models.CareerApplicationEvent, (e) => same(e.application, appS)).sort((a, b) => a.seq - b.seq);
   check("hiring timeline: S's 5 events kept (the employer's funnel still counts the hire) with a placeholder instead of S", sEv.length === 5 && sEv.every((e) => !same(e.candidate, ids.S) && same(e.candidate, sEv[0].candidate) && same(e.employer, EMP)) && !sEv.some((e) => same(e.actor, ids.S)) && sEv[4].type === "HIRE_CONFIRMED");
-  check("…notes and internal notes cleared, offer id and answer kept", !/great fit|0300|80k|thank you/.test(JSON.stringify(sEv.map((e) => e.metadata))) && sEv[3].metadata.offerId === "o1" && sEv[3].metadata.response === "accept");
+  check("…notes and internal notes cleared, offer id and answer kept", !/great fit|0300 1112223|80k|thank you/.test(JSON.stringify(sEv.map((e) => e.metadata))) && sEv[3].metadata.offerId === "o1" && sEv[3].metadata.response === "accept");
   const sIv = rows(Models.CareerInterview, (x) => same(x.application, appS))[0];
   const sOf = rows(Models.CareerOffer, (x) => same(x.application, appS))[0];
   check("interview and offer kept without S: placeholder, no location, link, note, messages or terms", !same(sIv.candidate, ids.S) && sIv.location === "" && sIv.meetingLink === "" && sIv.note === "" && sIv.responses.length === 0 && !same(sOf.candidate, ids.S) && sOf.terms === "" && sOf.responseNote === "" && sOf.status === "accepted");

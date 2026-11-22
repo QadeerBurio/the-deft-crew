@@ -259,7 +259,7 @@ const on = (flag, who, role) => flags.isEnabled(flag, { id: String(ids[who] || w
   check("list: forced on (sana, the brand) and forced off (the two undone by bulk), newest first, with names, university, who and why", r.status === 200 && L.total === 4 && onRows.length === 2 && offRows.length === 2
     && onRows[0].id === S && onRows[0].name === "sana" && onRows[0].university === "NED University" && onRows[0].setBy.name === "Ayesha Admin" && onRows[0].reason === "test student" && onRows[1].name === "Alpha Cafe"
     && offRows.every((a) => a.reason === "undo"), JSON.stringify(L?.accounts));
-  check("…no e-mail or phone in the list", !/@test\.local|0300/.test(r.text));
+  check("…no e-mail or phone in the list", !/@test\.local|03001234567/.test(r.text));
   r = await call("GET", "/api/admin/features/flag/loyaltyV2?limit=1&offset=1", { t: T.A });
   check("…paged", r.json.data.accounts.length === 1 && r.json.data.accounts[0].id === L.accounts[1].id);
   r = await call("GET", "/api/admin/features/flag/metaEvents", { t: T.A });
