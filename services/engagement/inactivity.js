@@ -25,15 +25,19 @@ async function sendWinBack(userId, daysSince = 3) {
     copyKey = 'win_back_soft';
   }
 
-  // N-7 (pushCopyV2): real numbers only: days away, deals and campus confessions since the last visit, a real offer
-  if (require('../../config/featureFlags').isEnabled('pushCopyV2', { id: String(userId), role: 'student' })) {
-    try {
-      vars = { ...vars, ...(await realFacts(userId, daysSince, copyKey)) };
-      if (copyKey === 'exclusive_offer' && !vars.offerId) return { sent: false, reason: 'no_specific_copy', copyKey, daysSince, route: data.route };
-      if (vars.offerId) data = { route: 'OfferScreen', params: { offerId: vars.offerId }, offerId: vars.offerId };
-    } catch (e) {
-      return { sent: false, reason: 'no_specific_copy', copyKey, daysSince, route: data.route };
-    }
+  // Owner (Phase N sign-off): the win-back nudge sends only with pushCopyV2, and only real numbers: days away, new
+  // deals and campus confessions since the last visit, the real best live offer, the real points balance. Without
+  // the flag (today's copy passes the days off as "deals" / "Rs saved" and offers a made-up "tdc · 20% off"), or
+  // with nothing real to say: nothing is sent.
+  if (!require('../../config/featureFlags').isEnabled('pushCopyV2', { id: String(userId), role: 'student' })) {
+    return { sent: false, reason: 'push_copy_v2_off', copyKey, daysSince, route: data.route };
+  }
+  try {
+    vars = { ...vars, ...(await realFacts(userId, daysSince, copyKey)) };
+    if (copyKey === 'exclusive_offer' && !vars.offerId) return { sent: false, reason: 'no_specific_copy', copyKey, daysSince, route: data.route };
+    if (vars.offerId) data = { route: 'OfferScreen', params: { offerId: vars.offerId }, offerId: vars.offerId };
+  } catch (e) {
+    return { sent: false, reason: 'no_specific_copy', copyKey, daysSince, route: data.route };
   }
   const result = await pushGateway.sendFromCopy(userId, copyKey, null, vars, data);
   return { ...result, copyKey, daysSince, route: data.route };

@@ -3,6 +3,7 @@
 //     the generic variants (a friend joined without the name, a deal without the brand) are gone; win-back uses real
 //     counts; the daily drop names itself; nothing specific and real → null
 //   gateway.sendFromCopy: flag on → the v2 copy, or no push ('no_specific_copy'); off → today's copy
+//   the admin win-back nudge: nothing without the flag; the route finds inactivity.js (the shadowing empty file is gone)
 //   inactivity win-back: real days / deals / campus confessions since the last visit; "exclusive offer" = the best
 //     live offer with its real brand and discount (none → no push), tapping opens it
 //   node tests/push-copy/run.js [serverDir]
@@ -47,7 +48,7 @@ const Confession = reqS("./models/Confession");
 reqS("./models/University");
 const copy = reqS("./services/engagement/copy");
 const gateway = reqS("./services/engagement/pushGateway");
-const inactivity = reqS("./services/engagement/inactivity.js"); // explicit: an empty extensionless file "inactivity" shadows it (pre-existing)
+const inactivity = reqS("./services/engagement/inactivity"); // the same path the admin route uses
 
 const oid = () => new mongoose.Types.ObjectId();
 const U1 = oid(); const A = oid(); const BR = oid();
@@ -77,6 +78,14 @@ const reset = () => EngagementProfile.updateMany({}, { $set: { push: {} } });
   check("win-back: only real counts above 0; nothing → null", copy.fillV2("win_back_soft", { deals: 0, confessions: 4 }, "w").body === "4 new confessions at your campus since you left." && copy.fillV2("win_back_soft", { n: 3, deals: 0, confessions: 0 }, "w") === null);
   check("the daily drop names itself; without a title → null", copy.fillV2("daily_drop", { title: "free coffee at cafe x" }, "d").body === "today's drop: free coffee at cafe x" && copy.fillV2("daily_drop", {}, "d") === null);
   check("a type without v2 variants keeps its own, minus those missing a value", copy.fillV2("streak_milestone", { count: 5 }, "s").body === "your 5 day streak. respect." && copy.fillV2("streak_milestone", {}, "s") === null && copy.fillV2("card_sorted", {}, "s").body === "sorted.");
+
+  quiet.log("-- the admin win-back nudge (owner, Phase N sign-off)");
+  check("the empty extensionless file that shadowed inactivity.js is gone: the admin route's require finds sendWinBack", !fs.existsSync(path.join(SERVER, "services", "engagement", "inactivity")) && typeof inactivity.sendWinBack === "function");
+  for (const days of [4, 10, 20, 40]) {
+    const before = expo.requests.length;
+    const w = await inactivity.sendWinBack(A, days);
+    check(`pushCopyV2 off: the nudge (${days} days) sends nothing (no made-up numbers)`, w.sent === false && w.reason === "push_copy_v2_off" && expo.requests.length === before, JSON.stringify(w));
+  }
 
   quiet.log("-- the gateway");
   let r = await gateway.sendFromCopy(A, "win_back_soft", null, { n: 3 }, { route: "Home" });

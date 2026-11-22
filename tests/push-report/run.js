@@ -76,5 +76,9 @@ fake.seed(coll("EngagementEvent"), [
   check("…denied again: not counted twice", outs(S).filter((k) => k === "os_permission").length === 1);
   check("the events are stored as source server", rows("EngagementEvent", (e) => e.name === "notif_opt_out" && String(e.user) === String(S)).every((e) => e.source === "server"));
   delete process.env.FLAG_PUSH_OPEN_TRACKING; delete process.env.FLAG_NOTIF_SETTINGS_V2;
+
+  console.log("-- the admin win-back nudge (was a 500: an empty file shadowed inactivity.js)");
+  r = await call("POST", `/api/admin/engagement/nudge/win-back/${S}`, { tok: T.admin, body: { days: 10 } });
+  check("POST nudge/win-back: 200 now; without pushCopyV2 nothing is sent", r.status === 200 && r.json.sent === false && r.json.reason === "push_copy_v2_off", r.text);
   h.finish(server);
 })().catch((e) => { console.error(e); process.exit(1); });
