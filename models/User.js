@@ -71,6 +71,25 @@ const userSchema = new mongoose.Schema(
     suspensionExpiry: {
       type: Date
     },
+
+    // --- CONFESSION SAFETY (plan P4-1 / P4-1b, flag confessionSafety). All optional. ---
+    // the confession rules were accepted (the app shows them once before the first post)
+    confessionRulesAcceptedAt: { type: Date },
+    // no confessions or confession comments until then (strikes, repeated blocked attempts)
+    confessionBanUntil: { type: Date },
+    // strikes in the last 90 days count; internal only
+    confessionStrikes: {
+      type: [{ at: Date, reason: String, ref: String, _id: false }],
+      select: false,
+      default: undefined,
+    },
+    // posts / comments blocked by the pre-post check (warning only; 3 in 24 h = a 24 h ban + a strike)
+    confessionBlocks: { type: [Date], select: false, default: undefined },
+    // authors this student muted ("don't show me posts from this person"); never sent to the app
+    mutedConfessionAuthors: { type: [mongoose.Schema.Types.ObjectId], select: false, default: undefined },
+    // reports rejected as false (3 in 30 days = no reporting for 30 days)
+    falseReportMarks: { type: [Date], select: false, default: undefined },
+    reportingBlockedUntil: { type: Date },
     isBlocked: {
       type: Boolean,
       default: false
