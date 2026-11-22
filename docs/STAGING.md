@@ -6,6 +6,23 @@ pushes. You switch on only the job you want to test.
 
 Production is not affected by anything here. Nothing in this guide changes a production variable.
 
+> **Status (21 Nov 2026): staging does not exist yet.** The Railway project has only `production`. The owner
+> creates staging by following sections 1 and 2 below, in that order: **first its own MongoDB (section 1), then
+> the Railway environment.** Staging's `MONGO_URI` must point at the staging cluster. **Never paste, copy or
+> "duplicate" the production `MONGO_URI`** (or any other production secret) into staging. Until staging is
+> ready, upgrade work is tested locally only (unit suites with in-memory data, and the app pointed at a local
+> server).
+>
+> Quick order of work for the owner:
+> 1. Atlas: new project `tdc-staging`, new cluster, new database user (section 1, steps 1–5).
+> 2. Railway: new **empty** environment `staging` (not "Duplicate production"), add the server service, deploy
+>    branch = the upgrade branch under test (e.g. `upgrade/p0-safety`), generate a domain (section 2).
+> 3. Variables: only the staging values in section 2 (`APP_ENV=staging`, the staging `MONGO_URI` /
+>    `BACKEND_MONGO_URI`, a **new** `JWT_SECRET`, `PUBLIC_BASE_URL`, …).
+> 4. Deploy, then run the checklist in section 6.
+> 5. Seed test data (section 1b) and turn the upgrade flags on for the test accounts (section 2, feature flags).
+> 6. Tell the developer the staging URL. Nothing else is shared.
+
 ---
 
 ## 1. Database: a separate MongoDB Atlas cluster
@@ -34,6 +51,25 @@ Steps (Atlas):
 production dump into staging**: it would copy students' personal data, and their push tokens, into an
 environment more people can reach. If realistic data is ever needed, export only what you need with
 the e-mails, phones, names, `pushTokens` and ID-card fields removed.
+
+## 1b. Seed test data (fake people only)
+
+`scripts/seed-staging.js` creates made-up test data: 3 universities, 20 students, 10 confessions and 5 resumes
+(one empty, one fresher, one experienced, two partial). Every account uses an `@staging.test` e-mail address, so
+nothing can reach a real inbox, and all share one password you choose.
+
+It refuses to run unless **all** of these are true, so it can't write to production by mistake:
+- `APP_ENV=staging`;
+- the database name in `MONGO_URI` contains `staging` (e.g. `tdc_staging`);
+- `--apply` is given and you type `APPLY` (without `--apply` it only says what it would create).
+
+```
+# from the server folder, with the STAGING connection string (never production's)
+APP_ENV=staging MONGO_URI="<staging connection string>" SEED_PASSWORD="<a test password>" node scripts/seed-staging.js            # dry run
+APP_ENV=staging MONGO_URI="<staging connection string>" SEED_PASSWORD="<a test password>" node scripts/seed-staging.js --apply    # writes
+```
+
+Running it again creates nothing new (it finds its own records by their `@staging.test` e-mails and seed markers).
 
 ---
 
@@ -91,6 +127,12 @@ Staging is the place to try a rule first, e.g. `FLAG_META_EVENTS=roles:admin`.
 Brand loyalty is `FLAG_LOYALTY_V2` (off by default). It must cover both the brand and the student,
 e.g. `FLAG_LOYALTY_V2=ids:<test brand id>,<test student id>`.
 
+**Upgrade v2 flags** (all off by default, in production and staging): `growthV2`, `ambassadorV2`, `resumeV2`,
+`confessionsV2`, `confessionSafety`, `shareCards`. Turn one on for the test students from the admin portal
+(settings → features → the flag's tab, or a student's features tab), or with a Railway rule such as
+`FLAG_CONFESSION_SAFETY=ids:<test student id>,<test student id>`. `FLAG_ACCOUNT_STATUS_ENFORCE` (server only,
+plan P0-6) stays unset until the owner has reviewed `scripts/count-account-status.js`.
+
 ---
 
 ## 3. Background jobs: all off in staging
@@ -145,8 +187,8 @@ React App bakes it in at **build** time.
   host). Set `REACT_APP_API_URL=<staging-url>` there, and leave production's value as it is.
   Put that site's URL into the server's `BRAND_PORTAL_URL` and `CORS_ORIGIN` (section 2).
 
-Until the change that makes every portal screen use `REACT_APP_API_URL` is merged, many screens still
-call the production URL directly. Don't use a staging portal build before then.
+Every portal screen now reads the address from `src/config/api.js` (checked 21 Nov 2026: no other screen
+names the production URL), so a staging portal build talks only to staging.
 
 ---
 
@@ -169,8 +211,12 @@ inlines `EXPO_PUBLIC_*` variables at build time. When the variable is missing, t
 
 Install staging builds only on testers' phones. Pushes from staging are off anyway (section 3).
 
-Until the change that makes every app screen use `EXPO_PUBLIC_API_URL` is merged, some screens call the
-production URL directly. Don't hand out a staging build before then.
+Every app screen now reads the address from `app/src/config/server.js` (checked 21 Nov 2026: no other file
+names the production URL), so a staging build talks only to staging.
+
+**Testing before staging exists (local).** Run this server on your machine with a local or staging-only
+MongoDB (`MONGO_URI` of that database, `APP_ENV=staging`, `npm start`), then point the app at it:
+`EXPO_PUBLIC_API_URL=http://<your computer's LAN IP>:<port> npx expo start --clear`.
 
 ---
 

@@ -76,6 +76,27 @@ const FLAGS = {
   // services/career/trialService.js). Per employer, e.g. FLAG_EMPLOYER_FIRST_HIRE_FREE="ids:<employer id>".
   // Off: no trial, no billing ledger rows, the hiring timeline unchanged. Per user only (/api/app/flags/me).
   employerFirstHireFree: { default: false, client: true, grant: { roles: ["employee"], label: "First Hire Free" } },
+
+  // ---- upgrade v2 (tdc-upgrade-v2/TDC_UPGRADE_PLAN.md in the app repo). Every one is OFF for everyone by default
+  // and is NOT in ROLE_DEFAULTS (that would turn it on for every student). Turned on per account from the admin
+  // portal (features tab) or by a Railway rule, e.g. FLAG_GROWTH_V2="ids:<test student id>". Off = today's behaviour.
+  // invite links, referral fixes, leaderboard (plan P1)
+  growthV2: { default: false, client: true, grant: { roles: ["student"], label: "Invites v2" } },
+  // ambassador invitation, intro, in-app application, hub (plan P2)
+  ambassadorV2: { default: false, client: true, grant: { roles: ["student"], label: "Ambassador v2" } },
+  // resume builder v2: smart start, fresher track, new sections, coach, templates (plan P3)
+  resumeV2: { default: false, client: true, grant: { roles: ["student"], label: "Resume v2" } },
+  // confessions v2: handles, tags, moods, polls, sort, follow (plan P4-2 to P4-6)
+  confessionsV2: { default: false, client: true, grant: { roles: ["student"], label: "Confessions v2" } },
+  // confession safety: pre-post check, report, mute author, strikes (plan P4-1, P4-1b). Separate from
+  // confessionsV2 so safety can reach every student while the rest of v2 stays off.
+  confessionSafety: { default: false, client: true, grant: { roles: ["student"], label: "Confession safety" } },
+  // branded share cards (plan P1-5)
+  shareCards: { default: false, client: true, grant: { roles: ["student"], label: "Share cards" } },
+  // Server only (plan P0-6): refuse sign-in and requests for accounts whose accountStatus is suspended / banned.
+  // Off = accountStatus is ignored, exactly as before. Admins are never locked out by it. Switched on by the owner
+  // (FLAG_ACCOUNT_STATUS_ENFORCE=on) only after reviewing scripts/count-account-status.js.
+  accountStatusEnforce: { default: false, client: false },
 };
 
 const JOBS = {
