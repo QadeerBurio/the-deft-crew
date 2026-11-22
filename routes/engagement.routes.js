@@ -1438,43 +1438,72 @@ router.get('/referrals/me', auth, requireAuth, async (req, res) => {
 });
 
 // ────────────────────────────────────────────────────────────
-// GET /api/engagement/referrals/leaderboard
-// Top 10 referrers by VERIFIED count
+// GET /api/engagement/referrals/leaderboard?period=all|month&university=<id>
+// Top 10 referrers by VERIFIED referrals (a friend who joined with the code and started using tdc).
+//   period=all (default, as before): all-time count · period=month: this Karachi month (from the points ledger's
+//   'referral:verified' rows) · university: only referrers at that university (optional)
+// First names only and no photos, for everyone (P1, owner): profileImage stays in the reply, always null.
+// Added (optional): period, me { rank, count } (null when not ranked), next { name, more } (who to pass, and how many
+// more verified friends that takes).
 // ────────────────────────────────────────────────────────────
+const firstName = (name) => String(name || '').trim().split(/\s+/)[0] || 'anonymous';
+const monthStartKarachi = (now = new Date()) => {
+  const pkt = new Date(now.getTime() + 5 * 3600e3);
+  return new Date(Date.UTC(pkt.getUTCFullYear(), pkt.getUTCMonth(), 1) - 5 * 3600e3);
+};
 router.get('/referrals/leaderboard', auth, requireAuth, async (req, res) => {
   try {
-    const top = await EngagementProfile.find({
-      verifiedReferralCount: { $gt: 0 },
-    })
-      .sort({ verifiedReferralCount: -1 })
-      .limit(10)
-      .select('user verifiedReferralCount')
-      .populate('user', 'name profileImage')
-      .lean();
-
-    const leaderboard = top
-      .filter((p) => p.user)
-      .map((p, i) => ({
-        rank: i + 1,
-        userId: p.user._id,
-        name: p.user.name || 'anonymous',
-        profileImage: p.user.profileImage || null,
-        verifiedCount: p.verifiedReferralCount || 0,
-      }));
-
-    res.json({ leaderboard });
+    const period = req.query.period === 'month' ? 'month' : 'all';
+    const uni = mongoose.Types.ObjectId.isValid(String(req.query.university || '')) ? String(req.query.university) : null;
+    let counts; // [{ user, count }]
+    if (period === 'month') {
+      const PointsLedger = require('../models/PointsLedger');
+      const rows = await PointsLedger.find({ reason: 'referral:verified', createdAt: { $gte: monthStartKarachi() } }).select('user').lean();
+      const m = new Map();
+      for (const r of rows) m.set(String(r.user), (m.get(String(r.user)) || 0) + 1);
+      counts = [...m.entries()].map(([user, count]) => ({ user, count }));
+    } else {
+      const profiles = await EngagementProfile.find({ verifiedReferralCount: { $gt: 0 } }).select('user verifiedReferralCount').lean();
+      counts = profiles.map((p) => ({ user: String(p.user), count: p.verifiedReferralCount || 0 }));
+    }
+    const users = await User.find({ _id: { $in: counts.map((c) => c.user) } }).select('name university').lean();
+    const byId = new Map(users.map((u) => [String(u._id), u]));
+    const ranked = counts
+      .filter((c) => byId.has(c.user) && (!uni || String(byId.get(c.user).university || '') === uni))
+      .sort((a, b) => b.count - a.count || a.user.localeCompare(b.user))
+      .map((c, i) => ({ rank: i + 1, userId: c.user, name: firstName(byId.get(c.user).name), profileImage: null, verifiedCount: c.count }));
+    const meId = String(req.userId);
+    const mine = ranked.find((r) => r.userId === meId) || null;
+    const above = mine && mine.rank > 1 ? ranked[mine.rank - 2] : !mine && ranked.length ? ranked[Math.min(ranked.length, 10) - 1] : null;
+    const myCount = mine ? mine.verifiedCount : 0;
+    res.json({
+      leaderboard: ranked.slice(0, 10),
+      period,
+      me: mine ? { rank: mine.rank, count: mine.verifiedCount } : null,
+      next: above ? { name: above.name, more: above.verifiedCount - myCount + 1 } : null,
+    });
   } catch (err) {
     console.error('[referrals/leaderboard] error:', err);
     res.status(500).json({ message: err.message });
   }
 });
 
-// ────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────
 // GET /api/engagement/referrals/validate/:code
-// Check if a referral code is valid (used during signup UX)
-// Public-ish — no auth needed but optional
-// ────────────────────────────────────────────────────────────
-router.get('/referrals/validate/:code', async (req, res) => {
+// Check if a referral code is valid (used during signup UX). No sign-in needed.
+// P1 (owner): the referrer's FIRST name only and no photo (profileImage stays, always null), for everyone; at most
+// 30 checks per address per 10 minutes, so codes can't be tried in bulk (429 RATE_LIMITED).
+// ──────────────────────────────────────────────────────
+const validateLimit = require('express-rate-limit').rateLimit({
+  windowMs: 10 * 60 * 1000,
+  limit: () => Math.max(1, Number(process.env.RATE_LIMIT_REFERRAL_VALIDATE_MAX) || 30),
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  keyGenerator: (req) => `referral-validate:${require('../services/loginGuard').clientIp(req)}`,
+  validate: false,
+  handler: (req, res) => res.status(429).json({ valid: false, code: 'RATE_LIMITED', reason: 'too many checks, try again in a few minutes' }),
+});
+router.get('/referrals/validate/:code', validateLimit, async (req, res) => {
   try {
     const code = String(req.params.code || '').trim().toUpperCase();
     if (!code) {
@@ -1482,7 +1511,7 @@ router.get('/referrals/validate/:code', async (req, res) => {
     }
 
     const user = await User.findOne({ referralCode: code })
-      .select('name profileImage')
+      .select('name')
       .lean();
 
     if (!user) {
@@ -1492,8 +1521,8 @@ router.get('/referrals/validate/:code', async (req, res) => {
     res.json({
       valid: true,
       referrer: {
-        name: user.name || 'a friend',
-        profileImage: user.profileImage || null,
+        name: user.name ? firstName(user.name) : 'a friend',
+        profileImage: null,
       },
     });
   } catch (err) {

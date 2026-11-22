@@ -276,6 +276,7 @@ app.use("/api/social", require("./routes/social.routes"));
 app.use("/api/safety", require("./routes/safetyActions.routes")); // one-time links in the safety e-mail (plan P4-1b)
 app.use("/api/events", require("./routes/event.routes"));
 app.use("/api/app", require("./routes/appFlags.routes")); // public app switches (Meta events kill switch)
+app.use("/api/invites", require("./routes/invites.routes")); // the invite page reports opens (P1-2, public, rate-limited)
 app.use("/api/jobs", require("./routes/jobs.routes"));
 app.use("/api/traveler", require("./routes/traveler.routes"));
 app.use("/api/resume", require("./routes/resume.routes"));
