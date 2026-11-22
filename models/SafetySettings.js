@@ -8,6 +8,9 @@ const helpline = new mongoose.Schema({ name: { type: String, trim: true, maxleng
 const safetySettingsSchema = new mongoose.Schema(
   {
     key: { type: String, required: true, unique: true, default: "confessions" },
+    // off: no checks · observe: every check runs on every new post / comment and report, logged only (nothing is
+    // blocked, held, hidden, struck or banned) · enforce: the checks act, for accounts with the confessionSafety flag
+    mode: { type: String, enum: ["off", "observe", "enforce"] },
     // unique reports that hide a confession / comment
     reportThreshold: { type: Number, min: 1, max: 50 },
     // extra banned words (on top of utils/profanity.js)

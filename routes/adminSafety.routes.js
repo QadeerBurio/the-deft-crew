@@ -21,6 +21,8 @@ const actionLog = require("../services/adminActionLog");
 const { authorRef } = require("../services/safetyAlerts");
 const safetySettings = require("../services/safetySettings");
 const createNotification = require("../utils/notificationHelper");
+const SafetyObservation = require("../models/SafetyObservation");
+const images = require("../services/confessionImages");
 
 const router = express.Router();
 router.use(auth, adminOnly);
@@ -115,6 +117,11 @@ async function setStatus(confessionId, commentId, status, reason) {
     return true;
   }
   const r = await Confession.updateOne({ _id: confessionId }, { $set: { status, statusReason: reason, statusAt: new Date() } });
+  // a removed confession's image is deleted from Cloudinary (P4-1 follow-up)
+  if (status === "removed") {
+    const doc = await Confession.findById(confessionId).select("image").lean();
+    if (doc?.image) setImmediate(() => images.deleteImage(doc.image, "confession removed by an admin"));
+  }
   return (r.matchedCount ?? r.n ?? 1) > 0;
 }
 
@@ -209,6 +216,34 @@ router.post("/:reportId/author", async (req, res) => {
   }
 });
 
+// GET /observed?days=7&limit=100 (observe mode, P4-1 follow-up): what the checks would have done on real posts, comments
+// and reports (nothing acted). Items where enforcement would have acted, newest first, plus counts by reason and by
+// outcome, and how many items were checked in all.
+router.get("/observed", async (req, res) => {
+  try {
+    const days = Math.min(90, Math.max(1, parseInt(req.query.days, 10) || 7));
+    const limit = Math.min(500, Math.max(1, parseInt(req.query.limit, 10) || 100));
+    const since = new Date(Date.now() - days * 864e5);
+    const all = await SafetyObservation.find({ createdAt: { $gte: since } }).select("+author").sort({ createdAt: -1 }).lean();
+    const acted = all.filter((o) => o.wouldHave !== "none");
+    const byReason = {};
+    const byOutcome = {};
+    for (const o of acted) {
+      byOutcome[o.wouldHave] = (byOutcome[o.wouldHave] || 0) + 1;
+      for (const r of o.reasons || []) byReason[r.code] = (byReason[r.code] || 0) + 1;
+    }
+    const items = acted.slice(0, limit).map((o) => ({
+      id: String(o._id), kind: o.kind, verdict: o.verdict, wouldHave: o.wouldHave, reasons: o.reasons || [], severe: !!o.severe, aiOk: o.aiOk !== false,
+      text: o.text || "", image: o.image || "", confessionId: o.confessionId ? String(o.confessionId) : null, commentId: o.commentId ? String(o.commentId) : null,
+      author: ref(o.author), createdAt: o.createdAt,
+    }));
+    ok(res, { days, checked: all.length, wouldHaveActed: acted.length, byOutcome, byReason, items });
+  } catch (e) {
+    console.error(`[admin-safety] observed failed: ${e.name}`);
+    fail(res, 500, "SERVER_ERROR", "Something went wrong");
+  }
+});
+
 router.get("/settings", async (req, res) => {
   try { ok(res, await safetySettings.get()); } catch (e) { fail(res, 500, "SERVER_ERROR", "Something went wrong"); }
 });
@@ -217,9 +252,10 @@ router.put("/settings", async (req, res) => {
   try {
     const before = await safetySettings.get();
     const after = await safetySettings.save(req.body || {}, req.user._id);
-    await actionLog.recordSafe({ admin: req.user._id, action: "safety.settings.update", targetType: "SafetySettings", targetId: "confessions", before: { reportThreshold: before.reportThreshold, bannedWords: before.bannedWords.length, helplines: before.helplines.length, suspendOnSingleEvidenceReport: before.suspendOnSingleEvidenceReport }, after: { reportThreshold: after.reportThreshold, bannedWords: after.bannedWords.length, helplines: after.helplines.length, suspendOnSingleEvidenceReport: after.suspendOnSingleEvidenceReport }, reason: String(req.body?.reason || "").slice(0, 300), requestId: req.id });
+    await actionLog.recordSafe({ admin: req.user._id, action: "safety.settings.update", targetType: "SafetySettings", targetId: "confessions", before: { mode: before.mode, reportThreshold: before.reportThreshold, bannedWords: before.bannedWords.length, helplines: before.helplines.length, suspendOnSingleEvidenceReport: before.suspendOnSingleEvidenceReport }, after: { mode: after.mode, reportThreshold: after.reportThreshold, bannedWords: after.bannedWords.length, helplines: after.helplines.length, suspendOnSingleEvidenceReport: after.suspendOnSingleEvidenceReport }, reason: String(req.body?.reason || "").slice(0, 300), requestId: req.id });
     ok(res, after);
   } catch (e) {
+    if (e.code === "BAD_MODE") return fail(res, 400, "BAD_MODE", e.message);
     console.error(`[admin-safety] settings failed: ${e.name}`);
     fail(res, 500, "SERVER_ERROR", "Something went wrong");
   }

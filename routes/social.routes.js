@@ -1404,16 +1404,21 @@ const myIdOf = (req) => (isGuestReq(req) ? '' : String(req.user?._id || req.user
 // a comment others may see: live (or written before statuses existed); my own held comment is shown to me
 const commentVisible = (c, meId) => Confession.isLive(c) || (!!meId && String(c?.user?._id || c?.user || '') === meId);
 // the confessions a viewer may see: live ones, plus their own held ("under review") ones
+// the sender of confession mention notifications: no real account, so nobody learns who commented
+const ANON_CONFESSION_SENDER = new mongoose.Types.ObjectId('000000000000000000000a00');
 const confessionCheck = require('../services/confessionCheck');
 const confessionStrikes = require('../services/confessionStrikes');
 const safetyAlerts = require('../services/safetyAlerts');
 const safetySettings = require('../services/safetySettings');
+const safetyObserve = require('../services/safetyObserve');
+const confessionImages = require('../services/confessionImages');
 const { perUser } = require('../utils/userRateLimit');
 // per-user limits only for students with the flag on (everyone else: exactly as before)
 const limitIfSafety = (name) => { const lim = perUser(name); return (req, res, next) => (safetyOn(req) ? lim(req, res, next) : next()); };
 const banReply = (res, until) => {
   const msg = `you can't post confessions or comments until ${until.toISOString().slice(0, 16).replace('T', ' ')} (community rules).`;
-  return res.status(403).json({ code: 'CONFESSION_BANNED', until, error: msg, message: msg });
+  const appeal = require('../services/accountStatus').appealEmail();
+  return res.status(403).json({ code: 'CONFESSION_BANNED', until, error: msg, message: msg, ...(appeal ? { appealEmail: appeal } : {}) });
 };
 // a pre-check that says "edit": 422, with a plain sentence older apps can show (error / message)
 const needsEditReply = (res, result, blocked) => {
@@ -1662,9 +1667,10 @@ router.post('/confessions/comment/:id', auth, limitIfSafety('confession_comment'
       return res.status(404).json({ error: "Confession not found" });
     }
 
-    // confession safety (plan P4-1, flag confessionSafety): ban, then the pre-post check. Flag off: as before.
+    // confession safety (plan P4-1): as for posts, by the admin mode (enforce / observe / off) and the flag
+    const safetyMode = (await safetySettings.get()).mode;
     let commentStatus = null;
-    if (safetyOn(req)) {
+    if (safetyMode === 'enforce' && safetyOn(req)) {
       const meDoc = await User.findById(req.user._id).select('confessionBanUntil').lean();
       const banned = confessionStrikes.bannedUntil(meDoc);
       if (banned) return banReply(res, banned);
@@ -1714,6 +1720,10 @@ router.post('/confessions/comment/:id', auth, limitIfSafety('confession_comment'
 
     confession.comments.push(newComment);
     await confession.save();
+    if (safetyMode === 'observe') {
+      const saved = confession.comments[confession.comments.length - 1];
+      setImmediate(() => safetyObserve.observePost({ kind: 'comment', text: text.trim(), universityId: confession.university, userId: req.user._id, confessionId: confession._id, commentId: saved?._id }));
+    }
 
     const updatedConfession = await Confession.findById(req.params.id)
       .populate('comments.user', 'name profileImage')
@@ -1743,15 +1753,17 @@ router.post('/confessions/comment/:id', auth, limitIfSafety('confession_comment'
     // ✅ Send MENTION notifications (only for mentions — no auto-reply notify, since anonymous)
     const previewText = text.length > 30 ? text.substring(0, 30) + "..." : text;
     const held = commentStatus === 'pending';
-    // held comments notify nobody; with confession safety on the mention doesn't name the commenter (plan P4-1)
+    // held comments notify nobody. Confessions are anonymous, so the mention never names the commenter, for everyone
+    // (owner, P4-1 follow-up): anonymous text, and the sender is a fixed id that matches no account (the app then shows
+    // "Someone" and opens no profile).
     if (validMentions.length > 0 && !held) {
       for (const mentionedId of validMentions) {
         try {
           await createNotification(
             mentionedId,
-            req.user._id,
+            ANON_CONFESSION_SENDER,
             'mention',
-            commentStatus ? `someone mentioned you in a confession: "${previewText}"` : `${req.user.name} mentioned you in a confession: "${previewText}"`,
+            `someone mentioned you in a confession: "${previewText}"`,
             null // No postId since it's a confession
           );
         } catch (notifErr) {
@@ -1976,15 +1988,20 @@ router.post('/confessions/create', auth, limitIfSafety('confession_post'), async
       return res.status(400).json({ error: "add your university in your profile to post confessions" });
     }
 
-    // confession safety (plan P4-1, flag confessionSafety): ban, then the pre-post check. Flag off: as before.
+    // confession safety (plan P4-1). Admin mode "enforce" (default): ban, then the pre-post check, for accounts with the
+    // confessionSafety flag. "observe": every post is checked after it's saved and the decision logged, nothing acts.
+    // "off", or the flag off: as before.
+    const safetyMode = (await safetySettings.get()).mode;
     let safety = null; // { status, statusReason, support }
-    if (safetyOn(req)) {
+    if (safetyMode === 'enforce' && safetyOn(req)) {
       const banned = confessionStrikes.bannedUntil(currentUser);
       if (banned) return banReply(res, banned);
       const result = await confessionCheck.check({ text: text || '', image: image || '', universityId: currentUser.university?._id });
       if (result.verdict === 'edit') {
         const blocked = await confessionStrikes.noteBlocked(req.user._id, { reason: result.reasons.map((r) => r.code).join(', '), content: text });
         alertIfSevere(result, req.user._id, text, '');
+        // the app uploaded the image before posting: it's not used now (P4-1 follow-up)
+        if (image) setImmediate(() => confessionImages.deleteImage(image, 'post blocked at the pre-check'));
         return needsEditReply(res, result, blocked);
       }
       if (result.verdict === 'hold' || result.verdict === 'selfharm') {
@@ -2008,6 +2025,11 @@ router.post('/confessions/create', auth, limitIfSafety('confession_post'), async
     });
 
     await confession.save();
+
+    // observe mode: check in the background and log what would have happened (nothing acts)
+    if (safetyMode === 'observe') {
+      setImmediate(() => safetyObserve.observePost({ kind: 'confession', text: text || '', image: image || '', universityId: currentUser.university?._id, userId: req.user._id, confessionId: confession._id }));
+    }
 
     // held ("under review"): no push, no points, nothing public. Self-harm: support for the author, e-mail to admins.
     if (safety && safety.status === 'pending') {

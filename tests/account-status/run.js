@@ -99,6 +99,19 @@ const login = (k, pw = PW) => call("POST", "/api/auth/login", { body: { email: e
   r = await call("POST", "/api/auth/signup/verify-otp", { body: { userId: String(ids.act), otp: "123456" } });
   check("verify-otp for a verified active account → signs in as before", r.status === 200 && !!r.json?.token, r.text.slice(0, 120));
 
+  // appeals (P4-1 follow-up): SAFETY_APPEAL_EMAIL goes into the locked replies; unset or invalid = no field
+  r = await login("ban");
+  check("no SAFETY_APPEAL_EMAIL: no appealEmail in the reply", r.status === 403 && !("appealEmail" in (r.json || {})));
+  process.env.SAFETY_APPEAL_EMAIL = "safety@gettdc.pk";
+  r = await login("ban");
+  check("SAFETY_APPEAL_EMAIL set: login 403 carries appealEmail", r.status === 403 && r.json?.appealEmail === "safety@gettdc.pk", r.text);
+  r = await probe("sus");
+  check("…and the 401 on a request too", r.status === 401 && r.json?.appealEmail === "safety@gettdc.pk", r.text);
+  process.env.SAFETY_APPEAL_EMAIL = "not an address";
+  r = await login("ban");
+  check("an invalid address is never sent", r.status === 403 && !("appealEmail" in (r.json || {})));
+  delete process.env.SAFETY_APPEAL_EMAIL;
+
   process.env.FLAG_ACCOUNT_STATUS_ENFORCE = "off";
   r = await probe("ban");
   check("kill switch (off) → banned allowed again at once", r.status === 200);

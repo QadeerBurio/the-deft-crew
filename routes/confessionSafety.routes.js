@@ -23,6 +23,8 @@ const strikes = require("../services/confessionStrikes");
 const alerts = require("../services/safetyAlerts");
 const settings = require("../services/safetySettings");
 const { perUser } = require("../utils/userRateLimit");
+const observe = require("../services/safetyObserve");
+const images = require("../services/confessionImages");
 
 const router = express.Router();
 const REASONS = Report.schema.path("reason").enumValues;
@@ -101,12 +103,23 @@ async function report(req, res, { confessionId, commentId = null }) {
     return res.status(201).json({ success: true, reportId: rep._id, outcome: "under_review", message: "thank you. our team has been told." });
   }
 
+  // admin mode "observe": the report is stored and re-checked, and what would have happened is logged; nothing is
+  // hidden, removed or struck. "off": stored for the admin Safety page only.
+  if (s.mode !== "enforce") {
+    await count();
+    if (s.mode === "observe") {
+      setImmediate(() => observe.observeReport({ reportId: rep._id, confessionId: c._id, commentId, userId: authorId, text, evidence, universityId: c.university, uniqueReporters: unique, threshold: s.reportThreshold }));
+    }
+    return res.status(201).json({ success: true, reportId: rep._id, outcome: "received", message: "thank you. we'll look at it." });
+  }
+
   if (evidence) {
     await setItem("hidden", "report_with_evidence");
     const r = await check.recheck({ text: evidence, universityId: c.university });
     const confirmedRules = r.confirmed;
     if (confirmedRules) {
       await setItem("removed", `confirmed: ${r.reasons.join(", ")}`);
+      if (!cm && c.image) setImmediate(() => images.deleteImage(c.image, "confession removed after a confirmed report"));
       const severe = r.severe || s.suspendOnSingleEvidenceReport;
       const st = await strikes.addStrike(authorId, { reason: `report confirmed: ${r.reasons.join(", ")}`, ref: String(rep._id), severe, content: text, evidence, contentId: String(c._id) });
       await Report.updateOne({ _id: rep._id }, { $set: { status: "resolved", actionTaken: st.action === "suspended" ? "user_suspended" : "content_removed", resolvedAt: new Date(), recheck: { confirmed: true, reasons: r.reasons, at: new Date() } } });
@@ -144,6 +157,18 @@ const wrap = (fn) => async (req, res) => {
 
 router.post("/confessions/:id/report", auth, gate, limit, wrap((req, res) => report(req, res, { confessionId: req.params.id })));
 router.post("/confessions/comment/:postId/:commentId/report", auth, gate, limit, wrap((req, res) => report(req, res, { confessionId: req.params.postId, commentId: req.params.commentId })));
+
+// POST /confessions/precheck { text } (P4-1 follow-up): the text check before the app uploads an image, so a post
+// that needs an edit never leaves an unused image behind. Only "ok" or "edit" (+ reasons): holds and self-harm are
+// decided by the real post. Nothing is stored and no strike or ban counts. Mode observe / off: always "ok".
+const precheckLimit = perUser("confession_precheck");
+router.post("/confessions/precheck", auth, gate, precheckLimit, wrap(async (req, res) => {
+  const text = String(req.body?.text || "").slice(0, 2000);
+  const s = await settings.get();
+  if (s.mode !== "enforce" || !text.trim()) return res.json({ verdict: "ok", reasons: [], mode: s.mode });
+  const r = await check.check({ text, universityId: req.user?.university?._id || req.user?.university || null });
+  res.json(r.verdict === "edit" ? { verdict: "edit", reasons: r.reasons, mode: s.mode } : { verdict: "ok", reasons: [], mode: s.mode });
+}));
 
 const mute = (on) => wrap(async (req, res) => {
   if (!isId(req.params.id)) return notFound(res);

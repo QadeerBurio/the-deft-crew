@@ -27,10 +27,12 @@ const mod = (text) => {
   const t = String(text || "");
   if (/\[fail\]/.test(t)) throw new Error("boom");
   if (/\[slow\]/.test(t)) return new Promise(() => {});
-  return { results: [{ flagged: true, categories: { "self-harm": /\[sh\]/.test(t), sexual: /\[sex\]/.test(t), "harassment/threatening": /\[threat\]/.test(t), hate: false, harassment: false, violence: false } }] };
+  return { results: [{ flagged: true, categories: { "self-harm": /\[sh\]/.test(t), sexual: /\[sex\]|nsfw\.jpg/.test(t), "harassment/threatening": /\[threat\]/.test(t), hate: false, harassment: false, violence: false, "violence/graphic": /gore\.jpg/.test(t) } }] };
 };
+// what the moderation call received (the image goes in as image_url, like the real API)
+const modInputs = [];
 const fakeAi = {
-  moderations: { create: async ({ input }) => mod(input.map((x) => x.text || "").join(" ")) },
+  moderations: { create: async ({ model, input }) => { modInputs.push({ model, input }); return mod(input.map((x) => x.text || x.image_url?.url || "").join(" ")); } },
   chat: { completions: { create: async ({ messages }) => {
     const t = messages[1].content;
     if (/\[fail\]/.test(t)) throw new Error("boom");
@@ -99,6 +101,19 @@ const tick = (ms = 20) => new Promise((r) => setTimeout(r, ms));
     r = await post(token(id, "student"), "he is such a Chamcha");
     check("admin banned word → 422 profanity", r.status === 422 && r.json.reasons.some((x) => x.code === "profanity"), r.text); }
 
+  console.log("-- images go through omni-moderation");
+  modInputs.length = 0;
+  const imgId = oid(); fake.STORE.get(coll("User")).push(user(imgId, "student", "Img Clean", { university: U })); flags.applyAdminAccess("confessionSafety", String(imgId), true);
+  r = await post(token(imgId, "student"), "look at this", { image: "https://res.cloudinary.com/decaxpera/image/upload/v1/ok.jpg" });
+  const sent = modInputs[0];
+  check("the image is sent to omni-moderation-latest as image_url, with the text", sent && sent.model === "omni-moderation-latest" && sent.input.some((x) => x.type === "image_url" && x.image_url.url.endsWith("/ok.jpg")) && sent.input.some((x) => x.type === "text"), JSON.stringify(sent));
+  check("…a clean image posts (201, live)", r.status === 201 && conf((c) => c.text === "look at this")[0]?.status === "live", r.text);
+  for (const [name, file, code] of [["sexual image", "nsfw.jpg", "sexual"], ["graphic image", "gore.jpg", "graphic"]]) {
+    const id = oid(); fake.STORE.get(coll("User")).push(user(id, "student", `Img ${name}`, { university: U })); flags.applyAdminAccess("confessionSafety", String(id), true);
+    r = await post(token(id, "student"), `harmless words ${name}`, { image: `https://res.cloudinary.com/decaxpera/image/upload/v1/${file}` });
+    check(`${name} with harmless text → 422 NEEDS_EDIT (${code})`, r.status === 422 && r.json?.reasons?.some((x) => x.code === code), r.text);
+  }
+
   console.log("-- safety e-mails at the pre-check");
   await tick(50);
   const dox = mails.find((m) => /doxxing/.test(m.subject));
@@ -151,6 +166,11 @@ const tick = (ms = 20) => new Promise((r) => setTimeout(r, ms));
   check("comment ok → 200, live", r.status === 200 && !r.json?.held, r.text);
   const note = rows("SocialNotification", (n) => String(n.recipient || n.user || n.to) === String(ids.B) || /mentioned you in a confession/.test(n.message || n.text || ""));
   check("…the mention doesn't name the commenter (flag on)", note.length > 0 && note.every((n) => !/Ayesha/.test(JSON.stringify(n))) && note.some((n) => /someone mentioned you/.test(JSON.stringify(n))), JSON.stringify(note));
+  check("…and its sender is no real account (not the commenter)", note.every((n) => String(n.sender) === "000000000000000000000a00"), JSON.stringify(note.map((n) => n.sender)));
+  const before = rows("SocialNotification").length;
+  r = await call("POST", `/api/social/confessions/comment/${live._id}`, { tok: T.O, body: { text: "hey @Bilal", mentions: [String(ids.B)] } });
+  const fresh = rows("SocialNotification").slice(before);
+  check("flag off too: the mention is anonymous (text and sender), for everyone", r.status === 200 && fresh.length === 1 && /^someone mentioned you in a confession/.test(fresh[0].text || fresh[0].message || "") && String(fresh[0].sender) === "000000000000000000000a00" && !/Omar/.test(JSON.stringify(fresh[0])), JSON.stringify(fresh));
 
   console.log("-- rate limit (flag on only)");
   process.env.RATE_LIMIT_CONFESSION_POST_MAX = "2";
