@@ -12,7 +12,7 @@ const flags = require("../config/featureFlags");
 function lockOf(user, now = new Date()) {
   if (!user) return { locked: false };
   if (!flags.isEnabled("accountStatusEnforce", { id: String(user._id || user.id || ""), role: user.role })) return { locked: false };
-  if (user.role === "admin") return { locked: false };
+  if (require("./adminAccess").isAdminAccount(user)) return { locked: false }; // an admin account is never locked out (its admin access can be paused instead)
   if (user.accountStatus === "banned") {
     const message = "This account has been closed for breaking tdc's community rules.";
     return { locked: true, code: "ACCOUNT_BANNED", status: "banned", message, until: null };

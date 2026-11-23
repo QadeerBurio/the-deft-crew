@@ -301,7 +301,7 @@ router.get("/:brandId", auth, async (req, res) => {
     // If brand is not approved and user is not admin or the brand owner
     if (brand.brandApprovalStatus !== 'approved') {
       const requestingUser = await User.findById(req.userId);
-      if (requestingUser.role !== 'admin' && req.userId !== brand._id.toString()) {
+      if (!(await require("../services/adminAccess").allowedFor(req.userId, "brands.view", "GET /api/brands/:brandId")) && req.userId !== brand._id.toString()) {
         return res.status(403).json({ 
           success: false,
           message: "This brand is not yet approved" 
@@ -330,7 +330,7 @@ router.get("/:brandId/offers/details", auth, async (req, res) => {
     // it lists the students who claimed (name, e-mail, roll number): the brand itself or an admin only
     if (String(req.params.brandId) !== String(req.userId)) {
       const requester = mongoose.Types.ObjectId.isValid(String(req.userId)) ? await User.findById(req.userId).select("role").lean() : null;
-      if (requester?.role !== "admin") return res.status(403).json({ success: false, message: "Not allowed" });
+      if (!(await require("../services/adminAccess").allowedFor(req.userId, "brands.view", "GET /api/brands/:brandId/offers/details"))) return res.status(403).json({ success: false, message: "Not allowed" });
     }
     const brand = await User.findOne({ 
       _id: req.params.brandId,
@@ -469,5 +469,12 @@ router.get("/brand/:brandId", async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
+
+// Phase A: the permission each admin route needs (middleware/adminAccess.js; shadow mode until adminRbacEnforce).
+// { inline }: an own-or-admin route; its handler checks the permission itself.
+require("../middleware/adminAccess").applyPermissions(router, {
+  "GET /:brandId": {"inline":"brands.view"},
+  "GET /:brandId/offers/details": "brands.view",
+}, "brands.routes.js");
 
 module.exports = router;

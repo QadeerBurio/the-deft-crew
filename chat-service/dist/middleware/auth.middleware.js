@@ -91,6 +91,8 @@ const authMiddleware = async (req, res, next) => {
             name: userDoc.name || 'Student',
             isGuest: false,
             university: userDoc.university ? userDoc.university.toString() : undefined,
+            dbRole: userDoc.role,
+            adminAccess: userDoc.adminAccess,
         };
         next();
     }

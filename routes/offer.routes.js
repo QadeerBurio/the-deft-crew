@@ -304,7 +304,7 @@ router.post('/redeem-payment', auth, async (req, res) => {
 
     const offer = await Offer.findById(offerId);
     if (!offer) return res.status(404).json({ message: 'Offer not found' });
-    if (requester.role !== 'admin' && String(offer.brand) !== String(req.userId)) {
+    if (!(await require("../services/adminAccess").allowedFor(req.userId, "offers.manage", "POST /api/offers/redeem-payment")) && String(offer.brand) !== String(req.userId)) {
       return res.status(403).json({ message: 'This offer belongs to another brand' });
     }
     if (isArchived(offer)) return res.status(410).json({ message: "This offer has ended" });
@@ -469,7 +469,7 @@ router.post('/redeem-payment', auth, async (req, res) => {
 router.get("/brand/:brandId", auth, async (req, res) => {
   try {
     const cacheKey = `offers:brand:${req.params.brandId}`;
-    const seesAll = req.userRole === "admin" || (req.userRole === "brand" && String(req.userId) === String(req.params.brandId));
+    const seesAll = (await require("../services/adminAccess").allowedFor(req.userId, "brands.view", "GET /api/offers/brand/:brandId")) || (req.userRole === "brand" && String(req.userId) === String(req.params.brandId));
     const send = (offers) =>
       res.json(seesAll ? offers : offers.map((o) => offerForStudent(o, req.isGuest ? null : req.userId)));
 
@@ -1009,7 +1009,7 @@ router.post("/scan-processed", auth, async (req, res) => {
       return res.status(404).json({ success: false, message: "Scan not found" });
     }
     const filter = { student: studentId, status: 'pending' };
-    if (requester.role !== "admin") filter.brand = req.userId; // a brand closes only its own scans
+    if (!(await require("../services/adminAccess").allowedFor(req.userId, "offers.manage", "POST /api/offers/scan-processed"))) filter.brand = req.userId; // a brand closes only its own scans
     const r = await PendingScan.updateMany(filter, { $set: { status: 'processed', processedAt: new Date() } });
     const found = r.modifiedCount > 0;
     
@@ -1067,7 +1067,7 @@ router.get("/student/:studentId", auth, async (req, res) => {
     // a student's details: their own, or for an admin
     if (String(req.params.studentId) !== String(req.userId)) {
       const requester = mongoose.Types.ObjectId.isValid(String(req.userId)) ? await User.findById(req.userId).select("role").lean() : null;
-      if (requester?.role !== "admin") return res.status(403).json({ message: "Not allowed" });
+      if (!(await require("../services/adminAccess").allowedFor(req.userId, "students.view", "GET /api/offers/student/:studentId"))) return res.status(403).json({ message: "Not allowed" });
     }
     const user = await User.findById(req.params.studentId)
       .select('name email rollNo university')
@@ -1342,7 +1342,7 @@ router.get("/brand/:brandId/redemptions", auth, async (req, res) => {
     if (!requester) {
       return res.status(403).json({ message: "Unauthorized" });
     }
-    if (requester.role !== 'admin' && requester.role !== 'brand') {
+    if (!(await require("../services/adminAccess").allowedFor(req.userId, "brands.view", "GET /api/offers/brand/:brandId/redemptions")) && requester.role !== 'brand') {
       return res.status(403).json({ message: "Only admins or the brand can view this" });
     }
     if (requester.role === 'brand' && req.userId !== brandId) {
@@ -1402,7 +1402,7 @@ router.get("/brand/:brandId/redemptions", auth, async (req, res) => {
 router.get("/admin/brands-revenue", auth, async (req, res) => {
   try {
     const admin = await User.findById(req.userId).lean().select('role');
-    if (!admin || admin.role !== 'admin') {
+    if (!(await require("../services/adminAccess").allowedFor(req.userId, "revenue.view", "GET /api/offers/admin/brands-revenue"))) {
       return res.status(403).json({ message: "Only admins allowed" });
     }
     const { testRule, realUserFilter, ruleConfigured } = require("../services/analytics/accountRules");
@@ -1485,5 +1485,16 @@ router.get("/admin/brands-revenue", auth, async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 });
+
+// Phase A: the permission each admin route needs (middleware/adminAccess.js; shadow mode until adminRbacEnforce).
+// { inline }: an own-or-admin route; its handler checks the permission itself.
+require("../middleware/adminAccess").applyPermissions(router, {
+  "GET /admin/brands-revenue": "revenue.view",
+  "POST /redeem-payment": {"inline":"offers.manage"},
+  "GET /brand/:brandId": {"inline":"brands.view"},
+  "POST /scan-processed": {"inline":"offers.manage"},
+  "GET /student/:studentId": {"inline":"students.view"},
+  "GET /brand/:brandId/redemptions": {"inline":"brands.view"},
+}, "offer.routes.js");
 
 module.exports = router;

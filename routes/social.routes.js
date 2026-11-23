@@ -3,6 +3,8 @@
 const express = require('express');
 const router = express.Router();
 const auth = require('../middleware/auth.middleware');
+// Phase A: the old social reports screens (admin): reading needs safety.view, deciding safety.act
+const REPORTS_PERMISSION = { GET: "safety.view", PUT: "safety.act", POST: "safety.act" };
 const Post = require('../models/Post');
 const Confession = require('../models/Confession');
 const User = require('../models/User');
@@ -318,7 +320,7 @@ router.get('/user/blocked', auth, async (req, res) => {
 
 router.get('/admin/reports/pending-count', auth, async (req, res) => {
   try {
-    if (req.user.role !== 'admin') {
+    if (!require("../services/adminAccess").adminCan(req, REPORTS_PERMISSION[req.method] || "safety.view")) {
       return res.status(403).json({ error: "Admin access required" });
     }
 
@@ -336,7 +338,7 @@ router.get('/admin/reports/pending-count', auth, async (req, res) => {
 
 router.get('/admin/reports', auth, async (req, res) => {
   try {
-    if (req.user.role !== 'admin') {
+    if (!require("../services/adminAccess").adminCan(req, REPORTS_PERMISSION[req.method] || "safety.view")) {
       return res.status(403).json({ error: "Admin access required" });
     }
 
@@ -376,7 +378,7 @@ router.get('/admin/reports', auth, async (req, res) => {
 
 router.get('/admin/reports/:reportId', auth, async (req, res) => {
   try {
-    if (req.user.role !== 'admin') {
+    if (!require("../services/adminAccess").adminCan(req, REPORTS_PERMISSION[req.method] || "safety.view")) {
       return res.status(403).json({ error: "Admin access required" });
     }
 
@@ -412,7 +414,7 @@ router.get('/admin/reports/:reportId', auth, async (req, res) => {
 
 router.put('/admin/reports/:reportId', auth, async (req, res) => {
   try {
-    if (req.user.role !== 'admin') {
+    if (!require("../services/adminAccess").adminCan(req, REPORTS_PERMISSION[req.method] || "safety.view")) {
       return res.status(403).json({ error: "Admin access required" });
     }
 
@@ -448,7 +450,7 @@ router.put('/admin/reports/:reportId', auth, async (req, res) => {
 
 router.post('/admin/reports/:reportId/action', auth, async (req, res) => {
   try {
-    if (req.user.role !== 'admin') {
+    if (!require("../services/adminAccess").adminCan(req, REPORTS_PERMISSION[req.method] || "safety.view")) {
       return res.status(403).json({ error: "Admin access required" });
     }
 
@@ -495,6 +497,7 @@ router.post('/admin/reports/:reportId/action', auth, async (req, res) => {
         break;
 
       case 'suspend_user':
+        if (!require("../services/adminAccess").adminCan(req, "students.suspend")) return res.status(403).json(require("../middleware/adminAccess").DENIED("students.suspend"));
         reportedUser.accountStatus = 'suspended';
         reportedUser.suspensionReason = reason || `Reported for ${report.reason}`;
         reportedUser.suspensionExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
@@ -504,6 +507,7 @@ router.post('/admin/reports/:reportId/action', auth, async (req, res) => {
         break;
 
       case 'ban_user':
+        if (!require("../services/adminAccess").adminCan(req, "students.suspend")) return res.status(403).json(require("../middleware/adminAccess").DENIED("students.suspend"));
         reportedUser.accountStatus = 'banned';
         reportedUser.suspensionReason = reason || `Permanently banned for ${report.reason}`;
         await reportedUser.save();
@@ -535,7 +539,7 @@ router.post('/admin/reports/:reportId/action', auth, async (req, res) => {
 
 router.get('/admin/reports/stats', auth, async (req, res) => {
   try {
-    if (req.user.role !== 'admin') {
+    if (!require("../services/adminAccess").adminCan(req, REPORTS_PERMISSION[req.method] || "safety.view")) {
       return res.status(403).json({ error: "Admin access required" });
     }
 
@@ -1394,7 +1398,7 @@ router.get('/posts/:id', auth, async (req, res) => {
 });
 
 // -------------------- CONFESSION VISIBILITY --------------------
-const isAdminUser = (req) => req.userRole === 'admin';
+const isAdminUser = (req) => require("../services/adminAccess").adminCan(req, "safety.view"); // Phase A: an admin with safety.view sees every confession
 const isGuestReq = (req) => !!req.isGuest || req.userId === 'guest-user';
 
 // confession safety (plan P4-1): the flag is per user (the author, reporter or viewer acting)
@@ -3456,5 +3460,18 @@ router.post('/notifications/create-message-notif', auth, async (req, res) => {
     res.status(500).json({ error: 'Failed to create notification' });
   }
 });
+
+// Phase A: the permission each admin route needs (middleware/adminAccess.js; shadow mode until adminRbacEnforce).
+// { inline }: an own-or-admin route; its handler checks the permission itself.
+require("../middleware/adminAccess").applyPermissions(router, {
+  "GET /admin/reports/pending-count": "safety.view",
+  "GET /admin/reports": "safety.view",
+  "GET /admin/reports/:reportId": "safety.view",
+  "PUT /admin/reports/:reportId": "safety.act",
+  "POST /admin/reports/:reportId/action": "safety.act",
+  "GET /admin/reports/stats": "safety.view",
+  "GET /posts/:id": {"inline":"safety.view"},
+  "GET /confessions/feed": {"inline":"safety.view"},
+}, "social.routes.js");
 
 module.exports = router;

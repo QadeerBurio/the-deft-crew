@@ -131,7 +131,7 @@ router.get("/:branchId", auth, async (req, res) => {
     // Only owner or admin can view
     const user = await User.findById(req.userId).lean().select("role");
     if (
-      user?.role !== "admin" &&
+      !(await require("../services/adminAccess").allowedFor(req.userId, "brands.view", "GET /api/branches/:branchId")) &&
       branch.brand.toString() !== req.userId.toString()
     ) {
       return res.status(403).json({ message: "Unauthorized" });
@@ -275,5 +275,11 @@ router.patch("/:branchId/toggle", auth, async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 });
+
+// Phase A: the permission each admin route needs (middleware/adminAccess.js; shadow mode until adminRbacEnforce).
+// { inline }: an own-or-admin route; its handler checks the permission itself.
+require("../middleware/adminAccess").applyPermissions(router, {
+  "GET /:branchId": {"inline":"brands.view"},
+}, "branch.routes.js");
 
 module.exports = router;

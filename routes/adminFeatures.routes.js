@@ -31,7 +31,7 @@ async function requireAdmin(req, res, next) {
   try {
     if (req.isGuest || !isId(req.userId)) return fail(req, res, 401, "SIGN_IN", "Sign in first");
     const u = await User.findById(req.userId).select("role").lean();
-    if (!u || u.role !== "admin") return fail(req, res, 403, "FORBIDDEN", "Admins only");
+    if (!require("../services/adminAccess").isAdminAccount(u)) return fail(req, res, 403, "FORBIDDEN", "Admins only");
     next();
   } catch (err) {
     console.error("[admin-features]", err.message);
@@ -71,5 +71,15 @@ router.post("/bulk", handle(async (req) => access.bulk({
 })));
 
 router.get("/flag/:flag", handle(async (req) => access.listFlag(req.params.flag, { offset: req.query.offset, limit: req.query.limit })));
+
+// Phase A: the permission each admin route needs (middleware/adminAccess.js; shadow mode until adminRbacEnforce)
+require("../middleware/adminAccess").applyPermissions(router, {
+  "GET /flags": "features.manage",
+  "GET /account/:id": "features.manage",
+  "PUT /account/:id/:flag": "features.manage",
+  "PUT /defaults/:flag": "features.manage",
+  "POST /bulk": "features.manage",
+  "GET /flag/:flag": "features.manage",
+}, "adminFeatures.routes.js");
 
 module.exports = router;

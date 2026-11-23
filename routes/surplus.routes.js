@@ -626,5 +626,20 @@ router.post("/admin/brands/:brandId/block", ...admin, handle(async (req, res) =>
   ok(req, res, { brandId: String(req.params.brandId), blocked: r.block.active, reason: r.block.active ? r.block.reason : "", listingsChanged: r.listingsChanged });
 }));
 
+// Phase A: the permission each admin route needs (middleware/adminAccess.js; shadow mode until adminRbacEnforce).
+// { inline }: an own-or-admin route; its handler checks the permission itself.
+require("../middleware/adminAccess").applyPermissions(router, {
+  "GET /admin/orders": "surplus.manage",
+  "GET /admin/no-shows": "surplus.manage",
+  "GET /admin/cases": "surplus.manage",
+  "POST /admin/cases/:id/decide": "surplus.manage",
+  "GET /admin/brands": "surplus.manage",
+  "GET /admin/listings": "surplus.manage",
+  "GET /admin/listings/:id": "surplus.manage",
+  "PATCH /admin/listings/:id": "surplus.manage",
+  "POST /admin/listings/:id/cancel": "surplus.manage",
+  "POST /admin/brands/:brandId/block": "surplus.manage",
+}, "surplus.routes.js");
+
 module.exports = router;
 module.exports.warnIfNoPickupSecret = warnIfNoPickupSecret;

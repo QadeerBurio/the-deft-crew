@@ -11,6 +11,9 @@ export interface AuthenticatedUser {
   name: string;
   isGuest: boolean;
   university?: string;
+  // Phase A: the account's role in the database and its admin access (services/adminAccess.js)
+  dbRole?: string;
+  adminAccess?: unknown;
 }
 
 export interface AuthenticatedRequest extends Request {
@@ -114,6 +117,8 @@ export const authMiddleware = async (
       name: userDoc.name || 'Student',
       isGuest: false,
       university: userDoc.university ? userDoc.university.toString() : undefined,
+      dbRole: userDoc.role,
+      adminAccess: userDoc.adminAccess,
     };
 
     next();

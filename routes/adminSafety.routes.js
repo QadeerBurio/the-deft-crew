@@ -129,7 +129,7 @@ async function accountAction(userId, action, note, adminId) {
   if (!userId) return null;
   const u = await User.findById(userId).select("role accountStatus confessionBanUntil").lean();
   if (!u) return null;
-  if (u.role === "admin" && ["suspend24h", "suspend7d", "ban"].includes(action)) return "admin_not_changed";
+  if (require("../services/adminAccess").isAdminAccount(u) && ["suspend24h", "suspend7d", "ban"].includes(action)) return "admin_not_changed";
   if (action === "warn") {
     try { await createNotification(userId, adminId, "alert", "one of your posts broke tdc's community rules. please read the guidelines before posting again.", null); } catch (e) { /* the decision stands */ }
     return "warned";
@@ -153,6 +153,8 @@ router.post("/:reportId/resolve", async (req, res) => {
   try {
     const { action, note = "" } = req.body || {};
     if (!ACTIONS.includes(action)) return fail(res, 400, "BAD_ACTION", `action: ${ACTIONS.join(" | ")}`);
+    // Phase A: pausing or closing an account needs students.suspend too (safety.act alone isn't enough)
+    if (["suspend24h", "suspend7d", "ban"].includes(action) && !require("../services/adminAccess").adminCan(req, "students.suspend")) return fail(res, 403, "ADMIN_PERMISSION_REQUIRED", "you don't have access to this. ask a super admin.");
     if (!isId(req.params.reportId)) return fail(res, 404, "NOT_FOUND", "Report not found");
     const r = await Report.findById(req.params.reportId).lean();
     if (!r) return fail(res, 404, "NOT_FOUND", "Report not found");
@@ -200,6 +202,8 @@ router.post("/confession/:id/resolve", async (req, res) => {
 // who wrote it: a required reason, every reveal logged (plan: role-gated in Phase A; for now every admin)
 router.post("/:reportId/author", async (req, res) => {
   try {
+    // Phase A: identity.reveal itself, not only the route's map
+    if (!require("../services/adminAccess").adminCan(req, "identity.reveal")) return fail(res, 403, "ADMIN_PERMISSION_REQUIRED", "you don't have access to this. ask a super admin.");
     const reason = String(req.body?.reason || "").trim();
     if (reason.length < 5) return fail(res, 400, "REASON_REQUIRED", "Give a reason (at least 5 characters). Every reveal is logged.");
     if (!isId(req.params.reportId)) return fail(res, 404, "NOT_FOUND", "Report not found");
@@ -260,5 +264,16 @@ router.put("/settings", async (req, res) => {
     fail(res, 500, "SERVER_ERROR", "Something went wrong");
   }
 });
+
+// Phase A: the permission each admin route needs (middleware/adminAccess.js; shadow mode until adminRbacEnforce)
+require("../middleware/adminAccess").applyPermissions(router, {
+  "GET /queue": "safety.view",
+  "GET /observed": "safety.view",
+  "GET /settings": "safety.view",
+  "POST /:reportId/resolve": "safety.act",
+  "POST /confession/:id/resolve": "safety.act",
+  "PUT /settings": "safety.act",
+  "POST /:reportId/author": "identity.reveal",
+}, "adminSafety.routes.js");
 
 module.exports = router;

@@ -45,7 +45,7 @@ const isAdmin = async (req, res, next) => {
       return res.status(403).json({ message: "Access denied. Admins only." });
     }
     const user = await User.findById(req.userId);
-    if (user && user.role === "admin") {
+    if (require("../services/adminAccess").isAdminAccount(user)) { // the role gate; each route's permission: applyPermissions at the end
       next();
     } else {
       res.status(403).json({ message: "Access denied. Admins only." });
@@ -74,7 +74,7 @@ router.get("/users/all", auth, isAdmin, async (req, res) => {
       brands: users.filter(u => u.role === "brand").length,
       employees: users.filter(u => u.role === "employee").length,
       travelers: users.filter(u => u.role === "traveler").length,
-      admins: users.filter(u => u.role === "admin").length,
+      admins: users.filter(u => require("../services/adminAccess").isAdminAccount(u)).length,
     };
 
     res.json({ users, stats });
@@ -191,7 +191,7 @@ router.put("/users/role/:id", auth, isAdmin, async (req, res) => {
     }
 
     const target = mongoose.Types.ObjectId.isValid(String(req.params.id)) ? await User.findById(req.params.id).select("role").lean() : null;
-    if (target && (role === "admin" || target.role === "admin")) {
+    if (target && (role === "admin" || require("../services/adminAccess").isAdminAccount(target))) {
       const allowed = superAdmin.isSuperAdmin(req.userId);
       await superAdmin.logAttempt({ req, action: role === "admin" ? "admin.promote" : "admin.demote", targetId: req.params.id, before: { role: target.role }, after: { role }, allowed });
       if (!allowed) return res.status(403).json(superAdmin.REFUSED);
@@ -229,7 +229,7 @@ router.get("/users/:id/delete-preview", auth, isAdmin, async (req, res) => {
   try {
     if (String(req.params.id) === String(req.userId)) return res.status(400).json({ message: "you can't delete your own account here" });
     const p = await accountDeletion.preview(req.params.id);
-    if (p.role === "admin") return res.status(403).json({ message: "admin accounts can't be deleted" });
+    if (require("../services/adminAccess").isAdminAccount(p)) return res.status(403).json({ message: "admin accounts can't be deleted" });
     res.json({ ...p, enabled: deletionEnabled() });
   } catch (err) {
     deletionError(res, err, "load the deletion preview");
@@ -1303,5 +1303,48 @@ router.post('/broadcast/app-update', auth, isAdmin, async (req, res) => {
   }
 });
 
+
+// Phase A: the permission each admin route needs (middleware/adminAccess.js; shadow mode until adminRbacEnforce)
+require("../middleware/adminAccess").applyPermissions(router, {
+  "GET /users/all": "students.view",
+  "GET /users/:role": "students.view",
+  "GET /users/details/:id": "students.view",
+  "GET /users/password/:id": "students.view",
+  "POST /approve-user/:id": "students.verify",
+  "PUT /users/role/:id": "students.edit",
+  "GET /users/:id/delete-preview": "students.delete",
+  "DELETE /users/:id": "students.delete",
+  "POST /users/create": "students.edit",
+  "GET /users/credentials/:role": "pii.view",
+  "POST /users/reset-password/:id": "students.edit",
+  "POST /add": "offers.manage",
+  "PATCH /toggle/:id": "offers.manage",
+  "DELETE /delete/:id": "offers.manage",
+  "POST /exchange/add": "scholarships.manage",
+  "POST /exchange/bulk-import": "scholarships.manage",
+  "GET /exchange/all-admin": "scholarships.manage",
+  "PUT /exchange/update/:id": "scholarships.manage",
+  "PATCH /exchange/toggle/:id": "scholarships.manage",
+  "DELETE /exchange/delete/:id": "scholarships.manage",
+  "GET /exchange/applications/:programId": "scholarships.manage",
+  "POST /packages/create": "travel.manage",
+  "GET /packages/all": "travel.manage",
+  "DELETE /packages/delete/:id": "travel.manage",
+  "PUT /packages/update/:id": "travel.manage",
+  "GET /pending-cards": "cards.manage",
+  "GET /pending-payments": "cards.manage",
+  "GET /card-stats": "cards.manage",
+  "GET /logistics/:status": "cards.manage",
+  "POST /bulk-update-status": "cards.manage",
+  "POST /approve-payment/:id": "cards.manage",
+  "POST /reject-payment/:id": "cards.manage",
+  "GET /bookings/all": "travel.manage",
+  "PUT /bookings/:id": "travel.manage",
+  "GET /bookings/stats": "travel.manage",
+  "DELETE /bookings/:id": "travel.manage",
+  "GET /jobs/all": "jobs.manage",
+  "PATCH /verify-user/:targetUserId": "students.verify",
+  "POST /broadcast/app-update": "push.send",
+}, "admin.routes.js");
 
 module.exports = router;

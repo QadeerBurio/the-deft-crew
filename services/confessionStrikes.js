@@ -39,7 +39,7 @@ async function addStrike(userId, { reason = "", ref = "", severe = false, conten
   const u = await User.findById(userId).select("+confessionStrikes role confessionBanUntil accountStatus").lean();
   if (!u) return { strikes: 0, action: null, banUntil: null };
   const strikes = (u.confessionStrikes || []).filter((s) => s.at && now - new Date(s.at).getTime() <= STRIKE_WINDOW).length;
-  if ((severe || strikes >= 3) && u.role !== "admin") {
+  if ((severe || strikes >= 3) && !require("./adminAccess").isAdminAccount(u)) {
     const banUntil = await setBan(userId, LONG_BAN, u.confessionBanUntil);
     await User.updateOne({ _id: userId }, { $set: { accountStatus: "suspended", suspensionReason: severe ? `confession safety: ${reason}` : "confession safety: 3 strikes", suspensionExpiry: null } });
     await alerts.send(severe ? "severe" : "suspension", { userId, reason: severe ? reason : `3 strikes (latest: ${reason})`, content, evidence, contentId });
