@@ -91,6 +91,33 @@ const resumeSchema = new mongoose.Schema({
   }],
   interests: [String],
   achievements: [String],
+  // P3-3 (additive, all optional): the sections freshers have. activities = societies, clubs, leadership;
+  // volunteering has the same shape; awards; relevant coursework (strings). Missing on older resumes = empty.
+  activities: [{
+    organisation: { type: String, default: '' },
+    role: { type: String, default: '' },
+    startDate: { type: Date },
+    endDate: { type: Date },
+    current: { type: Boolean, default: false },
+    description: { type: String, default: '' },
+    bullets: [String]
+  }],
+  volunteering: [{
+    organisation: { type: String, default: '' },
+    role: { type: String, default: '' },
+    startDate: { type: Date },
+    endDate: { type: Date },
+    current: { type: Boolean, default: false },
+    description: { type: String, default: '' },
+    bullets: [String]
+  }],
+  awards: [{
+    title: { type: String, default: '' },
+    issuer: { type: String, default: '' },
+    date: { type: Date },
+    note: { type: String, default: '' }
+  }],
+  coursework: [String],
   otherNotes: { type: String, default: '' }, // resume text an upload couldn't place in a section
   // the resume's name: the student's own when nameCustom, else "<Full name> – <title>" (utils/resumeRules)
   name: { type: String, default: '' },
@@ -222,7 +249,9 @@ const resumeSchema = new mongoose.Schema({
     language: { type: String, default: 'en' },
     autoSave: { type: Boolean, default: true },
     saveInterval: { type: Number, default: 30 },
-    defaultTemplate: { type: String, default: 'modern' }
+    defaultTemplate: { type: String, default: 'modern' },
+    // P3-1 / P3-2: "fresher" (no internship or job yet) or "experienced"; missing = experienced (old resumes unchanged)
+    track: { type: String, enum: ['fresher', 'experienced'] }
   },
   completionPercentage: { type: Number, default: 0 },
   isComplete: { type: Boolean, default: false },

@@ -259,6 +259,8 @@ router.post('/', auth, rejectGuest, checkResumeLimit, async (req, res) => {
         saveInterval: req.body.settings.saveInterval || 30,
         defaultTemplate: req.body.settings.defaultTemplate || 'modern'
       };
+      // P3-1: the track chosen at "start fresh" (missing = experienced, as before)
+      if (['fresher', 'experienced'].includes(req.body.settings.track)) cleanData.settings.track = req.body.settings.track;
     }
 
     // the resume's name: the student's own, or (empty) "<Full name> – <title>" from the model's pre-save
@@ -269,7 +271,7 @@ router.post('/', auth, rejectGuest, checkResumeLimit, async (req, res) => {
     }
     if (typeof req.body.otherNotes === 'string') cleanData.otherNotes = req.body.otherNotes.slice(0, 5000);
 
-    const arrayFields = ['education', 'skills', 'workExperience', 'certifications', 'projects', 'languages', 'references', 'interests', 'achievements'];
+    const arrayFields = ['education', 'skills', 'workExperience', 'certifications', 'projects', 'languages', 'references', 'interests', 'achievements', 'activities', 'volunteering', 'awards', 'coursework']; // P3-3: the last four
     arrayFields.forEach(field => {
       if (req.body[field] && Array.isArray(req.body[field])) {
         cleanData[field] = req.body[field].filter(item => item && Object.keys(item).length > 0);
@@ -672,6 +674,8 @@ router.put('/:id', auth, rejectGuest, async (req, res) => {
     }
 
     if (req.body.settings) {
+      // P3-1: a track that isn't one of the two is ignored (never a failed save)
+      if (req.body.settings.track !== undefined && !['fresher', 'experienced'].includes(req.body.settings.track)) delete req.body.settings.track;
       resume.settings = {
         ...resume.settings,
         ...req.body.settings
@@ -686,7 +690,7 @@ router.put('/:id', auth, rejectGuest, async (req, res) => {
     }
     if (typeof req.body.otherNotes === 'string') resume.otherNotes = req.body.otherNotes.slice(0, 5000);
 
-    const arrayFields = ['education', 'skills', 'workExperience', 'certifications', 'projects', 'languages', 'references', 'interests', 'achievements'];
+    const arrayFields = ['education', 'skills', 'workExperience', 'certifications', 'projects', 'languages', 'references', 'interests', 'achievements', 'activities', 'volunteering', 'awards', 'coursework']; // P3-3: the last four
     arrayFields.forEach(field => {
       if (req.body[field] !== undefined) {
         resume[field] = req.body[field];
