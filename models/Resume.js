@@ -156,7 +156,8 @@ const resumeSchema = new mongoose.Schema({
   },
   template: {
     type: String,
-    enum: ['modern', 'classic', 'creative', 'minimal', 'professional', 'modern_ats', 'stanford', 'faang', 'jakes', 'rezi', 'flowcv', 'reactive', 'canva'],
+    // the older ids + the template studio's (P3-6, config/resumeTemplates.js)
+    enum: require('../config/resumeTemplates').TEMPLATE_IDS,
     default: 'modern_ats'
   },
   customStyles: {
@@ -164,7 +165,24 @@ const resumeSchema = new mongoose.Schema({
     accentColor: { type: String, default: '#1E3A8A' },
     headingColor: { type: String, default: '#0F172A' },
     textColor: { type: String, default: '#334155' },
-    bgColor: { type: String, default: '#FFFFFF' }
+    bgColor: { type: String, default: '#FFFFFF' },
+    // P3-6 template studio (all optional; missing = the template's own look). Checked by
+    // config/resumeTemplates.cleanCustomStyles before they are saved.
+    palette: { type: String },
+    fontPair: { type: String },
+    size: { type: String, enum: ['S', 'M', 'L'] },
+    density: { type: String, enum: ['compact', 'normal', 'airy'] },
+    margins: { type: String, enum: ['narrow', 'normal', 'wide'] },
+    headingCase: { type: String, enum: ['upper', 'title'] },
+    headingStyle: { type: String, enum: ['rule', 'bar', 'underline', 'none'] },
+    headingIcons: { type: Boolean },
+    sectionOrder: { type: [String], default: undefined },
+    hiddenSections: { type: [String], default: undefined },
+    headings: { type: mongoose.Schema.Types.Mixed },
+    photo: { on: { type: Boolean }, shape: { type: String, enum: ['circle', 'rounded', 'square'] } },
+    dateFormat: { type: String, enum: ['mon-yyyy', 'mm/yyyy'] },
+    pageSize: { type: String, enum: ['A4', 'Letter'] },
+    linkStyle: { type: String, enum: ['full', 'short'] }
   },
 
   // ==================== CAREER INTELLIGENCE LAYER ====================

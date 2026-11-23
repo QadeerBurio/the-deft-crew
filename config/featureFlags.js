@@ -143,6 +143,9 @@ const FLAGS = {
   // fix everything, ready-to-send check) and speak mode (hold to talk; the audio is transcribed, never stored)
   resumeCoach: { default: false, client: true, grant: { roles: ["student"], label: "Resume coach" } },
   resumeSpeak: { default: false, client: true, grant: { roles: ["student"], label: "Resume speak mode" } },
+  // P3c (under resumeV2): the template studio: the library (approved templates only), gallery, customisation,
+  // recommended row, ATS-safe badges, embedded fonts. Off: the five templates, as today.
+  resumeTemplatesV2: { default: false, client: true, grant: { roles: ["student"], label: "Resume template studio" } },
 };
 
 const JOBS = {
