@@ -72,6 +72,24 @@ async function awardSignupReferral(referrer, user, opts = {}) {
     );
     console.log('[signup] referee +100:', welcomeAward);
 
+    // P2-7 (ambassadorV2 on for the new student): celebrate with the real amount, once
+    if (welcomeAward && !welcomeAward.duplicate) {
+      try {
+        if (require('../../config/featureFlags').isEnabled('ambassadorV2', { id: String(user._id), role: 'student' })) {
+          const first = String(referrer.name || '').trim().split(/\s+/)[0] || 'a friend';
+          await require('./popups').enqueue(String(user._id), {
+            kind: 'referral_welcome', mood: 'hype',
+            line: `you joined with ${first}'s code. +100 pts are yours.`,
+            cta: { label: 'view crew', route: 'Points', params: {} },
+            payload: { referrerId: String(referrer._id), amount: 100 },
+            priority: 30,
+          });
+        }
+      } catch (e) {
+        console.error('[signup] referee popup failed:', e.message);
+      }
+    }
+
     // ── Update verifiedReferralCount on referrer's profile ──
     try {
       const EngagementProfile = require("../../models/EngagementProfile");
@@ -131,6 +149,8 @@ const KEYS = (referrerId, userId) => [`referral_signup_bonus:${userId}`, `referr
  * Gate on and the student still has to confirm their e-mail: pays nothing now (verify-otp pays).
  */
 async function onSignup(referrer, user) {
+  // P2-7: an account that is verified at signup counts toward the referrer's squad this week (flag squadMission)
+  if (user.emailVerified === true) setImmediate(() => require('../crew/squad').evaluate(referrer._id).catch(() => {}));
   if (gateOn(referrer) && user.emailVerified === false) {
     console.log(`[referral] gate: rewards for ${user._id} wait for the e-mail code`);
     return { paid: false, reason: 'waiting_for_email' };
@@ -146,6 +166,8 @@ async function onSignup(referrer, user) {
 async function onEmailVerified(user) {
   try {
     if (!user?.referredBy) return { paid: false, reason: 'no_referrer' };
+    // P2-7: a friend who verified counts toward the referrer's squad this week (flag squadMission; off = nothing)
+    setImmediate(() => require('../crew/squad').evaluate(user.referredBy).catch(() => {}));
     const User = require('../../models/User');
     const referrer = await User.findById(user.referredBy).select('_id role name').lean();
     if (!referrer) return { paid: false, reason: 'no_referrer' };
