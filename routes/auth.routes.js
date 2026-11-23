@@ -157,6 +157,9 @@ const authMiddleware = async (req, res, next) => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     req.userId = decoded.id;
     req.userRole = decoded.role;
+    // suspended / banned accounts (P0-6, flag accountStatusEnforce), as in middleware/auth.middleware.js
+    const lock = await accountStatus.lockOfId(decoded.id);
+    if (lock.locked) return res.status(401).json(accountStatus.lockBody(lock));
     // Phase A (adminSessionsV1): an admin token needs a live session, as in middleware/auth.middleware.js
     const session = await require("../services/adminSessions").checkToken(decoded);
     if (!session.ok) return res.status(401).json({ code: session.code, message: session.message });

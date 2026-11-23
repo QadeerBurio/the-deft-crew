@@ -39,4 +39,12 @@ function lockBody(lock) {
   return { code: lock.code, accountStatus: lock.status, until: lock.until, message: lock.message, error: lock.message, ...(appeal ? { appealEmail: appeal } : {}) };
 }
 
-module.exports = { lockOf, lockBody, appealEmail };
+/** For a route file's own sign-in that has only the token: the account is read only while the flag is configured */
+async function lockOfId(userId, now = new Date()) {
+  if (!flags.pilotConfigured("accountStatusEnforce")) return { locked: false };
+  if (!/^[0-9a-f]{24}$/i.test(String(userId || ""))) return { locked: false };
+  const u = await require("../models/User").findById(userId).select("role accountStatus suspensionExpiry suspensionReason").lean();
+  return lockOf(u, now);
+}
+
+module.exports = { lockOf, lockOfId, lockBody, appealEmail };

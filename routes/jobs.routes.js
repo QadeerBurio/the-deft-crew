@@ -102,6 +102,10 @@ const authMiddleware = async (req, res, next) => {
         req.userId = decoded.id;
         req.userRole = decoded.role;
         req.user = await User.findById(req.userId);
+        // suspended / banned accounts (P0-6, flag accountStatusEnforce), as in middleware/auth.middleware.js: this route
+        // file signs in on its own and missed it
+        const lock = require("../services/accountStatus").lockOf(req.user);
+        if (lock.locked) return res.status(401).json(require("../services/accountStatus").lockBody(lock));
         // Phase A (adminSessionsV1): an admin token needs a live session, as in middleware/auth.middleware.js
         const session = await require("../services/adminSessions").check(decoded, req.user);
         if (!session.ok) return res.status(401).json({ code: session.code, message: session.message });
