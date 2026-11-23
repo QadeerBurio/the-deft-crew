@@ -139,6 +139,10 @@ const FLAGS = {
   // P2-7: "bring your squad": 3 friends who join with your code and verify their e-mail in a Karachi week → a reward
   // (services/crew/squad.js). Off = no mission.
   squadMission: { default: false, client: true, grant: { roles: ["student"], label: "Squad mission" } },
+  // P3b (under resumeV2): the resume coach (tap / chat mode, memory joggers, done-for-you writing, live checks,
+  // fix everything, ready-to-send check) and speak mode (hold to talk; the audio is transcribed, never stored)
+  resumeCoach: { default: false, client: true, grant: { roles: ["student"], label: "Resume coach" } },
+  resumeSpeak: { default: false, client: true, grant: { roles: ["student"], label: "Resume speak mode" } },
 };
 
 const JOBS = {
