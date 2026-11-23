@@ -398,4 +398,17 @@ router.get("/interviews/:id/ics", auth, handle(async (req, res) => {
   res.send(interviews.ics(iv, { jobTitle: ctx.job?.title, company: ctx.job?.companyName }));
 }));
 
+// Phase A: the permission each admin route needs (middleware/adminAccess.js; shadow mode until adminRbacEnforce).
+// { inline }: an own-or-admin route; its handler checks the permission itself.
+require("../middleware/adminAccess").applyPermissions(router, {
+  "GET /employers/me/applications": "hiring.manage",
+  "GET /employers/me/analytics": "hiring.manage",
+  "GET /admin/analytics": "analytics.view",
+  "GET /admin/disputes": "disputes.manage",
+  "GET /admin/applications": "hiring.manage",
+  "GET /admin/interviews": "hiring.manage",
+  "GET /admin/hires": "hiring.manage",
+  "POST /admin/outbox/drain": "hiring.manage",
+}, "career.routes.js");
+
 module.exports = router;

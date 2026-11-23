@@ -127,8 +127,7 @@ async function fullMessage(eventId, tierName) {
 
 // Creator or admin. An event with no creator (imported / CSV) is admin only.
 const canManageEvent = (req, event) => {
-  const role = req.user?.role || req.userRole;
-  if (role === 'admin') return true;
+  if (require("../services/adminAccess").adminCan(req, "events.manage")) return true; // Phase A: an admin with events.manage
   const userId = getUserId(req);
   return !!(event.creator && userId && event.creator.toString() === String(userId));
 };
@@ -836,7 +835,7 @@ router.patch('/registrations/:id/payment', auth, isAdmin, async (req, res) => {
 // POST /admin/tickets/backfill                  admin { apply, includeFree } (sends nothing)
 // ============================================================
 const NO_REG = { message: 'Registration not found', error: 'Registration not found' };
-const isAdminReq = (req) => (req.user?.role || req.userRole) === 'admin';
+const isAdminReq = (req) => require("../services/adminAccess").adminCan(req, "events.manage"); // Phase A: an admin with events.manage
 
 // Public ticket page (the email's "download ticket"): read-only, only ticket fields.
 // Limited per visitor: Railway's proxy adds the visitor's address last in X-Forwarded-For
@@ -1648,4 +1647,24 @@ router.post('/track-external/:eventId', auth, async (req, res) => {
     res.status(500).json({ error: 'Failed to track external event', details: err.message });
   }
 });
+// Phase A: the permission each admin route needs (middleware/adminAccess.js; shadow mode until adminRbacEnforce).
+// { inline }: an own-or-admin route; its handler checks the permission itself.
+require("../middleware/adminAccess").applyPermissions(router, {
+  "PATCH /registrations/:id/payment": "events.manage",
+  "PATCH /registrations/:id/tickets/:code": "events.manage",
+  "POST /registrations/:id/tickets/resend": "events.manage",
+  "POST /admin/tickets/backfill": "events.manage",
+  "DELETE /expired": "events.manage",
+  "GET /admin/registrations": "events.manage",
+  "GET /all-registrations": "events.manage",
+  "GET /admin/registrations.csv": "data.export",
+  "POST /sync": "events.manage",
+  "GET /admin/stats": "events.manage",
+  "PATCH /admin/moderate/:id": "events.manage",
+  "PATCH /expire": "events.manage",
+  "POST /admin/import-csv": "events.manage",
+  "GET /registrations/:id/ticket": {"inline":"events.manage"},
+  "GET /registrations/:eventId": {"inline":"events.manage"},
+}, "event.routes.js");
+
 module.exports = router;

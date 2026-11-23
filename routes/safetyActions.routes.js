@@ -65,7 +65,7 @@ router.post("/action/:token", async (req, res) => {
     if (!u) return res.status(404).type("html").send(page("safety link", "<p>this account no longer exists.</p>"));
     const before = { accountStatus: u.accountStatus || "active" };
     if (a.action === "blacklist") {
-      if (u.role !== "admin") await User.updateOne({ _id: u._id }, { $set: { accountStatus: "banned", suspensionReason: "confession safety: blacklisted" } });
+      if (!require("../services/adminAccess").isAdminAccount(u)) await User.updateOne({ _id: u._id }, { $set: { accountStatus: "banned", suspensionReason: "confession safety: blacklisted" } });
       for (const [kind, value] of [["email", normEmail(u.email)], ["phone", normPhone(u.phone)]]) {
         if (!value) continue;
         try { await Blocklist.create({ kind, hash: sha(value), user: u._id, reason: String(a.reason || "").slice(0, 200) }); }
@@ -74,7 +74,7 @@ router.post("/action/:token", async (req, res) => {
     } else {
       await strikes.restore(u._id);
     }
-    await actionLog.recordSafe({ admin: EMAIL_LINK_ADMIN, action: `safety.${a.action}`, targetType: "User", targetId: String(u._id), before, after: { accountStatus: a.action === "blacklist" && u.role !== "admin" ? "banned" : "active" }, reason: `via safety e-mail link: ${a.reason || ""}`.slice(0, 300) });
+    await actionLog.recordSafe({ admin: EMAIL_LINK_ADMIN, action: `safety.${a.action}`, targetType: "User", targetId: String(u._id), before, after: { accountStatus: a.action === "blacklist" && !require("../services/adminAccess").isAdminAccount(u) ? "banned" : "active" }, reason: `via safety e-mail link: ${a.reason || ""}`.slice(0, 300) });
     res.type("html").send(page("done", `<p>${a.action === "blacklist" ? "the account is banned and its e-mail and phone are blocked." : "the account is active again."}</p>`));
   } catch (e) {
     console.error(`[safety] link action failed: ${e.name}`);

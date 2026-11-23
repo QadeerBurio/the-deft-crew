@@ -37,7 +37,7 @@ async function posterInPilot(job) {
   if (!job.postedBy) return false;
   const u = await User.findById(job.postedBy).select("role").lean();
   if (!u) return false;
-  return u.role === "admin" || (u.role === "employee" && isEnabled("careerMatching", { id: String(job.postedBy), role: "employee" }));
+  return require("../adminAccess").isAdminAccount(u) || (u.role === "employee" && isEnabled("careerMatching", { id: String(job.postedBy), role: "employee" }));
 }
 
 function payloadFor(job, m) {

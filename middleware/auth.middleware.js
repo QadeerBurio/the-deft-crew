@@ -6,7 +6,7 @@ const User = require("../models/User");
 // middleware/): _id, id, role, name, email, university, phone, location, headline. Loaded lean,
 // instead of the whole document (every field but the password) on every signed-in request.
 // routes/jobs.routes.js loads its own full user and is not affected.
-const REQ_USER_FIELDS = "_id role name email university phone location headline";
+const REQ_USER_FIELDS = "_id role name email university phone location headline adminAccess"; // adminAccess: Phase A (admins only; read on every request, so access changes act at once)
 // read only for the lock-out check (plan P0-6) and removed again before req.user is set, so routes see the same fields
 const STATUS_FIELDS = "accountStatus suspensionExpiry suspensionReason";
 const { lockOf, lockBody } = require("../services/accountStatus");
@@ -74,6 +74,9 @@ module.exports = async (req, res, next) => {
     if (lock.locked) {
       return res.status(401).json(lockBody(lock));
     }
+    // Phase A (adminSessionsV1): an admin token needs a live session (12 hours idle ends it)
+    const session = await require("../services/adminSessions").check(decoded, user);
+    if (!session.ok) return res.status(401).json({ code: session.code, message: session.message });
     user.id = String(user._id); // Mongoose's "id" virtual; routes use req.user.id
     
     // Set user data on request

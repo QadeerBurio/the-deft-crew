@@ -30,6 +30,23 @@ const userSchema = new mongoose.Schema(
       enum: ["student", "brand", "admin", "traveler", "employee"],
       default: "student",
     },
+    // Phase A: what an admin account may do (services/adminAccess.js). Missing = every admin today (all permissions
+    // except team.manage). Only on role "admin"; set by a super admin on the team page.
+    adminAccess: {
+      type: new mongoose.Schema({
+        level: { type: String, enum: ["super", "member"] },
+        roleTemplate: { type: String, maxlength: 60 },
+        permissions: { type: [String], default: undefined },
+        status: { type: String, enum: ["active", "suspended"], default: "active" },
+        invitedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+        invitedAt: { type: Date },
+        lastActiveAt: { type: Date },
+        note: { type: String, maxlength: 120 },
+        suspendedReason: { type: String, maxlength: 300 },
+        removedAt: { type: Date },
+      }, { _id: false }),
+      default: undefined,
+    },
 
     // --- BRAND APPROVAL STATUS (NEW) ---
     brandApprovalStatus: {

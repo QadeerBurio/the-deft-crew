@@ -31,7 +31,7 @@ async function requireAdmin(req, res, next) {
   try {
     if (req.isGuest || !isId(req.userId)) return fail(req, res, 401, "SIGN_IN", "Sign in first");
     const u = await User.findById(req.userId).select("role").lean();
-    if (!u || u.role !== "admin") return fail(req, res, 403, "FORBIDDEN", "Admins only");
+    if (!require("../services/adminAccess").isAdminAccount(u)) return fail(req, res, 403, "FORBIDDEN", "Admins only");
     next();
   } catch (err) {
     console.error("[admin-universities]", err?.message);
@@ -182,5 +182,21 @@ router.post("/unmatched/:id/add", handle(async (req, res) => {
   unis.bust();
   ok(req, res, row(u, await unis.countsFor([u._id])));
 }));
+
+// Phase A: the permission each admin route needs (middleware/adminAccess.js; shadow mode until adminRbacEnforce)
+require("../middleware/adminAccess").applyPermissions(router, {
+  "GET /": "universities.manage",
+  "GET /cities": "universities.manage",
+  "POST /": "universities.manage",
+  "PATCH /:id": "universities.manage",
+  "POST /:id/hide": "universities.manage",
+  "POST /:id/show": "universities.manage",
+  "POST /merge": "universities.manage",
+  "GET /unmatched": "universities.manage",
+  "GET /unmatched/summary": "universities.manage",
+  "POST /unmatched/match-bulk": "universities.manage",
+  "POST /unmatched/:id/match": "universities.manage",
+  "POST /unmatched/:id/add": "universities.manage",
+}, "adminUniversities.routes.js");
 
 module.exports = router;

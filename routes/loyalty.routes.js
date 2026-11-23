@@ -363,4 +363,19 @@ router.post("/admin/programs/:id/restart", auth, role("admin"), handle(async (re
   ok(req, res, adminProgramView(updated, await brandNames([updated.brand])));
 }));
 
+// Phase A: the permission each admin route needs (middleware/adminAccess.js; shadow mode until adminRbacEnforce).
+// { inline }: an own-or-admin route; its handler checks the permission itself.
+require("../middleware/adminAccess").applyPermissions(router, {
+  "GET /admin/ledger": "loyalty.manage",
+  "POST /admin/reverse": "loyalty.manage",
+  "GET /admin/programs": "loyalty.manage",
+  "GET /admin/programs/:id/members": "loyalty.manage",
+  "GET /admin/programs/:id": "loyalty.manage",
+  "POST /admin/programs": "loyalty.manage",
+  "PATCH /admin/programs/:id": "loyalty.manage",
+  "POST /admin/programs/:id/restart": "loyalty.manage",
+  "PATCH /programs/:id": "loyalty.manage",
+  "POST /programs/:id/restart": "loyalty.manage",
+}, "loyalty.routes.js");
+
 module.exports = router;

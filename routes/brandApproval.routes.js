@@ -36,7 +36,7 @@ const isAdmin = async (req, res, next) => {
   try {
     if (!isId(req.userId)) return fail(res, 403, "FORBIDDEN", "Access denied. Admins only.");
     const user = await User.findById(req.userId).select("role").lean();
-    if (user && user.role === "admin") return next();
+    if (require("../services/adminAccess").isAdminAccount(user)) return next();
     return fail(res, 403, "FORBIDDEN", "Access denied. Admins only.");
   } catch (err) {
     console.error("[brand-approval] admin check:", err?.message);
@@ -301,6 +301,16 @@ router.post("/:id/request-info", auth, isAdmin, async (req, res) => {
     fail(res, 500, "SERVER_ERROR", "Something went wrong");
   }
 });
+
+// Phase A: the permission each admin route needs (middleware/adminAccess.js; shadow mode until adminRbacEnforce)
+require("../middleware/adminAccess").applyPermissions(router, {
+  "GET /stats": "brands.view",
+  "GET /": "brands.view",
+  "GET /:id": "brands.view",
+  "PUT /bulk-status": "brands.approve",
+  "PUT /:id/status": "brands.approve",
+  "POST /:id/request-info": "brands.approve",
+}, "brandApproval.routes.js");
 
 module.exports = router;
 module.exports._test = { listFilter, escapeRe };

@@ -59,7 +59,7 @@ async function postingHold(req, res, n = 1) {
 }
 // may this user manage this job's applicants? an admin, or the job's own poster. An imported job has no
 // poster: only an admin (before, job.postedBy.toString() crashed with a 500 on those)
-const ownsJob = (req, job) => req.user?.role === "admin" || (!!job?.postedBy && String(job.postedBy) === String(req.userId));
+const ownsJob = (req, job) => adminCan(req, "jobs.manage") || (!!job?.postedBy && String(job.postedBy) === String(req.userId));
 // PUT /update never changes these (owner, archive state, counters, ids); employers also can't change the import fields
 const PROTECTED_JOB_FIELDS = new Set(["_id", "id", "__v", "postedBy", "archivedAt", "archivedReason", "archivedBy", "totalApplications", "views", "createdAt", "updatedAt", "embedding", "embeddingUpdatedAt", "pendingVerification", "publishedAt", "closedAt", "closedReason"]);
 const ADMIN_ONLY_JOB_FIELDS = new Set(["isExternal", "externalUrl", "externalId", "source", "sourceFile", "importBatch", "batchExpiresAt", "lastFetchedAt", "featured"]);
@@ -90,6 +90,8 @@ const uploadJobCsvMulter = multer({
 });
 
 // Auth middleware
+const { adminCan, isAdminAccount } = require("../services/adminAccess"); // Phase A
+
 const authMiddleware = async (req, res, next) => {
     try {
         const token = req.headers.authorization?.split(" ")[1];
@@ -100,6 +102,13 @@ const authMiddleware = async (req, res, next) => {
         req.userId = decoded.id;
         req.userRole = decoded.role;
         req.user = await User.findById(req.userId);
+        // suspended / banned accounts (P0-6, flag accountStatusEnforce), as in middleware/auth.middleware.js: this route
+        // file signs in on its own and missed it
+        const lock = require("../services/accountStatus").lockOf(req.user);
+        if (lock.locked) return res.status(401).json(require("../services/accountStatus").lockBody(lock));
+        // Phase A (adminSessionsV1): an admin token needs a live session, as in middleware/auth.middleware.js
+        const session = await require("../services/adminSessions").check(decoded, req.user);
+        if (!session.ok) return res.status(401).json({ code: session.code, message: session.message });
         next();
     } catch (err) {
         res.status(401).json({ message: "Invalid token" });
@@ -107,7 +116,7 @@ const authMiddleware = async (req, res, next) => {
 };
 
 const isAdminOrEmployee = async (req, res, next) => {
-    if (req.user?.role !== "admin" && req.user?.role !== "employee") {
+    if (!isAdminAccount(req.user) && req.user?.role !== "employee") { // the role gate; the permission: applyPermissions below
         return res.status(403).json({ message: "Admin or Employee access required" });
     }
     next();
@@ -146,7 +155,7 @@ router.post("/add", authMiddleware, isAdminOrEmployee, async (req, res) => {
             minExperience: minExperience || 0, education: education || "Bachelor's Degree",
             skills: sk.skills, active: start.pendingVerification ? false : active !== undefined ? active : true,
             pendingVerification: start.pendingVerification,
-            featured: req.user?.role === "admin" ? !!featured : false, urgent: urgent || false, // featuring is tdc's call
+            featured: adminCan(req, "jobs.manage") ? !!featured : false, urgent: urgent || false, // featuring is tdc's call
             applicationDeadline: applicationDeadline || new Date(+new Date() + 30*24*60*60*1000),
             postedBy: req.userId,
             companyName: company,
@@ -189,7 +198,7 @@ router.post("/add", authMiddleware, isAdminOrEmployee, async (req, res) => {
 //                                [{ skill, reasons }] }], limits }
 router.get("/admin/skills-report", authMiddleware, async (req, res) => {
     try {
-        if (req.user?.role !== "admin") return res.status(403).json({ message: "Admin access required" });
+        if (!isAdminAccount(req.user)) return res.status(403).json({ message: "Admin access required" }); // permission: applyPermissions below
         const all = await Job.find({}).select("title companyName skills active archivedAt").lean();
         const jobs = [];
         for (const j of all) {
@@ -235,7 +244,7 @@ router.post('/admin/import-csv', authMiddleware, isAdminOrEmployee, async (req, 
     }
 
     // an employer's upload: the jobs are theirs (they manage them and get the applicants); tdc's upload: unowned
-    const owner = req.user?.role === "admin" ? null : { userId: req.userId, email: req.user?.email || "", companyName: profileCompany(req), companyLogo: profileLogo(req) };
+    const owner = adminCan(req, "jobs.manage") ? null : { userId: req.userId, email: req.user?.email || "", companyName: profileCompany(req), companyLogo: profileLogo(req) };
     const pending = owner ? !(await jobStatus.companyVerified(req.userId)) : false;
     // on the trial: as many rows as the file has; within a plan: each new job is counted, rows past the plan's
     // limit aren't saved (listed in "rejected"); an updated job keeps its deadline unless on the trial
@@ -337,7 +346,7 @@ router.put("/update/:id", authMiddleware, isAdminOrEmployee, async (req, res) =>
 
         // only the job's own fields: never its owner, archive state, counters or the import pipeline's fields
         const changes = { ...(req.body || {}) };
-        for (const k of Object.keys(changes)) if (k.startsWith("$") || PROTECTED_JOB_FIELDS.has(k) || (req.user?.role !== "admin" && ADMIN_ONLY_JOB_FIELDS.has(k))) delete changes[k];
+        for (const k of Object.keys(changes)) if (k.startsWith("$") || PROTECTED_JOB_FIELDS.has(k) || (!adminCan(req, "jobs.manage") && ADMIN_ONLY_JOB_FIELDS.has(k))) delete changes[k];
         if (isEmployer(req) && job.pendingVerification) delete changes.active; // goes live once the company is verified
         // switching a closed job on through the form = reopening: the trial / plan lock, a fresh deadline if needed
         const closedNow = jobStatus.statusOf(job) === "closed";
@@ -412,7 +421,7 @@ router.post("/duplicate/:id", authMiddleware, isAdminOrEmployee, async (req, res
     try {
         if (!mongoose.Types.ObjectId.isValid(String(req.params.id))) return res.status(404).json({ message: "Job not found" });
         const job = await Job.findById(req.params.id).lean();
-        if (!job || !ownsJob(req, job) || (req.user?.role !== "admin" && job.isExternal)) return res.status(404).json({ message: "Job not found" });
+        if (!job || !ownsJob(req, job) || (!adminCan(req, "jobs.manage") && job.isExternal)) return res.status(404).json({ message: "Job not found" });
         const hold = await postingHold(req, res);
         if (!hold) return;
         const copy = Object.fromEntries(DUPLICATE_FIELDS.filter((k) => job[k] !== undefined).map((k) => [k, job[k]]));
@@ -422,7 +431,7 @@ router.post("/duplicate/:id", authMiddleware, isAdminOrEmployee, async (req, res
             title: String(req.body?.title || job.title).slice(0, 200),
             active: start.active, pendingVerification: start.pendingVerification, featured: false,
             applicationDeadline: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-            postedBy: req.user?.role === "admin" ? job.postedBy || null : req.userId,
+            postedBy: adminCan(req, "jobs.manage") ? job.postedBy || null : req.userId,
             isExternal: false, source: "manual",
         });
         try {
@@ -452,7 +461,7 @@ router.delete("/delete/:id", authMiddleware, isAdminOrEmployee, async (req, res)
         if (!job) return res.status(404).json({ message: "Job not found" });
         
         // String(): an imported job has no postedBy
-        if (req.user.role !== "admin" && String(job.postedBy) !== String(req.userId)) {
+        if (!adminCan(req, "jobs.manage") && String(job.postedBy) !== String(req.userId)) {
             return res.status(403).json({ message: "You can only delete your own jobs" });
         }
         
@@ -896,7 +905,7 @@ router.get("/interviews/all", authMiddleware, async (req, res) => {
         let query = {};
         
         // If not admin, only show interviews for their jobs
-        if (req.user.role !== "admin") {
+        if (!adminCan(req, "hiring.manage")) {
             const myJobs = await Job.find({ postedBy: req.userId }).select('_id');
             const jobIds = myJobs.map(job => job._id);
             query = { jobId: { $in: jobIds } };
@@ -924,7 +933,7 @@ router.get("/interviews/upcoming", authMiddleware, async (req, res) => {
         };
         
         // If not admin, only show interviews for their jobs
-        if (req.user.role !== "admin") {
+        if (!adminCan(req, "hiring.manage")) {
             const myJobs = await Job.find({ postedBy: req.userId }).select('_id');
             const jobIds = myJobs.map(job => job._id);
             query.jobId = { $in: jobIds };
@@ -938,7 +947,7 @@ router.get("/interviews/upcoming", authMiddleware, async (req, res) => {
         // the hiring timeline's interviews (invited, accepted, new time asked), in the same shape
         const CareerInterview = require('../models/CareerInterview');
         const tq = { active: true, startsAt: { $gte: new Date() }, status: { $in: ["invited", "accepted", "reschedule_requested"] } };
-        if (req.user.role !== "admin") tq.employer = req.userId;
+        if (!adminCan(req, "hiring.manage")) tq.employer = req.userId;
         const timeline = await CareerInterview.find(tq).sort({ startsAt: 1 }).limit(10).lean();
         const tApps = new Map((await JobApplication.find({ _id: { $in: timeline.map((i) => i.application) } }).select("fullName jobId").populate('jobId', 'title department location companyName').lean()).map((a) => [String(a._id), a]));
         const fromTimeline = timeline.map((i) => {
@@ -1159,7 +1168,7 @@ router.get("/candidates/all", authMiddleware, async (req, res) => {
         let query = {};
         
         // If not admin, only show candidates for their jobs
-        if (req.user.role !== "admin") {
+        if (!adminCan(req, "hiring.manage")) {
             const myJobs = await Job.find({ postedBy: req.userId }).select('_id');
             const jobIds = myJobs.map(job => job._id);
             query.jobId = { $in: jobIds };
@@ -1288,7 +1297,7 @@ router.get("/candidates/export", authMiddleware, async (req, res) => {
     try {
         let query = {};
         
-        if (req.user.role !== "admin") {
+        if (!adminCan(req, "hiring.manage")) {
             const myJobs = await Job.find({ postedBy: req.userId }).select('_id');
             const jobIds = myJobs.map(job => job._id);
             query.jobId = { $in: jobIds };
@@ -1327,7 +1336,7 @@ router.get("/stats", authMiddleware, async (req, res) => {
         let query = {};
         
         // If not admin, only show stats for their jobs
-        if (req.user.role !== "admin") {
+        if (!adminCan(req, "hiring.manage")) {
             const myJobs = await Job.find({ postedBy: req.userId }).select('_id');
             const jobIds = myJobs.map(job => job._id);
             query = { jobId: { $in: jobIds } };
@@ -1335,7 +1344,7 @@ router.get("/stats", authMiddleware, async (req, res) => {
         
         // jobs (not deleted): live = active and not past its deadline; closed = past its deadline or closed by the
         // expiry job; pending = waiting for company verification
-        const mine = req.user.role === "admin" ? { archivedAt: null } : { postedBy: req.userId, archivedAt: null };
+        const mine = adminCan(req, "hiring.manage") ? { archivedAt: null } : { postedBy: req.userId, archivedAt: null };
         const nowStats = new Date();
         const totalJobs = await Job.countDocuments(mine);
         const activeJobs = await Job.countDocuments({ ...mine, active: true, $or: [{ applicationDeadline: null }, { applicationDeadline: { $gte: nowStats } }] });
@@ -1374,7 +1383,7 @@ router.get("/stats", authMiddleware, async (req, res) => {
             last7Days.push({ date: date.toLocaleDateString('en-US', { weekday: 'short' }), count });
         }
         
-        const jobsByDepartment = req.user.role === "admin" 
+        const jobsByDepartment = adminCan(req, "hiring.manage") 
             ? await Job.aggregate([{ $group: { _id: "$department", count: { $sum: 1 } } }])
             : await Job.aggregate([{ $match: { postedBy: req.user._id } }, { $group: { _id: "$department", count: { $sum: 1 } } }]);
         
@@ -1975,5 +1984,24 @@ router.post('/ingest/trigger', authMiddleware, isAdminOrEmployee, async (req, re
   }
 });
 
+
+// Phase A: the permission each admin route needs (middleware/adminAccess.js; shadow mode until adminRbacEnforce).
+// { inline }: an own-or-admin route; its handler checks the permission itself.
+require("../middleware/adminAccess").applyPermissions(router, {
+  "POST /add": "jobs.manage",
+  "POST /admin/import-csv": "jobs.manage",
+  "GET /all": "jobs.manage",
+  "PUT /update/:id": "jobs.manage",
+  "PATCH /toggle/:id": "jobs.manage",
+  "POST /duplicate/:id": "jobs.manage",
+  "DELETE /delete/:id": "jobs.manage",
+  "POST /ingest/trigger": "jobs.manage",
+  "GET /admin/skills-report": "analytics.view",
+  "GET /interviews/all": {"inline":"hiring.manage"},
+  "GET /interviews/upcoming": {"inline":"hiring.manage"},
+  "GET /candidates/all": {"inline":"hiring.manage"},
+  "GET /candidates/export": {"inline":"hiring.manage"},
+  "GET /stats": {"inline":"hiring.manage"},
+}, "jobs.routes.js");
 
 module.exports = router;

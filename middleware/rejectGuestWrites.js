@@ -11,6 +11,8 @@
 const ALLOW = [
   // signing up and in, codes and password reset
   ["POST", /^\/auth\/(signup|login|signup\/verify-otp|signup\/resend-otp|forgot-password|resend-otp|verify-otp|reset-password)\/?$/i],
+  // an admin's sign-in code (Phase A, adminSessionsV1) and accepting an admin invitation
+  ["POST", /^\/auth\/admin\/(verify-code|accept-invite)\/?$/i],
   // store webhooks: each checks its own signature or secret
   ["POST", /^\/webhooks\/woocommerce\/[^/]+\/?$/i],
   ["POST", /^\/webhooks\/confirm\/?$/i],

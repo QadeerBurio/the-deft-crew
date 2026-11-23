@@ -21,7 +21,7 @@ async function requireAdmin(req, res, next) {
   try {
     if (req.isGuest || !isId(req.userId)) return fail(req, res, 401, "SIGN_IN", "Sign in first");
     const u = await User.findById(req.userId).select("role").lean();
-    if (!u || u.role !== "admin") return fail(req, res, 403, "FORBIDDEN", "Admins only");
+    if (!require("../services/adminAccess").isAdminAccount(u)) return fail(req, res, 403, "FORBIDDEN", "Admins only");
     next();
   } catch (err) {
     console.error("[admin-actions]", err);
@@ -62,5 +62,11 @@ router.get("/facets", auth, requireAdmin, async (req, res) => {
     fail(req, res, 500, "SERVER_ERROR", "Something went wrong");
   }
 });
+
+// Phase A: the permission each admin route needs (middleware/adminAccess.js; shadow mode until adminRbacEnforce)
+require("../middleware/adminAccess").applyPermissions(router, {
+  "GET /": "audit.view",
+  "GET /facets": "audit.view",
+}, "adminActions.routes.js");
 
 module.exports = router;

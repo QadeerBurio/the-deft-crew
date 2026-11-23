@@ -275,6 +275,8 @@ app.use("/api/admin/universities", require("./routes/adminUniversities.routes"))
 app.use("/api/admin/features", require("./routes/adminFeatures.routes")); // features per account (admin only, logged)
 app.use("/api/admin/safety", require("./routes/adminSafety.routes")); // confession safety log (plan P4-7, admins only)
 app.use("/api/admin", require("./routes/admin.routes"));
+app.use("/api/admin/team", require("./routes/adminTeam.routes")); // Phase A: team & access (super admins)
+app.use("/api/admin/me", require("./routes/adminMe.routes")); // Phase A: an admin's own access and sessions
 app.use("/api/membership", require("./routes/membership.route"));
 app.use("/api/bookings", require("./routes/booking.routes"));
 app.use("/api/social", require("./routes/confessionSafety.routes")); // report / mute / rules (flag confessionSafety; 404 otherwise)

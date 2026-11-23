@@ -522,6 +522,8 @@ async function deleteAccount(userId, { actor, confirmName } = {}) {
   const user = await loadTarget(userId);
   const isAdminActor = actor?.type === "admin";
   if (isAdminActor && String(actor.adminId) === String(userId)) throw new DeletionError(400, "you can't delete your own account here");
+  // Phase A: an admin needs students.delete here too, not only on the route ("is an admin" alone is never enough)
+  if (isAdminActor && !(await require("./adminAccess").allowedFor(actor.adminId, "students.delete", "accountDeletion"))) throw new DeletionError(403, "you don't have access to this. ask a super admin.");
 
   let audit;
   if (!user) {
@@ -529,7 +531,7 @@ async function deleteAccount(userId, { actor, confirmName } = {}) {
     audit = await AdminAuditLog.findOne({ targetId: userId, status: { $in: ["running", "failed"] } }).sort({ startedAt: -1 });
     if (!audit) throw new DeletionError(404, "account not found");
   } else {
-    if (user.role === "admin") throw new DeletionError(403, "admin accounts can't be deleted");
+    if (require("./adminAccess").isAdminAccount(user)) throw new DeletionError(403, "admin accounts can't be deleted");
     if (!SUPPORTED_ROLES.has(user.role)) throw new DeletionError(400, "not supported yet");
     if (isAdminActor && String(confirmName || "").trim() !== displayName(user)) throw new DeletionError(400, "the name doesn't match");
     audit = await AdminAuditLog.findOne({ targetId: user._id, status: { $in: ["running", "failed"] } }).sort({ startedAt: -1 });

@@ -129,6 +129,13 @@ const FLAGS = {
   // N-7: push copy that names the specific thing, with real numbers only (services/engagement/copy.js fillV2);
   // nothing specific and real to say → no push. Off = today's copy.
   pushCopyV2: { default: false, client: true, grant: { roles: ["student"], label: "Push copy v2" } },
+  // Phase A: admin permissions are enforced (middleware/adminAccess.js). Off = shadow mode: a member admin without a
+  // permission is still allowed and the "would deny" is logged for review. Server only, Railway FLAG_ADMIN_RBAC_ENFORCE=on.
+  adminRbacEnforce: { default: false, client: false },
+  // Phase A (A-8): admin sessions: a code for a new device (and every 30 days), sign-out after 12 hours idle, login
+  // history (services/adminSessions.js). Server only, Railway FLAG_ADMIN_SESSIONS_V1=on, after the portal with the
+  // code screen is live. Off = admins sign in as today.
+  adminSessionsV1: { default: false, client: false },
 };
 
 const JOBS = {

@@ -81,4 +81,10 @@ router.post("/admin/reports/:id/decide", auth, signedIn, admin, handle(async (re
   ok(req, res, { id: String(rep._id), status: rep.status, decisionReason: rep.decisionReason });
 }));
 
+// Phase A: the permission each admin route needs (middleware/adminAccess.js; shadow mode until adminRbacEnforce)
+require("../middleware/adminAccess").applyPermissions(router, {
+  "GET /admin/reports": "ratings.moderate",
+  "POST /admin/reports/:id/decide": "ratings.moderate",
+}, "careerRatings.routes.js");
+
 module.exports = router;

@@ -162,13 +162,13 @@ async function contextFor(applicationId, userId) {
   if (!isId(userId)) throw new CareerError(401, "SIGN_IN", "Sign in first");
   const [app, user] = await Promise.all([
     JobApplication.findById(applicationId).select("jobId userId status appliedAt").lean(),
-    User.findById(userId).select("role").lean(),
+    User.findById(userId).select("role adminAccess").lean(),
   ]);
   if (!app || !user) throw new CareerError(404, "NOT_FOUND", "Application not found");
   const job = await Job.findById(app.jobId).select("title companyName postedBy isExternal archivedAt active").lean();
   const employerId = job?.postedBy || null;
   let role = null;
-  if (user.role === "admin") role = "admin";
+  if (require("../adminAccess").adminAllowed(user, "hiring.manage", "career timeline")) role = "admin"; // Phase A
   else if (same(app.userId, userId)) role = "candidate";
   else if (["employee", "admin"].includes(user.role) && same(employerId, userId)) role = "employer";
   // not the candidate, not this job's employer: it doesn't exist for them

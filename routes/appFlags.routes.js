@@ -76,7 +76,7 @@ router.get('/meta-builds', auth, async (req, res) => {
   try {
     if (req.isGuest) return res.status(401).json({ message: 'Sign in first' });
     const me = await User.findById(req.userId).select('role').lean();
-    if (me?.role !== 'admin') return res.status(403).json({ message: 'Admin access required' });
+    if (!(await require("../services/adminAccess").allowedFor(req.userId, "features.manage", "GET /api/app/meta-builds"))) return res.status(403).json({ message: 'Admin access required' });
     const rows = await MetaBuildReport.find({}).sort({ lastAt: -1 }).limit(200).lean();
     const builds = rows.map((r) => ({ platform: r.platform, appVersion: r.appVersion, build: r.build, enabled: r.enabled, installs: r.count, firstAt: r.firstAt, lastAt: r.lastAt }));
     res.set('Cache-Control', 'private, no-store');
@@ -86,5 +86,11 @@ router.get('/meta-builds', auth, async (req, res) => {
     res.status(500).json({ message: 'Something went wrong' });
   }
 });
+
+// Phase A: the permission each admin route needs (middleware/adminAccess.js; shadow mode until adminRbacEnforce).
+// { inline }: an own-or-admin route; its handler checks the permission itself.
+require("../middleware/adminAccess").applyPermissions(router, {
+  "GET /meta-builds": "features.manage",
+}, "appFlags.routes.js");
 
 module.exports = router;

@@ -186,4 +186,16 @@ router.post("/admin/plan-requests/:id/decline", ...admin, handle(async (req, res
   ok(req, res, { id: String(r._id), status: r.status });
 }));
 
+// Phase A: the permission each admin route needs (middleware/adminAccess.js; shadow mode until adminRbacEnforce).
+// { inline }: an own-or-admin route; its handler checks the permission itself.
+require("../middleware/adminAccess").applyPermissions(router, {
+  "GET /admin/company-verifications": "employers.view",
+  "GET /admin/company-verifications/:id/documents/:documentId": "employers.verify",
+  "POST /admin/company-verifications/:id/review": "employers.verify",
+  "GET /admin/hiring-plans": "plans.manage",
+  "POST /admin/hiring-plans/:employerId/grant": "plans.manage",
+  "POST /admin/hiring-plans/:employerId/trial": "plans.manage",
+  "POST /admin/plan-requests/:id/decline": "plans.manage",
+}, "hiringAccess.routes.js");
+
 module.exports = router;

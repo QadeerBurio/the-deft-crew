@@ -18,7 +18,7 @@ const pushGateway = require('../services/engagement/pushGateway');
 const isAdmin = async (req, res, next) => {
   try {
     const user = await User.findById(req.userId);
-    if (user && user.role === 'admin') next();
+    if (require("../services/adminAccess").isAdminAccount(user)) next();
     else res.status(403).json({ message: 'Access denied. Admins only.' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1081,4 +1081,35 @@ router.post('/redemptions/:id/cancel', async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 });
+// Phase A: the permission each admin route needs (middleware/adminAccess.js; shadow mode until adminRbacEnforce)
+require("../middleware/adminAccess").applyPermissions(router, {
+  "POST /test-push": "push.send",
+  "POST /broadcast/app-update": "push.send",
+  "POST /broadcast/freeze-reset": "push.send",
+  "POST /broadcast/custom": "push.send",
+  "POST /nudge/feature/:userId": "push.send",
+  "POST /nudge/win-back/:userId": "push.send",
+  "POST /nudge/streak/:userId": "push.send",
+  "GET /push-logs": "analytics.view",
+  "GET /push-report": "analytics.view",
+  "GET /metrics": "analytics.view",
+  "GET /drilldown": "analytics.view",
+  "GET /profiles": "students.view",
+  "GET /users/:userId/ledger": "students.view",
+  "GET /drops": "drops.manage",
+  "POST /drops": "drops.manage",
+  "PUT /drops/:dayKey": "drops.manage",
+  "POST /drops/:dayKey/publish-now": "drops.manage",
+  "DELETE /drops/:dayKey": "drops.manage",
+  "GET /drops/:dayKey/results": "drops.manage",
+  "GET /rewards": "rewards.manage",
+  "POST /rewards": "rewards.manage",
+  "PUT /rewards/:id": "rewards.manage",
+  "DELETE /rewards/:id": "rewards.manage",
+  "GET /rewards/:id/redemptions": "rewards.manage",
+  "POST /redemptions/:id/cancel": "rewards.manage",
+  "POST /points/adjust": "points.award",
+  "POST /badges/award": "points.award",
+}, "adminEngagement.routes.js");
+
 module.exports = router;

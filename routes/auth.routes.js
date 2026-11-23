@@ -147,7 +147,7 @@ const cleanupFile = async (file) => {
 // ==========================================
 // AUTH MIDDLEWARE
 // ==========================================
-const authMiddleware = (req, res, next) => {
+const authMiddleware = async (req, res, next) => {
   try {
     const token = req.headers.authorization?.split(" ")[1];
     if (!token) {
@@ -157,6 +157,12 @@ const authMiddleware = (req, res, next) => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     req.userId = decoded.id;
     req.userRole = decoded.role;
+    // suspended / banned accounts (P0-6, flag accountStatusEnforce), as in middleware/auth.middleware.js
+    const lock = await accountStatus.lockOfId(decoded.id);
+    if (lock.locked) return res.status(401).json(accountStatus.lockBody(lock));
+    // Phase A (adminSessionsV1): an admin token needs a live session, as in middleware/auth.middleware.js
+    const session = await require("../services/adminSessions").checkToken(decoded);
+    if (!session.ok) return res.status(401).json({ code: session.code, message: session.message });
 
     next();
   } catch (err) {
@@ -165,11 +171,13 @@ const authMiddleware = (req, res, next) => {
   }
 };
 
-// Admin check against the database (the role in a token can be out of date).
-async function isAdminUser(userId) {
+// Admin check against the database (the role in a token can be out of date). Phase A: an admin with this permission
+// (services/adminAccess.js; shadow mode until adminRbacEnforce).
+const adminAccess = require("../services/adminAccess");
+async function isAdminUser(userId, permission) {
   if (!mongoose.Types.ObjectId.isValid(String(userId))) return false;
-  const u = await User.findById(userId).select("role").lean();
-  return u?.role === "admin";
+  const u = await User.findById(userId).select("role adminAccess").lean();
+  return adminAccess.adminAllowed(u, permission, `auth ${permission}`);
 }
 
 // ==========================================
@@ -475,6 +483,10 @@ router.post("/login", async (req, res) => {
       });
     }
 
+    // Phase A (adminSessionsV1): an admin from a new device gets a code first; a known device a session token
+    const adminLogin = await require("../services/adminSessions").startLogin(user, req);
+    if (adminLogin) return res.json(adminLogin.body);
+
     const token = signToken(user);
 
     res.json({
@@ -483,6 +495,48 @@ router.post("/login", async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ==========================================
+// ADMIN SIGN-IN CODE (Phase A, adminSessionsV1): { sessionId, code } → { token, user }
+// ==========================================
+router.post("/admin/verify-code", async (req, res) => {
+  try {
+    const lock = loginGuard.check(req, `admin-code:${req.body?.sessionId || ""}`);
+    if (lock.locked) return loginGuard.reply(res, lock);
+    const r = await require("../services/adminSessions").verifyCode(req.body?.sessionId, req.body?.code);
+    if (r.status !== 200) loginGuard.fail(req, `admin-code:${req.body?.sessionId || ""}`);
+    return res.status(r.status).json(r.body);
+  } catch (err) {
+    console.error("[admin-sessions] verify failed:", err.message);
+    return res.status(500).json({ message: "Server error. Please try again." });
+  }
+});
+
+// ==========================================
+// ADMIN INVITATION (Phase A): { token, password } sets the invited member's password (72-hour link, used once)
+// ==========================================
+router.post("/admin/accept-invite", async (req, res) => {
+  try {
+    const raw = String(req.body?.token || "");
+    const password = String(req.body?.password || "");
+    if (!/^[0-9a-f]{64}$/.test(raw)) return res.status(400).json({ message: "this invitation link isn't valid." });
+    if (password.length < 8) return res.status(400).json({ message: "use at least 8 characters." });
+    const AdminInvite = require("../models/AdminInvite");
+    const inv = await AdminInvite.findOne({ tokenHash: crypto.createHash("sha256").update(raw).digest("hex") });
+    if (!inv || inv.usedAt || inv.expiresAt < new Date()) return res.status(400).json({ message: "this invitation has expired or was used. ask a super admin for a new one." });
+    const user = await User.findById(inv.user).select("role adminAccess email");
+    if (!user || user.role !== require("../services/adminAccess").ADMIN_ROLE || user.adminAccess?.status === "suspended") return res.status(400).json({ message: "this invitation is no longer valid." });
+    user.password = await bcrypt.hash(password, 10);
+    await user.save();
+    inv.usedAt = new Date();
+    await inv.save();
+    await require("../services/adminActionLog").recordSafe({ admin: user._id, action: "team.invite.accepted", targetType: "User", targetId: String(user._id), before: null, after: { accepted: true } });
+    return res.json({ success: true, message: "your password is set. sign in." });
+  } catch (err) {
+    console.error("[team] accept invite failed:", err.message);
+    return res.status(500).json({ message: "Server error. Please try again." });
   }
 });
 
@@ -653,7 +707,7 @@ router.post("/activate-vip/:userId", authMiddleware, async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    if (req.userId !== userId && requestingUser.role !== 'admin') {
+    if (req.userId !== userId && !adminAccess.adminAllowed(requestingUser, "cards.manage", "POST /api/auth/activate-vip")) {
       return res.status(403).json({ message: "Unauthorized" });
     }
 
@@ -937,7 +991,7 @@ router.post("/reset-password", async (req, res) => {
 // ==========================================
 router.post("/approve-user/:id", authMiddleware, async (req, res) => {
   try {
-    if (!(await isAdminUser(req.userId))) {
+    if (!(await isAdminUser(req.userId, "students.verify"))) {
       return res.status(403).json({ message: "Admin access required" });
     }
     const user = await User.findByIdAndUpdate(
@@ -956,7 +1010,7 @@ router.post("/approve-user/:id", authMiddleware, async (req, res) => {
 // ==========================================
 router.patch("/verify-user/:targetUserId", authMiddleware, async (req, res) => {
   try {
-    if (!(await isAdminUser(req.userId))) {
+    if (!(await isAdminUser(req.userId, "students.verify"))) {
       return res.status(403).json({ message: "Admin access required" });
     }
     const updatedUser = await User.findByIdAndUpdate(
@@ -1103,7 +1157,7 @@ router.get("/:id", authMiddleware, async (req, res) => {
       });
     }
     // A user's own account, or any account for an admin (the app only loads its own user here)
-    if (String(req.userId) !== id && !(await isAdminUser(req.userId))) {
+    if (String(req.userId) !== id && !(await isAdminUser(req.userId, "students.view"))) {
       return res.status(403).json({ message: "You can only view your own account." });
     }
 
@@ -1186,7 +1240,7 @@ router.put("/update/:id", authMiddleware, async (req, res) => {
     const { id } = req.params;
     
     const requestingUser = await User.findById(req.userId);
-    if (requestingUser.role !== 'admin') {
+    if (!adminAccess.adminAllowed(requestingUser, "students.edit", "PUT /api/auth/update/:id")) {
       return res.status(403).json({ message: "Admin access required" });
     }
 
@@ -1234,7 +1288,7 @@ router.get("/student/:id", authMiddleware, async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({ message: "Invalid User ID format" });
     }
-    if (String(req.userId) !== id && !(await isAdminUser(req.userId))) {
+    if (String(req.userId) !== id && !(await isAdminUser(req.userId, "students.view"))) {
       return res.status(403).json({ message: "You can only view your own account." });
     }
 
@@ -1399,7 +1453,7 @@ router.post("/admin-login-as-brand", authMiddleware, async (req, res) => {
     
     // Verify the requesting user is an admin
     const adminUser = await User.findById(req.userId);
-    if (adminUser.role !== 'admin') {
+    if (!adminAccess.adminAllowed(adminUser, "brands.approve", "POST /api/auth/admin-login-as-brand")) {
       return res.status(403).json({ 
         success: false, 
         message: "Only admins can login as brands" 
@@ -1473,4 +1527,16 @@ router.post("/admin-login-as-brand", authMiddleware, async (req, res) => {
 // ==========================================
 // EXPORT
 // ==========================================
+// Phase A: the permission each admin route needs (middleware/adminAccess.js; shadow mode until adminRbacEnforce).
+// { inline }: an own-or-admin route; its handler checks the permission itself.
+require("../middleware/adminAccess").applyPermissions(router, {
+  "POST /approve-user/:id": "students.verify",
+  "PATCH /verify-user/:targetUserId": "students.verify",
+  "PUT /update/:id": "students.edit",
+  "POST /admin-login-as-brand": "brands.approve",
+  "GET /:id": {"inline":"students.view"},
+  "GET /student/:id": {"inline":"students.view"},
+  "POST /activate-vip/:userId": {"inline":"cards.manage"},
+}, "auth.routes.js");
+
 module.exports = router;

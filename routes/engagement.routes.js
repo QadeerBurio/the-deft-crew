@@ -1116,7 +1116,7 @@ router.post('/streak/expiry-warnings/send', async (req, res) => {
           return res.status(401).json({ message: 'unauthorized' });
         }
         const me = await User.findById(req.userId).select('role').lean();
-        if (me?.role !== 'admin') {
+        if (!(await require("../services/adminAccess").allowedFor(req.userId, "push.send", "POST /api/engagement/streak/expiry-warnings/send"))) {
           return res.status(403).json({ message: 'admin or cron key required' });
         }
         authorized = true;
@@ -1678,4 +1678,10 @@ router.post('/referrals/backfill', auth, requireAuth, async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 });
+// Phase A: the permission each admin route needs (middleware/adminAccess.js; shadow mode until adminRbacEnforce).
+// { inline }: an own-or-admin route; its handler checks the permission itself.
+require("../middleware/adminAccess").applyPermissions(router, {
+  "POST /streak/expiry-warnings/send": {"inline":"push.send"},
+}, "engagement.routes.js");
+
 module.exports = router;

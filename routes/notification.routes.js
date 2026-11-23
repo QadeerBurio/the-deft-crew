@@ -138,7 +138,7 @@ router.post('/send', auth, async (req, res) => {
     if (!senderId) return res.status(401).json({ message: 'User ID required' });
     // admins only (any signed-in user could push any text to any user)
     const sender = mongoose.Types.ObjectId.isValid(String(senderId)) ? await User.findById(senderId).select('role').lean() : null;
-    if (sender?.role !== 'admin') return res.status(403).json({ message: 'Only admins can send notifications' });
+    if (!(await require("../services/adminAccess").allowedFor(senderId, "push.send", "POST /api/notification/send"))) return res.status(403).json({ message: 'Only admins can send notifications' });
 
     const resolvedMood = mood || 'sorted';
 
@@ -479,5 +479,11 @@ router.get('/test-push', auth, async (req, res) => {
     res.status(500).json({ ok: false, problem: 'SEND_FAILED', error: err.message });
   }
 });
+
+// Phase A: the permission each admin route needs (middleware/adminAccess.js; shadow mode until adminRbacEnforce).
+// { inline }: an own-or-admin route; its handler checks the permission itself.
+require("../middleware/adminAccess").applyPermissions(router, {
+  "POST /send": "push.send",
+}, "notification.routes.js");
 
 module.exports = router;

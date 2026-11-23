@@ -21,7 +21,7 @@ const badgesService = require('../services/engagement/badges');
 const isAdmin = async (req, res, next) => {
   try {
     const user = await User.findById(req.userId);
-    if (user && user.role === 'admin') {
+    if (require("../services/adminAccess").isAdminAccount(user)) {
       next();
     } else {
       res.status(403).json({ message: 'Access denied. Admins only.' });
@@ -510,5 +510,27 @@ router.get('/settings', async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 });
+
+// Phase A: the permission each admin route needs (middleware/adminAccess.js; shadow mode until adminRbacEnforce)
+require("../middleware/adminAccess").applyPermissions(router, {
+  "GET /inbox": "crew.view",
+  "GET /partners": "crew.view",
+  "GET /partners/:userId": "crew.view",
+  "GET /campaigns": "crew.view",
+  "GET /settings": "crew.view",
+  "POST /partners": "crew.manage",
+  "DELETE /partners/:userId": "crew.manage",
+  "POST /posts/:postId/review": "crew.manage",
+  "POST /partners/applications/:appId/review": "crew.manage",
+  "POST /campaigns": "crew.manage",
+  "PUT /campaigns/:id": "crew.manage",
+  "POST /campaigns/:id/end": "crew.manage",
+  "DELETE /campaigns/:id": "crew.manage",
+  "GET /credentials": "credentials.issue",
+  "POST /credentials": "credentials.issue",
+  "DELETE /credentials/:id": "credentials.issue",
+  "POST /points/award": "points.award",
+  "POST /badges/award": "points.award",
+}, "adminCrew.routes.js");
 
 module.exports = router;

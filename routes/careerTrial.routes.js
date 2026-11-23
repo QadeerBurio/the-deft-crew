@@ -156,4 +156,16 @@ router.get("/admin/employers/company-status", ...admin, handle(async (req, res) 
 // shared with routes/hiringAccess.routes.js (company verification for every employer)
 router.verificationView = verificationView;
 router.usersById = usersById;
+// Phase A: the permission each admin route needs (middleware/adminAccess.js; shadow mode until adminRbacEnforce).
+// { inline }: an own-or-admin route; its handler checks the permission itself.
+require("../middleware/adminAccess").applyPermissions(router, {
+  "GET /admin/verifications": "employers.view",
+  "POST /admin/verifications/:id/review": "employers.verify",
+  "GET /admin/trials": "plans.manage",
+  "POST /admin/trials/:id/review": "plans.manage",
+  "GET /admin/billing-events": "revenue.view",
+  "GET /admin/audit": "audit.view",
+  "GET /admin/employers/company-status": "employers.view",
+}, "careerTrial.routes.js");
+
 module.exports = router;

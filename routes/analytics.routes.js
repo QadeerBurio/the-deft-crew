@@ -40,4 +40,11 @@ router.get("/employers/me", auth, role("employee"), limit, handle(async (req, re
   ok(req, res, await analytics.employerResults(req.userId, req.query, { trialService: require("../services/career/trialService") }));
 }));
 
+// Phase A: the permission each admin route needs (middleware/adminAccess.js; shadow mode until adminRbacEnforce).
+// { inline }: an own-or-admin route; its handler checks the permission itself.
+require("../middleware/adminAccess").applyPermissions(router, {
+  "GET /admin/overview": "analytics.view",
+  "GET /admin/metrics": "analytics.view",
+}, "analytics.routes.js");
+
 module.exports = router;
