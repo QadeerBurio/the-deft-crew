@@ -108,6 +108,13 @@ export const authMiddleware = async (
       res.status(401).json({ success: false, ...lockBody(lock) });
       return;
     }
+    // Phase A (adminSessionsV1): an admin token needs a live session (main server: services/adminSessions.js)
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const session = await require('../../../services/adminSessions').check(decoded, { _id: String(decoded.id), role: userDoc.role });
+    if (!session.ok) {
+      res.status(401).json({ success: false, code: session.code, message: session.message });
+      return;
+    }
 
     // Attach profile details for personalized prompts
     req.user = {

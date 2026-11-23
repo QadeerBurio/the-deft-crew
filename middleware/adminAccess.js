@@ -10,6 +10,8 @@
 const access = require("../services/adminAccess");
 
 const DENIED = (permission) => ({ code: "ADMIN_PERMISSION_REQUIRED", permission, message: "you don't have access to this. ask a super admin." });
+// a permission-free admin route: the admin's own access and sessions
+const SELF = "self";
 const SUSPENDED = { code: "ADMIN_ACCESS_SUSPENDED", message: "your admin access is paused. ask a super admin." };
 
 function permit(permission) {
@@ -18,7 +20,8 @@ function permit(permission) {
     try { user = await access.callerOf(req); } catch { user = null; }
     if (!access.isAdminAccount(user)) return next(); // not an admin: the route's own checks decide, as before
     const where = `${req.method} ${req.baseUrl || ""}${req.route?.path || ""}`;
-    const d = access.decide(user, permission, where);
+    // "self": any admin whose access isn't paused (their own access, sessions)
+    const d = permission === SELF ? (access.levelOf(user) === "suspended" ? { allowed: false, reason: "suspended" } : { allowed: true, reason: "self" }) : access.decide(user, permission, where);
     if (!d.allowed) return res.status(403).json(d.reason === "suspended" ? SUSPENDED : DENIED(permission));
     // owner: an admin reply never carries secrets, and documents / full contact details only with their permission
     const { safeRecord, optionsFor } = require("../utils/safeRecord");
@@ -47,7 +50,7 @@ function applyPermissions(router, map, file = "routes") {
     // { inline: "students.view" }: the handler checks it itself (an own-or-admin route); a tagged no-op marks it
     const inline = value && typeof value === "object" ? value.inline : null;
     const permission = inline || value;
-    if (!require("../config/adminPermissions").KEYS.includes(permission)) throw new Error(`[admin-access] ${file}: unknown permission ${permission} for ${key}`);
+    if (permission !== SELF && !require("../config/adminPermissions").KEYS.includes(permission)) throw new Error(`[admin-access] ${file}: unknown permission ${permission} for ${key}`);
     const [method, path] = key.split(" ");
     const layers = router.stack.filter((l) => l.route && l.route.path === path && l.route.methods[method.toLowerCase()]);
     if (!layers.length) throw new Error(`[admin-access] ${file}: no route ${key}`);
@@ -65,4 +68,4 @@ function applyPermissions(router, map, file = "routes") {
   return router;
 }
 
-module.exports = { permit, applyPermissions, DENIED, SUSPENDED };
+module.exports = { permit, applyPermissions, DENIED, SUSPENDED, SELF };

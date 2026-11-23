@@ -43,6 +43,7 @@ const userSchema = new mongoose.Schema(
         lastActiveAt: { type: Date },
         note: { type: String, maxlength: 120 },
         suspendedReason: { type: String, maxlength: 300 },
+        removedAt: { type: Date },
       }, { _id: false }),
       default: undefined,
     },

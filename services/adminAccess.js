@@ -45,6 +45,7 @@ function has(user, permission) {
   return false;
 }
 
+const ALWAYS_ENFORCED = new Set(["team.manage"]);
 const enforcing = () => require("../config/featureFlags").isEnabled("adminRbacEnforce", null);
 
 // shadow log: one row per admin + permission + route per hour (memory dedupe)
@@ -69,7 +70,8 @@ function decide(user, permission, where = "") {
   if (!level) return { allowed: false, reason: "not_admin" };
   if (level === "suspended") return { allowed: false, reason: "suspended" };
   if (has(user, permission)) return { allowed: true, reason: level };
-  if (!enforcing()) { logShadow(user, permission, where); return { allowed: true, reason: "shadow" }; }
+  // team.manage (making and changing admins) is never shadowed: like SEC-2, it fails closed for everyone but super admins
+  if (!enforcing() && !ALWAYS_ENFORCED.has(permission)) { logShadow(user, permission, where); return { allowed: true, reason: "shadow" }; }
   return { allowed: false, reason: "missing_permission" };
 }
 

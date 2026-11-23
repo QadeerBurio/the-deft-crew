@@ -74,6 +74,9 @@ module.exports = async (req, res, next) => {
     if (lock.locked) {
       return res.status(401).json(lockBody(lock));
     }
+    // Phase A (adminSessionsV1): an admin token needs a live session (12 hours idle ends it)
+    const session = await require("../services/adminSessions").check(decoded, user);
+    if (!session.ok) return res.status(401).json({ code: session.code, message: session.message });
     user.id = String(user._id); // Mongoose's "id" virtual; routes use req.user.id
     
     // Set user data on request

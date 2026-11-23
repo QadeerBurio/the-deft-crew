@@ -102,6 +102,9 @@ const authMiddleware = async (req, res, next) => {
         req.userId = decoded.id;
         req.userRole = decoded.role;
         req.user = await User.findById(req.userId);
+        // Phase A (adminSessionsV1): an admin token needs a live session, as in middleware/auth.middleware.js
+        const session = await require("../services/adminSessions").check(decoded, req.user);
+        if (!session.ok) return res.status(401).json({ code: session.code, message: session.message });
         next();
     } catch (err) {
         res.status(401).json({ message: "Invalid token" });

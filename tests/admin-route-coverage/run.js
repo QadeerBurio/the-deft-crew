@@ -92,15 +92,16 @@ const fill = (p) => p.replace(/:([A-Za-z_]+)/g, () => String(oid())).replace(/\(
   say("-- 2. enforced: a member without permissions is refused on every mapped route");
   process.env.FLAG_ADMIN_RBAC_ENFORCE = "on";
   const notRefused = []; const legacyRefused = [];
-  for (const r of mapped.filter((x) => !x.inline)) {
+  for (const r of mapped.filter((x) => !x.inline && x.permission !== "self")) { // "self": every admin (own access / sessions)
     const url = r.mount + fill(r.path);
     const m = await call(r.method, url, T.M);
     if (!(m.status === 403 && /ADMIN_PERMISSION_REQUIRED/.test(m.text))) notRefused.push(`${r.method} ${r.mount}${r.path} (${m.status})`);
     const a = await call(r.method, url, T.A);
-    if (/ADMIN_PERMISSION_REQUIRED/.test(a.text)) legacyRefused.push(`${r.method} ${r.mount}${r.path}`);
+    if (/ADMIN_PERMISSION_REQUIRED/.test(a.text) && r.permission !== "team.manage") legacyRefused.push(`${r.method} ${r.mount}${r.path}`);
+    if (r.permission === "team.manage" && !/ADMIN_PERMISSION_REQUIRED/.test(a.text)) legacyRefused.push(`team.manage open to an admin today: ${r.method} ${r.mount}${r.path}`);
   }
-  check(`member without permissions: 403 ADMIN_PERMISSION_REQUIRED on all ${mapped.filter((x) => !x.inline).length} mapped routes`, notRefused.length === 0, notRefused.slice(0, 8).join(" | "));
-  check("an admin today (no adminAccess): never refused by a permission", legacyRefused.length === 0, legacyRefused.slice(0, 8).join(" | "));
+  check(`member without permissions: 403 ADMIN_PERMISSION_REQUIRED on all ${mapped.filter((x) => !x.inline && x.permission !== "self").length} mapped routes`, notRefused.length === 0, notRefused.slice(0, 8).join(" | "));
+  check("an admin today (no adminAccess): never refused by a permission, except team.manage (super admins only, always)", legacyRefused.length === 0, legacyRefused.slice(0, 8).join(" | "));
   const one = mapped.find((r) => r.method === "GET" && r.permission === "students.view" && !r.inline);
   const p = await call("GET", one.mount + fill(one.path), T.P);
   check("a suspended member: 403 ADMIN_ACCESS_SUSPENDED (even with the permission)", p.status === 403 && /ADMIN_ACCESS_SUSPENDED/.test(p.text), p.text);

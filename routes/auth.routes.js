@@ -147,7 +147,7 @@ const cleanupFile = async (file) => {
 // ==========================================
 // AUTH MIDDLEWARE
 // ==========================================
-const authMiddleware = (req, res, next) => {
+const authMiddleware = async (req, res, next) => {
   try {
     const token = req.headers.authorization?.split(" ")[1];
     if (!token) {
@@ -157,6 +157,9 @@ const authMiddleware = (req, res, next) => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     req.userId = decoded.id;
     req.userRole = decoded.role;
+    // Phase A (adminSessionsV1): an admin token needs a live session, as in middleware/auth.middleware.js
+    const session = await require("../services/adminSessions").checkToken(decoded);
+    if (!session.ok) return res.status(401).json({ code: session.code, message: session.message });
 
     next();
   } catch (err) {
@@ -477,6 +480,10 @@ router.post("/login", async (req, res) => {
       });
     }
 
+    // Phase A (adminSessionsV1): an admin from a new device gets a code first; a known device a session token
+    const adminLogin = await require("../services/adminSessions").startLogin(user, req);
+    if (adminLogin) return res.json(adminLogin.body);
+
     const token = signToken(user);
 
     res.json({
@@ -485,6 +492,48 @@ router.post("/login", async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ==========================================
+// ADMIN SIGN-IN CODE (Phase A, adminSessionsV1): { sessionId, code } → { token, user }
+// ==========================================
+router.post("/admin/verify-code", async (req, res) => {
+  try {
+    const lock = loginGuard.check(req, `admin-code:${req.body?.sessionId || ""}`);
+    if (lock.locked) return loginGuard.reply(res, lock);
+    const r = await require("../services/adminSessions").verifyCode(req.body?.sessionId, req.body?.code);
+    if (r.status !== 200) loginGuard.fail(req, `admin-code:${req.body?.sessionId || ""}`);
+    return res.status(r.status).json(r.body);
+  } catch (err) {
+    console.error("[admin-sessions] verify failed:", err.message);
+    return res.status(500).json({ message: "Server error. Please try again." });
+  }
+});
+
+// ==========================================
+// ADMIN INVITATION (Phase A): { token, password } sets the invited member's password (72-hour link, used once)
+// ==========================================
+router.post("/admin/accept-invite", async (req, res) => {
+  try {
+    const raw = String(req.body?.token || "");
+    const password = String(req.body?.password || "");
+    if (!/^[0-9a-f]{64}$/.test(raw)) return res.status(400).json({ message: "this invitation link isn't valid." });
+    if (password.length < 8) return res.status(400).json({ message: "use at least 8 characters." });
+    const AdminInvite = require("../models/AdminInvite");
+    const inv = await AdminInvite.findOne({ tokenHash: crypto.createHash("sha256").update(raw).digest("hex") });
+    if (!inv || inv.usedAt || inv.expiresAt < new Date()) return res.status(400).json({ message: "this invitation has expired or was used. ask a super admin for a new one." });
+    const user = await User.findById(inv.user).select("role adminAccess email");
+    if (!user || user.role !== require("../services/adminAccess").ADMIN_ROLE || user.adminAccess?.status === "suspended") return res.status(400).json({ message: "this invitation is no longer valid." });
+    user.password = await bcrypt.hash(password, 10);
+    await user.save();
+    inv.usedAt = new Date();
+    await inv.save();
+    await require("../services/adminActionLog").recordSafe({ admin: user._id, action: "team.invite.accepted", targetType: "User", targetId: String(user._id), before: null, after: { accepted: true } });
+    return res.json({ success: true, message: "your password is set. sign in." });
+  } catch (err) {
+    console.error("[team] accept invite failed:", err.message);
+    return res.status(500).json({ message: "Server error. Please try again." });
   }
 });
 

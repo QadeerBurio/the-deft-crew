@@ -192,7 +192,7 @@ router.put("/users/role/:id", auth, isAdmin, async (req, res) => {
 
     const target = mongoose.Types.ObjectId.isValid(String(req.params.id)) ? await User.findById(req.params.id).select("role").lean() : null;
     if (target && (role === "admin" || require("../services/adminAccess").isAdminAccount(target))) {
-      const allowed = superAdmin.isSuperAdmin(req.userId);
+      const allowed = await superAdmin.canManageAdmins(req.userId);
       await superAdmin.logAttempt({ req, action: role === "admin" ? "admin.promote" : "admin.demote", targetId: req.params.id, before: { role: target.role }, after: { role }, allowed });
       if (!allowed) return res.status(403).json(superAdmin.REFUSED);
     }
@@ -270,7 +270,7 @@ router.post("/users/create", auth, isAdmin, async (req, res) => {
 
     // SEC-2: creating an admin only for accounts in SUPER_ADMIN_IDS (empty = nobody); every attempt logged
     const wantsAdmin = String(role || "").trim().toLowerCase() === "admin";
-    if (wantsAdmin && !superAdmin.isSuperAdmin(req.userId)) {
+    if (wantsAdmin && !(await superAdmin.canManageAdmins(req.userId))) {
       await superAdmin.logAttempt({ req, action: "admin.create", targetId: "new", after: { role: "admin" }, allowed: false });
       return res.status(403).json(superAdmin.REFUSED);
     }

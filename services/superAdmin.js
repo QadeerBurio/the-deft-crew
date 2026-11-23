@@ -11,6 +11,13 @@ function ids() {
   return new Set(unquote(process.env.SUPER_ADMIN_IDS || "").split(/[\s,;]+/).map(unquote).filter((x) => /^[0-9a-f]{24}$/i.test(x)).map((x) => x.toLowerCase()));
 }
 const isSuperAdmin = (userId) => !!userId && ids().has(String(userId).toLowerCase());
+/** Phase A: may this account create / promote / demote admins? A super admin: SUPER_ADMIN_IDS or adminAccess.level super */
+async function canManageAdmins(userId) {
+  if (isSuperAdmin(userId)) return true;
+  if (!/^[0-9a-f]{24}$/i.test(String(userId || ""))) return false;
+  const u = await require("../models/User").findById(userId).select("role adminAccess").lean();
+  return require("./adminAccess").levelOf(u) === "super";
+}
 
 /**
  * Log an attempt to create / promote / demote an admin. entry: { req, action, targetId, before, after, allowed }
@@ -24,10 +31,10 @@ async function logAttempt({ req, action, targetId, before = null, after = null, 
     targetId: String(targetId || "new"),
     before,
     after,
-    reason: allowed ? "allowed: listed in SUPER_ADMIN_IDS" : (ids().size ? "refused: not listed in SUPER_ADMIN_IDS" : "refused: SUPER_ADMIN_IDS is empty (nobody may create admins)"),
+    reason: allowed ? "allowed: a super admin" : (ids().size ? "refused: not listed in SUPER_ADMIN_IDS" : "refused: SUPER_ADMIN_IDS is empty (nobody may create admins)"),
   });
 }
 
 const REFUSED = { code: "SUPER_ADMIN_REQUIRED", message: "only a super admin can create, promote or demote admin accounts." };
 
-module.exports = { ids, isSuperAdmin, logAttempt, REFUSED };
+module.exports = { ids, isSuperAdmin, canManageAdmins, logAttempt, REFUSED };
