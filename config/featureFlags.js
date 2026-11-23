@@ -136,6 +136,9 @@ const FLAGS = {
   // history (services/adminSessions.js). Server only, Railway FLAG_ADMIN_SESSIONS_V1=on, after the portal with the
   // code screen is live. Off = admins sign in as today.
   adminSessionsV1: { default: false, client: false },
+  // P2-7: "bring your squad": 3 friends who join with your code and verify their e-mail in a Karachi week → a reward
+  // (services/crew/squad.js). Off = no mission.
+  squadMission: { default: false, client: true, grant: { roles: ["student"], label: "Squad mission" } },
 };
 
 const JOBS = {

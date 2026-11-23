@@ -318,6 +318,7 @@ app.use('/api/analytics', require('./routes/analytics.routes')); // admin / bran
 
 // 🆕 admin crew
 app.use('/api/admin/crew', require('./routes/adminCrew.routes'));
+app.use("/api/crew", require("./routes/crew.routes")); // P2: the ambassador programme for students (flag ambassadorV2)
 // ---------------- SOCKET.IO CHAT & CALL HANDLER ----------------
 // moved unchanged to socket/chatHandlers.js (SEC-1)
 require("./socket/chatHandlers").attach(io);
