@@ -34,10 +34,10 @@ const T = { S: token(S, "student"), B: token(B, "brand"), A: token(A, "admin") }
   check("profile/me: as before (name, referralCode, the added isVip / cardStatus / paymentStatus)", r.status === 200 && r.json.name === "Sana Malik" && r.json.referralCode === "SANA01" && r.json.isVip === false && "cardStatus" in r.json && "paymentStatus" in r.json, r.text.slice(0, 160));
   check("…no secret or ID-card field", leaks(r.json).length === 0, leaks(r.json).join());
 
-  // GET /me: over HTTP it is answered by GET /:id, defined earlier in the file (a pre-existing bug, reported to the
-  // owner; the route order is not changed here). Its own handler is checked directly.
+  // GET /me: it used to be answered by GET /:id (owner: moved before it, tests/auth-me-and-id); checked over HTTP and
+  // its handler directly.
   r = await call("GET", "/api/auth/me", { tok: T.B });
-  check("pre-existing: GET /api/auth/me is answered by /:id (400), reported to the owner", r.status === 400 && /Invalid User ID format/.test(r.json?.message || ""));
+  check("GET /api/auth/me (now before /:id, owner): 200 over HTTP, safe shape", r.status === 200 && r.json.brandName === "Chai Spot" && leaks(r.json).length === 0, r.text.slice(0, 160));
   const router = h.reqS("./routes/auth.routes");
   const layer = router.stack.find((l) => l.route && l.route.path === "/me" && l.route.methods.get);
   const handler = layer.route.stack[layer.route.stack.length - 1].handle;
