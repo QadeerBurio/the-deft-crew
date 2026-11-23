@@ -14,6 +14,13 @@ const credentialSchema = new mongoose.Schema(
     issuedAt: { type: Date, default: Date.now },
     issuedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     fileUrl: { type: String, default: '' },
+    // P2-5 (additive): a recommendation letter's text, written / edited by an admin and approved before it is issued
+    // (never generated); revokedAt / revokedBy: a revoked credential shows "revoked" on its public verify page
+    letterText: { type: String, default: undefined, maxlength: 6000 },
+    approvedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: undefined },
+    approvedAt: { type: Date, default: undefined },
+    revokedAt: { type: Date, default: undefined },
+    revokedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: undefined },
   },
   { timestamps: true }
 );

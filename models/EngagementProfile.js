@@ -152,6 +152,14 @@ const profileSchema = new mongoose.Schema(
       university: String,
       handle: String,
       addedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+      universityId: { type: mongoose.Schema.Types.ObjectId, ref: 'University' }, // P2 (additive)
+    },
+    // P2-1: the ambassador invitation (asked at most once; "not now" → once more after 30 days; "never" → never)
+    ambassadorInvite: {
+      shownAt: { type: Date },
+      answer: { type: String, enum: ['more', 'not_now', 'never'] },
+      answeredAt: { type: Date },
+      asks: { type: Number },
     },
 
     backfilledAt: { type: Date, default: null },

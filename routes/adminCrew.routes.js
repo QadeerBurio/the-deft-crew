@@ -33,6 +33,39 @@ const isAdmin = async (req, res, next) => {
 
 router.use(auth, isAdmin);
 
+// ─── P2 helpers ───
+const LETTERS = new Set(['letter', 'recommendation']);
+const isOid = (v) => /^[0-9a-f]{24}$/i.test(String(v || ''));
+const v2For = (userId) => require('../config/featureFlags').isEnabled('ambassadorV2', { id: String(userId), role: 'student' });
+
+// the University id of an application: stored (P2), or found by the name (older applications)
+async function universityIdOf(app) {
+  if (app.universityId) return app.universityId;
+  const name = String(app.university || '').trim();
+  if (!name) return null;
+  const esc = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const u = await require('../models/University').findOne({ name: { $regex: `^${esc}$`, $options: 'i' } }).select('_id').lean();
+  return u ? u._id : null;
+}
+
+// P2: tell the student (ambassadorV2 on for them) that their application was reviewed. A personal push.
+async function notifyApplicant(app) {
+  if (!app?.user || !v2For(app.user)) return;
+  const approved = app.status === 'approved';
+  const title = approved ? "you're in: tdc ambassador" : 'your ambassador application';
+  const body = approved
+    ? 'welcome to the crew. open your ambassador hub to get started.'
+    : (app.reviewNote ? `not this time: ${app.reviewNote}` : 'not this time. you can apply again in 30 days.');
+  try {
+    await require('../services/engagement/pushGateway').send(app.user, {
+      type: 'crew_application', budgetClass: 'personal', essential: true, title, body,
+      data: { route: 'Points', params: {}, crewApplication: app.status },
+    });
+  } catch (e) {
+    console.error('[adminCrew] application push failed:', e.message);
+  }
+}
+
 // ═══════════════════════════════════════════════════════════
 // INBOX — combined feed of pending posts + applications
 // ═══════════════════════════════════════════════════════════
@@ -57,8 +90,12 @@ router.get('/inbox', async (req, res) => {
         platform: p.platform,
         url: p.url,
         screenshotUrl: p.screenshotUrl,
-        summary: `${p.platform} post`,
+        summary: p.kind === 'moment' ? 'campus moment' : `${p.platform} post`,
         createdAt: p.createdAt,
+        // P2-5 (additive): a campus moment (photo + caption)
+        postKind: p.kind || 'link',
+        caption: p.caption || '',
+        imageUrl: p.imageUrl || '',
       })),
       ...apps.map((a) => ({
         _id: a._id,
@@ -69,6 +106,12 @@ router.get('/inbox', async (req, res) => {
         why: a.why,
         summary: 'partner application',
         createdAt: a.createdAt,
+        // P2-3 (additive): the in-app application's details
+        universityId: a.universityId || null,
+        whyChips: a.whyChips || [],
+        groups: a.groups || [],
+        source: a.source || 'form',
+        appliedAt: a.appliedAt || a.createdAt,
       })),
     ];
 
@@ -87,9 +130,22 @@ router.get('/inbox', async (req, res) => {
 // ═══════════════════════════════════════════════════════════
 router.get('/partners', async (req, res) => {
   try {
-    const profiles = await EngagementProfile.find({
-      'partner.type': { $in: ['ambassador', 'influencer'] },
-    })
+    // P2 (additive): ?university=<University id or name>: by the stored id, older partners by the name
+    const filter = { 'partner.type': { $in: ['ambassador', 'influencer'] } };
+    const uniQ = String(req.query.university || '').trim();
+    if (uniQ) {
+      const or = [];
+      let name = uniQ;
+      if (/^[0-9a-f]{24}$/i.test(uniQ)) {
+        or.push({ 'partner.universityId': uniQ });
+        const u = await require('../models/University').findById(uniQ).select('name').lean();
+        name = u?.name || '';
+      }
+      if (name) or.push({ 'partner.university': { $regex: `^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' } });
+      filter.$or = or.length ? or : [{ _id: null }];
+    }
+    const monthStart = require('../services/crew/ambassador').karachiMonthStart(new Date());
+    const profiles = await EngagementProfile.find(filter)
       .populate('user', 'name email profileImage university')
       .lean();
 
@@ -107,6 +163,11 @@ router.get('/partners', async (req, res) => {
           user: p.user?._id,
           status: 'approved',
         });
+        // P2 (additive): friends who joined with the code and verified their e-mail (all time / this month)
+        const [verified, verifiedThisMonth] = await Promise.all([
+          User.countDocuments({ referredBy: p.user?._id, emailVerified: true }),
+          User.countDocuments({ referredBy: p.user?._id, emailVerified: true, createdAt: { $gte: monthStart } }),
+        ]);
 
         return {
           _id: p._id,
@@ -119,6 +180,8 @@ router.get('/partners', async (req, res) => {
             firstSorts,
             sortedPercent,
             approvedPosts,
+            verified,
+            verifiedThisMonth,
           },
         };
       })
@@ -270,10 +333,14 @@ router.post('/partners/applications/:appId/review', async (req, res) => {
     if (!['approved', 'rejected'].includes(status)) {
       return res.status(400).json({ message: 'status must be approved or rejected' });
     }
+    // P2 (additive): an optional note to the student (shown in the app's application status)
+    const rawNote = req.body.note ?? req.body.reviewNote;
+    const set = { status, reviewedBy: req.userId, reviewedAt: new Date() };
+    if (typeof rawNote === 'string') set.reviewNote = rawNote.trim().slice(0, 500);
 
     const app = await PartnerApplication.findByIdAndUpdate(
       req.params.appId,
-      { $set: { status, reviewedBy: req.userId, reviewedAt: new Date() } },
+      { $set: set },
       { new: true }
     );
 
@@ -289,10 +356,13 @@ router.post('/partners/applications/:appId/review', async (req, res) => {
             'partner.university': app.university,
             'partner.handle': app.handle,
             'partner.addedBy': req.userId,
+            // P2: the university id (older applications: found by the name)
+            'partner.universityId': await universityIdOf(app),
           },
         }
       );
     }
+    notifyApplicant(app).catch(() => {});
 
     res.json(app);
   } catch (err) {
@@ -426,6 +496,14 @@ router.post('/credentials', async (req, res) => {
       return res.status(400).json({ message: 'userId and type required' });
     }
 
+    // P2-5 (ambassadorV2 on for the student): a recommendation letter starts as a draft; an admin writes / edits its
+    // text and approves it before it is issued (never generated). Flag off: issued at once, as before.
+    if (LETTERS.has(type) && v2For(userId)) {
+      const letterText = typeof req.body.letterText === 'string' ? req.body.letterText.trim().slice(0, 6000) : '';
+      const d = await Credential.create({ user: userId, type, note: note || '', status: 'draft', letterText, issuedBy: req.userId });
+      return res.status(201).json(d);
+    }
+
     const c = await Credential.create({
       user: userId,
       type,
@@ -445,9 +523,76 @@ router.delete('/credentials/:id', async (req, res) => {
   try {
     await Credential.findByIdAndUpdate(
       req.params.id,
-      { $set: { status: 'revoked', revokedAt: new Date() } }
+      { $set: { status: 'revoked', revokedAt: new Date(), revokedBy: req.userId } }
     );
     res.status(204).end();
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// P2-5: edit a draft letter's text (only drafts; an issued letter is never changed)
+router.put('/credentials/:id', async (req, res) => {
+  try {
+    if (!isOid(req.params.id)) return res.status(404).json({ message: 'credential not found' });
+    const c = await Credential.findById(req.params.id);
+    if (!c) return res.status(404).json({ message: 'credential not found' });
+    if (c.status !== 'draft') return res.status(409).json({ message: 'only a draft can be edited' });
+    if (typeof req.body.letterText === 'string') c.letterText = req.body.letterText.trim().slice(0, 6000);
+    if (typeof req.body.note === 'string') c.note = req.body.note.slice(0, 500);
+    await c.save();
+    res.json(c);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// P2-5: approve a draft letter → issued (needs its text)
+router.post('/credentials/:id/approve', async (req, res) => {
+  try {
+    if (!isOid(req.params.id)) return res.status(404).json({ message: 'credential not found' });
+    const c = await Credential.findById(req.params.id);
+    if (!c) return res.status(404).json({ message: 'credential not found' });
+    if (c.status !== 'draft') return res.status(409).json({ message: 'only a draft can be approved' });
+    if (LETTERS.has(c.type) && !String(c.letterText || '').trim()) return res.status(400).json({ message: 'write the letter first' });
+    const now = new Date();
+    c.status = 'issued'; c.approvedBy = req.userId; c.approvedAt = now; c.issuedAt = now; c.issuedBy = req.userId;
+    await c.save();
+    res.json(c);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// P2-5: revoke (its public verify page then says "revoked"); the same as DELETE, with the reply
+router.post('/credentials/:id/revoke', async (req, res) => {
+  try {
+    if (!isOid(req.params.id)) return res.status(404).json({ message: 'credential not found' });
+    const c = await Credential.findById(req.params.id);
+    if (!c) return res.status(404).json({ message: 'credential not found' });
+    if (c.status !== 'revoked') {
+      c.status = 'revoked'; c.revokedAt = new Date(); c.revokedBy = req.userId;
+      await c.save();
+    }
+    res.json(c);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// P2-5: preview the PDF (a draft letter too, once it has text)
+router.get('/credentials/:id/pdf', async (req, res) => {
+  try {
+    if (!isOid(req.params.id)) return res.status(404).json({ message: 'credential not found' });
+    const c = await Credential.findById(req.params.id).lean();
+    if (!c) return res.status(404).json({ message: 'credential not found' });
+    const certificate = require('../services/crew/certificate');
+    if (LETTERS.has(c.type) && !String(c.letterText || '').trim()) return res.status(400).json({ message: 'write the letter first' });
+    const pdf = await certificate.render(c);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="tdc-${c.type}-${c._id}${c.status === 'draft' ? '-draft' : ''}.pdf"`);
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.end(pdf);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -529,6 +674,10 @@ require("../middleware/adminAccess").applyPermissions(router, {
   "GET /credentials": "credentials.issue",
   "POST /credentials": "credentials.issue",
   "DELETE /credentials/:id": "credentials.issue",
+  "PUT /credentials/:id": "credentials.issue",
+  "POST /credentials/:id/approve": "credentials.issue",
+  "POST /credentials/:id/revoke": "credentials.issue",
+  "GET /credentials/:id/pdf": "credentials.issue",
   "POST /points/award": "points.award",
   "POST /badges/award": "points.award",
 }, "adminCrew.routes.js");
