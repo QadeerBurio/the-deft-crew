@@ -53,6 +53,14 @@ const cfg = reqS("./config/resumeTemplates");
   c = doc().customStyles;
   check("null clears a studio key (reset to the template's look); the older keys can't be cleared", r.status === 200 && c.palette === undefined && c.fontPair === undefined && c.sectionOrder === undefined && c.size === "S" && c.accentColor === "#AA0000", JSON.stringify(c));
 
+  console.log("-- reset after a typed custom colour (the app sends null for the studio keys + the default colours)");
+  r = await call("PUT", `/api/resume/${R}`, { tok: T, body: { customStyles: { palette: "custom", accentColor: "#7A1F5C" } } });
+  check("a typed custom colour is saved", r.status === 200 && doc().customStyles.palette === "custom" && doc().customStyles.accentColor === "#7A1F5C", JSON.stringify(doc().customStyles));
+  r = await call("PUT", `/api/resume/${R}`, { tok: T, body: { customStyles: { palette: null, size: null, density: null, margins: null, headingCase: null, headingStyle: null, headingIcons: null, hiddenSections: null, headings: null, photo: null, dateFormat: null, pageSize: null, linkStyle: null, accentColor: "#1E3A8A", headingColor: "#0F172A", textColor: "#334155" } } });
+  c = doc().customStyles;
+  const left = Object.keys(c).filter((k) => c[k] !== undefined).sort().join();
+  check("reset: back to the never-customised styles (the model's default colours, no studio key, custom colour gone)", r.status === 200 && left === "accentColor,bgColor,font,headingColor,textColor" && c.accentColor === "#1E3A8A" && c.headingColor === "#0F172A" && c.textColor === "#334155", JSON.stringify(c));
+
   console.log("-- photo link");
   r = await call("PUT", `/api/resume/${R}`, { tok: T, body: { personalInfo: { photoUrl: "https://res.cloudinary.com/x/me.jpg" } } });
   check("an https photo link is saved (first name untouched)", r.status === 200 && doc().personalInfo.photoUrl === "https://res.cloudinary.com/x/me.jpg" && doc().personalInfo.firstName === "Sana");
