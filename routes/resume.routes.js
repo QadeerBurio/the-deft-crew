@@ -709,6 +709,7 @@ router.put('/:id', auth, rejectGuest, async (req, res) => {
       const cleaned = require('../config/resumeTemplates').cleanCustomStyles(req.body.customStyles);
       const current = resume.customStyles && typeof resume.customStyles.toObject === 'function' ? resume.customStyles.toObject() : (resume.customStyles || {});
       const next = { ...current, ...cleaned };
+      for (const k of Object.keys(next)) if (next[k] === null) delete next[k]; // null = back to the template's look
       resume.customStyles = next;
       resume.markModified('customStyles');
     }

@@ -22,6 +22,7 @@ const CHOICES = {
   linkStyle: ["full", "short"],
 };
 const COLOURS = ["accentColor", "headingColor", "textColor", "bgColor"];
+const STUDIO_KEYS = ["palette", "fontPair", "size", "density", "margins", "headingCase", "headingStyle", "headingIcons", "sectionOrder", "hiddenSections", "headings", "photo", "dateFormat", "pageSize", "linkStyle"];
 const ID = /^[a-z0-9_-]{1,30}$/;
 const HEX = /^#[0-9a-f]{6}$/i;
 const str = (v, max) => String(v == null ? "" : v).replace(/\s+/g, " ").trim().slice(0, max);
@@ -49,6 +50,8 @@ function cleanCustomStyles(input) {
   }
   // a colour key must be a colour if it's one of the P3-6 colour keys sent with a palette
   for (const k of COLOURS) if (out[k] !== undefined && out[k] !== "" && x.palette !== undefined && !HEX.test(out[k])) delete out[k];
+  // null clears a studio key ("reset to the template's look"); the five older keys can't be cleared this way
+  for (const k of STUDIO_KEYS) if (x[k] === null) out[k] = null;
   return out;
 }
 

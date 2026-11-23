@@ -49,6 +49,10 @@ const cfg = reqS("./config/resumeTemplates");
   r = await call("PUT", `/api/resume/${R}`, { tok: T, body: { customStyles: { accentColor: "#AA0000" } } });
   c = doc().customStyles;
   check("an older app's colour-only save changes only that colour", c.accentColor === "#AA0000" && c.palette === "ocean" && c.size === "S");
+  r = await call("PUT", `/api/resume/${R}`, { tok: T, body: { customStyles: { palette: null, fontPair: null, sectionOrder: null, accentColor: null } } });
+  c = doc().customStyles;
+  check("null clears a studio key (reset to the template's look); the older keys can't be cleared", r.status === 200 && c.palette === undefined && c.fontPair === undefined && c.sectionOrder === undefined && c.size === "S" && c.accentColor === "#AA0000", JSON.stringify(c));
+
   console.log("-- photo link");
   r = await call("PUT", `/api/resume/${R}`, { tok: T, body: { personalInfo: { photoUrl: "https://res.cloudinary.com/x/me.jpg" } } });
   check("an https photo link is saved (first name untouched)", r.status === 200 && doc().personalInfo.photoUrl === "https://res.cloudinary.com/x/me.jpg" && doc().personalInfo.firstName === "Sana");
