@@ -199,7 +199,10 @@ const userSchema = new mongoose.Schema(
     // ✅ ADD THIS BLOCK
 city: {
   type: String,
-  default: "Karachi",
+  // owner (P3b): a NEW student account starts with no city (it used to be "Karachi" whether or not the student gave
+  // it). Brands / employers keep "Karachi" (their address geocoding uses it), and an existing account that never
+  // stored a city reads exactly as before (isNew is false when it is loaded).
+  default: function () { return this.isNew !== false && this.role === "student" ? "" : "Karachi"; },
   trim: true,
 },
     // --- STUDENT SPECIFICS ---
@@ -277,7 +280,8 @@ academicLevel: {
     avatar: { type: String },
     headline: { type: String, default: "" },
     bio: { type: String, default: "" },
-    location: { type: String, default: "Karachi, Pakistan" },
+    // owner (P3b): the same rule as city: empty for a new student account, as before for everyone else
+    location: { type: String, default: function () { return this.isNew !== false && this.role === "student" ? "" : "Karachi, Pakistan"; } },
     skills: [{ type: String }],
     education: [
       {
