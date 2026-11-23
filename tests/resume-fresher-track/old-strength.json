@@ -1,0 +1,1137 @@
+{
+ "empty": {
+  "input": {},
+  "expect": {
+   "score": 0,
+   "label": "needs more",
+   "missing": [
+    {
+     "key": "skills",
+     "text": "add 5 more skills",
+     "step": 7,
+     "points": 15
+    },
+    {
+     "key": "experience",
+     "text": "add an internship, job or volunteer role",
+     "step": 3,
+     "points": 12
+    },
+    {
+     "key": "summary",
+     "text": "add a short summary (2–3 lines about you)",
+     "step": 6,
+     "points": 10
+    },
+    {
+     "key": "education",
+     "text": "add your school, college or university",
+     "step": 2,
+     "points": 9
+    },
+    {
+     "key": "name",
+     "text": "add your full name",
+     "step": 1,
+     "points": 6
+    },
+    {
+     "key": "projects",
+     "text": "add a project (class, personal or work)",
+     "step": 4,
+     "points": 6
+    },
+    {
+     "key": "email",
+     "text": "add your email",
+     "step": 1,
+     "points": 5
+    },
+    {
+     "key": "phone",
+     "text": "add your phone number",
+     "step": 1,
+     "points": 5
+    },
+    {
+     "key": "title",
+     "text": "add a title, like \"HR Intern\"",
+     "step": 1,
+     "points": 5
+    },
+    {
+     "key": "extras",
+     "text": "add a certificate, language or achievement",
+     "step": 5,
+     "points": 5
+    },
+    {
+     "key": "city",
+     "text": "add your city",
+     "step": 1,
+     "points": 4
+    }
+   ]
+  }
+ },
+ "nameOnly": {
+  "input": {
+   "personalInfo": {
+    "firstName": "Sana"
+   }
+  },
+  "expect": {
+   "score": 6,
+   "label": "needs more",
+   "missing": [
+    {
+     "key": "skills",
+     "text": "add 5 more skills",
+     "step": 7,
+     "points": 15
+    },
+    {
+     "key": "experience",
+     "text": "add an internship, job or volunteer role",
+     "step": 3,
+     "points": 12
+    },
+    {
+     "key": "summary",
+     "text": "add a short summary (2–3 lines about you)",
+     "step": 6,
+     "points": 10
+    },
+    {
+     "key": "education",
+     "text": "add your school, college or university",
+     "step": 2,
+     "points": 9
+    },
+    {
+     "key": "projects",
+     "text": "add a project (class, personal or work)",
+     "step": 4,
+     "points": 6
+    },
+    {
+     "key": "email",
+     "text": "add your email",
+     "step": 1,
+     "points": 5
+    },
+    {
+     "key": "phone",
+     "text": "add your phone number",
+     "step": 1,
+     "points": 5
+    },
+    {
+     "key": "title",
+     "text": "add a title, like \"HR Intern\"",
+     "step": 1,
+     "points": 5
+    },
+    {
+     "key": "extras",
+     "text": "add a certificate, language or achievement",
+     "step": 5,
+     "points": 5
+    },
+    {
+     "key": "city",
+     "text": "add your city",
+     "step": 1,
+     "points": 4
+    }
+   ]
+  }
+ },
+ "contact": {
+  "input": {
+   "personalInfo": {
+    "firstName": "Sana",
+    "lastName": "Malik",
+    "email": "s@x.co",
+    "phone": "0300",
+    "location": "Karachi",
+    "title": "HR Intern"
+   }
+  },
+  "expect": {
+   "score": 25,
+   "label": "needs more",
+   "missing": [
+    {
+     "key": "skills",
+     "text": "add 5 more skills",
+     "step": 7,
+     "points": 15
+    },
+    {
+     "key": "experience",
+     "text": "add an internship, job or volunteer role",
+     "step": 3,
+     "points": 12
+    },
+    {
+     "key": "summary",
+     "text": "add a short summary (2–3 lines about you)",
+     "step": 6,
+     "points": 10
+    },
+    {
+     "key": "education",
+     "text": "add your school, college or university",
+     "step": 2,
+     "points": 9
+    },
+    {
+     "key": "projects",
+     "text": "add a project (class, personal or work)",
+     "step": 4,
+     "points": 6
+    },
+    {
+     "key": "extras",
+     "text": "add a certificate, language or achievement",
+     "step": 5,
+     "points": 5
+    }
+   ]
+  }
+ },
+ "titleIsName": {
+  "input": {
+   "personalInfo": {
+    "firstName": "Sana",
+    "lastName": "Malik",
+    "title": "Sana Malik"
+   },
+   "professionalSummary": {
+    "summary": "short"
+   }
+  },
+  "expect": {
+   "score": 6,
+   "label": "needs more",
+   "missing": [
+    {
+     "key": "skills",
+     "text": "add 5 more skills",
+     "step": 7,
+     "points": 15
+    },
+    {
+     "key": "experience",
+     "text": "add an internship, job or volunteer role",
+     "step": 3,
+     "points": 12
+    },
+    {
+     "key": "summary",
+     "text": "add a short summary (2–3 lines about you)",
+     "step": 6,
+     "points": 10
+    },
+    {
+     "key": "education",
+     "text": "add your school, college or university",
+     "step": 2,
+     "points": 9
+    },
+    {
+     "key": "projects",
+     "text": "add a project (class, personal or work)",
+     "step": 4,
+     "points": 6
+    },
+    {
+     "key": "email",
+     "text": "add your email",
+     "step": 1,
+     "points": 5
+    },
+    {
+     "key": "phone",
+     "text": "add your phone number",
+     "step": 1,
+     "points": 5
+    },
+    {
+     "key": "title",
+     "text": "add a title, like \"HR Intern\"",
+     "step": 1,
+     "points": 5
+    },
+    {
+     "key": "extras",
+     "text": "add a certificate, language or achievement",
+     "step": 5,
+     "points": 5
+    },
+    {
+     "key": "city",
+     "text": "add your city",
+     "step": 1,
+     "points": 4
+    }
+   ]
+  }
+ },
+ "jobNoDates": {
+  "input": {
+   "workExperience": [
+    {
+     "company": "Acme",
+     "position": "Intern"
+    }
+   ]
+  },
+  "expect": {
+   "score": 12,
+   "label": "needs more",
+   "missing": [
+    {
+     "key": "skills",
+     "text": "add 5 more skills",
+     "step": 7,
+     "points": 15
+    },
+    {
+     "key": "summary",
+     "text": "add a short summary (2–3 lines about you)",
+     "step": 6,
+     "points": 10
+    },
+    {
+     "key": "education",
+     "text": "add your school, college or university",
+     "step": 2,
+     "points": 9
+    },
+    {
+     "key": "name",
+     "text": "add your full name",
+     "step": 1,
+     "points": 6
+    },
+    {
+     "key": "projects",
+     "text": "add a project (class, personal or work)",
+     "step": 4,
+     "points": 6
+    },
+    {
+     "key": "email",
+     "text": "add your email",
+     "step": 1,
+     "points": 5
+    },
+    {
+     "key": "phone",
+     "text": "add your phone number",
+     "step": 1,
+     "points": 5
+    },
+    {
+     "key": "title",
+     "text": "add a title, like \"HR Intern\"",
+     "step": 1,
+     "points": 5
+    },
+    {
+     "key": "extras",
+     "text": "add a certificate, language or achievement",
+     "step": 5,
+     "points": 5
+    },
+    {
+     "key": "city",
+     "text": "add your city",
+     "step": 1,
+     "points": 4
+    },
+    {
+     "key": "experience_dates",
+     "text": "add dates to your experience at Intern at Acme",
+     "step": 3,
+     "points": 4
+    },
+    {
+     "key": "experience_bullets",
+     "text": "add 1–3 lines on what you did as Intern at Acme",
+     "step": 3,
+     "points": 4
+    }
+   ]
+  }
+ },
+ "jobsMixed": {
+  "input": {
+   "workExperience": [
+    {
+     "company": "Acme",
+     "position": "Intern",
+     "startDate": "2025-01-01",
+     "achievements": [
+      "did a thing"
+     ]
+    },
+    {
+     "company": "Beta"
+    }
+   ]
+  },
+  "expect": {
+   "score": 12,
+   "label": "needs more",
+   "missing": [
+    {
+     "key": "skills",
+     "text": "add 5 more skills",
+     "step": 7,
+     "points": 15
+    },
+    {
+     "key": "summary",
+     "text": "add a short summary (2–3 lines about you)",
+     "step": 6,
+     "points": 10
+    },
+    {
+     "key": "education",
+     "text": "add your school, college or university",
+     "step": 2,
+     "points": 9
+    },
+    {
+     "key": "name",
+     "text": "add your full name",
+     "step": 1,
+     "points": 6
+    },
+    {
+     "key": "projects",
+     "text": "add a project (class, personal or work)",
+     "step": 4,
+     "points": 6
+    },
+    {
+     "key": "email",
+     "text": "add your email",
+     "step": 1,
+     "points": 5
+    },
+    {
+     "key": "phone",
+     "text": "add your phone number",
+     "step": 1,
+     "points": 5
+    },
+    {
+     "key": "title",
+     "text": "add a title, like \"HR Intern\"",
+     "step": 1,
+     "points": 5
+    },
+    {
+     "key": "extras",
+     "text": "add a certificate, language or achievement",
+     "step": 5,
+     "points": 5
+    },
+    {
+     "key": "city",
+     "text": "add your city",
+     "step": 1,
+     "points": 4
+    },
+    {
+     "key": "experience_dates",
+     "text": "add dates to your experience at Beta",
+     "step": 3,
+     "points": 4
+    },
+    {
+     "key": "experience_bullets",
+     "text": "add 1–3 lines on what you did as Beta",
+     "step": 3,
+     "points": 4
+    }
+   ]
+  }
+ },
+ "eduNoDegree": {
+  "input": {
+   "education": [
+    {
+     "institution": "NED"
+    }
+   ]
+  },
+  "expect": {
+   "score": 9,
+   "label": "needs more",
+   "missing": [
+    {
+     "key": "skills",
+     "text": "add 5 more skills",
+     "step": 7,
+     "points": 15
+    },
+    {
+     "key": "experience",
+     "text": "add an internship, job or volunteer role",
+     "step": 3,
+     "points": 12
+    },
+    {
+     "key": "summary",
+     "text": "add a short summary (2–3 lines about you)",
+     "step": 6,
+     "points": 10
+    },
+    {
+     "key": "name",
+     "text": "add your full name",
+     "step": 1,
+     "points": 6
+    },
+    {
+     "key": "projects",
+     "text": "add a project (class, personal or work)",
+     "step": 4,
+     "points": 6
+    },
+    {
+     "key": "email",
+     "text": "add your email",
+     "step": 1,
+     "points": 5
+    },
+    {
+     "key": "phone",
+     "text": "add your phone number",
+     "step": 1,
+     "points": 5
+    },
+    {
+     "key": "title",
+     "text": "add a title, like \"HR Intern\"",
+     "step": 1,
+     "points": 5
+    },
+    {
+     "key": "extras",
+     "text": "add a certificate, language or achievement",
+     "step": 5,
+     "points": 5
+    },
+    {
+     "key": "city",
+     "text": "add your city",
+     "step": 1,
+     "points": 4
+    },
+    {
+     "key": "education_degree",
+     "text": "add your degree or programme",
+     "step": 2,
+     "points": 3
+    },
+    {
+     "key": "education_dates",
+     "text": "add dates to NED",
+     "step": 2,
+     "points": 3
+    }
+   ]
+  }
+ },
+ "eduFull": {
+  "input": {
+   "education": [
+    {
+     "institution": "NED",
+     "degree": "BS",
+     "startDate": "2025-01-01"
+    },
+    {
+     "institution": "KGS",
+     "fieldOfStudy": "Science",
+     "current": true
+    }
+   ]
+  },
+  "expect": {
+   "score": 15,
+   "label": "needs more",
+   "missing": [
+    {
+     "key": "skills",
+     "text": "add 5 more skills",
+     "step": 7,
+     "points": 15
+    },
+    {
+     "key": "experience",
+     "text": "add an internship, job or volunteer role",
+     "step": 3,
+     "points": 12
+    },
+    {
+     "key": "summary",
+     "text": "add a short summary (2–3 lines about you)",
+     "step": 6,
+     "points": 10
+    },
+    {
+     "key": "name",
+     "text": "add your full name",
+     "step": 1,
+     "points": 6
+    },
+    {
+     "key": "projects",
+     "text": "add a project (class, personal or work)",
+     "step": 4,
+     "points": 6
+    },
+    {
+     "key": "email",
+     "text": "add your email",
+     "step": 1,
+     "points": 5
+    },
+    {
+     "key": "phone",
+     "text": "add your phone number",
+     "step": 1,
+     "points": 5
+    },
+    {
+     "key": "title",
+     "text": "add a title, like \"HR Intern\"",
+     "step": 1,
+     "points": 5
+    },
+    {
+     "key": "extras",
+     "text": "add a certificate, language or achievement",
+     "step": 5,
+     "points": 5
+    },
+    {
+     "key": "city",
+     "text": "add your city",
+     "step": 1,
+     "points": 4
+    }
+   ]
+  }
+ },
+ "projects": {
+  "input": {
+   "projects": [
+    {
+     "name": "App",
+     "description": "a campus app for students"
+    },
+    {
+     "name": "Bot"
+    }
+   ]
+  },
+  "expect": {
+   "score": 6,
+   "label": "needs more",
+   "missing": [
+    {
+     "key": "skills",
+     "text": "add 5 more skills",
+     "step": 7,
+     "points": 15
+    },
+    {
+     "key": "experience",
+     "text": "add an internship, job or volunteer role",
+     "step": 3,
+     "points": 12
+    },
+    {
+     "key": "summary",
+     "text": "add a short summary (2–3 lines about you)",
+     "step": 6,
+     "points": 10
+    },
+    {
+     "key": "education",
+     "text": "add your school, college or university",
+     "step": 2,
+     "points": 9
+    },
+    {
+     "key": "name",
+     "text": "add your full name",
+     "step": 1,
+     "points": 6
+    },
+    {
+     "key": "email",
+     "text": "add your email",
+     "step": 1,
+     "points": 5
+    },
+    {
+     "key": "phone",
+     "text": "add your phone number",
+     "step": 1,
+     "points": 5
+    },
+    {
+     "key": "title",
+     "text": "add a title, like \"HR Intern\"",
+     "step": 1,
+     "points": 5
+    },
+    {
+     "key": "extras",
+     "text": "add a certificate, language or achievement",
+     "step": 5,
+     "points": 5
+    },
+    {
+     "key": "city",
+     "text": "add your city",
+     "step": 1,
+     "points": 4
+    },
+    {
+     "key": "project_description",
+     "text": "add a line about your project \"Bot\"",
+     "step": 4,
+     "points": 4
+    }
+   ]
+  }
+ },
+ "skills3": {
+  "input": {
+   "skills": [
+    {
+     "name": "Excel"
+    },
+    "Word",
+    {
+     "name": " "
+    },
+    {
+     "name": "Talking"
+    }
+   ]
+  },
+  "expect": {
+   "score": 9,
+   "label": "needs more",
+   "missing": [
+    {
+     "key": "experience",
+     "text": "add an internship, job or volunteer role",
+     "step": 3,
+     "points": 12
+    },
+    {
+     "key": "summary",
+     "text": "add a short summary (2–3 lines about you)",
+     "step": 6,
+     "points": 10
+    },
+    {
+     "key": "education",
+     "text": "add your school, college or university",
+     "step": 2,
+     "points": 9
+    },
+    {
+     "key": "name",
+     "text": "add your full name",
+     "step": 1,
+     "points": 6
+    },
+    {
+     "key": "projects",
+     "text": "add a project (class, personal or work)",
+     "step": 4,
+     "points": 6
+    },
+    {
+     "key": "skills",
+     "text": "add 2 more skills",
+     "step": 7,
+     "points": 6
+    },
+    {
+     "key": "email",
+     "text": "add your email",
+     "step": 1,
+     "points": 5
+    },
+    {
+     "key": "phone",
+     "text": "add your phone number",
+     "step": 1,
+     "points": 5
+    },
+    {
+     "key": "title",
+     "text": "add a title, like \"HR Intern\"",
+     "step": 1,
+     "points": 5
+    },
+    {
+     "key": "extras",
+     "text": "add a certificate, language or achievement",
+     "step": 5,
+     "points": 5
+    },
+    {
+     "key": "city",
+     "text": "add your city",
+     "step": 1,
+     "points": 4
+    }
+   ]
+  }
+ },
+ "extrasLang": {
+  "input": {
+   "languages": [
+    {
+     "name": "Urdu"
+    }
+   ]
+  },
+  "expect": {
+   "score": 5,
+   "label": "needs more",
+   "missing": [
+    {
+     "key": "skills",
+     "text": "add 5 more skills",
+     "step": 7,
+     "points": 15
+    },
+    {
+     "key": "experience",
+     "text": "add an internship, job or volunteer role",
+     "step": 3,
+     "points": 12
+    },
+    {
+     "key": "summary",
+     "text": "add a short summary (2–3 lines about you)",
+     "step": 6,
+     "points": 10
+    },
+    {
+     "key": "education",
+     "text": "add your school, college or university",
+     "step": 2,
+     "points": 9
+    },
+    {
+     "key": "name",
+     "text": "add your full name",
+     "step": 1,
+     "points": 6
+    },
+    {
+     "key": "projects",
+     "text": "add a project (class, personal or work)",
+     "step": 4,
+     "points": 6
+    },
+    {
+     "key": "email",
+     "text": "add your email",
+     "step": 1,
+     "points": 5
+    },
+    {
+     "key": "phone",
+     "text": "add your phone number",
+     "step": 1,
+     "points": 5
+    },
+    {
+     "key": "title",
+     "text": "add a title, like \"HR Intern\"",
+     "step": 1,
+     "points": 5
+    },
+    {
+     "key": "city",
+     "text": "add your city",
+     "step": 1,
+     "points": 4
+    }
+   ]
+  }
+ },
+ "extrasAch": {
+  "input": {
+   "achievements": [
+    "won debate"
+   ]
+  },
+  "expect": {
+   "score": 5,
+   "label": "needs more",
+   "missing": [
+    {
+     "key": "skills",
+     "text": "add 5 more skills",
+     "step": 7,
+     "points": 15
+    },
+    {
+     "key": "experience",
+     "text": "add an internship, job or volunteer role",
+     "step": 3,
+     "points": 12
+    },
+    {
+     "key": "summary",
+     "text": "add a short summary (2–3 lines about you)",
+     "step": 6,
+     "points": 10
+    },
+    {
+     "key": "education",
+     "text": "add your school, college or university",
+     "step": 2,
+     "points": 9
+    },
+    {
+     "key": "name",
+     "text": "add your full name",
+     "step": 1,
+     "points": 6
+    },
+    {
+     "key": "projects",
+     "text": "add a project (class, personal or work)",
+     "step": 4,
+     "points": 6
+    },
+    {
+     "key": "email",
+     "text": "add your email",
+     "step": 1,
+     "points": 5
+    },
+    {
+     "key": "phone",
+     "text": "add your phone number",
+     "step": 1,
+     "points": 5
+    },
+    {
+     "key": "title",
+     "text": "add a title, like \"HR Intern\"",
+     "step": 1,
+     "points": 5
+    },
+    {
+     "key": "city",
+     "text": "add your city",
+     "step": 1,
+     "points": 4
+    }
+   ]
+  }
+ },
+ "activitiesIgnored": {
+  "input": {
+   "activities": [
+    {
+     "organisation": "IEEE",
+     "role": "lead",
+     "bullets": [
+      "x"
+     ]
+    }
+   ],
+   "awards": [
+    {
+     "title": "Gold"
+    }
+   ]
+  },
+  "expect": {
+   "score": 0,
+   "label": "needs more",
+   "missing": [
+    {
+     "key": "skills",
+     "text": "add 5 more skills",
+     "step": 7,
+     "points": 15
+    },
+    {
+     "key": "experience",
+     "text": "add an internship, job or volunteer role",
+     "step": 3,
+     "points": 12
+    },
+    {
+     "key": "summary",
+     "text": "add a short summary (2–3 lines about you)",
+     "step": 6,
+     "points": 10
+    },
+    {
+     "key": "education",
+     "text": "add your school, college or university",
+     "step": 2,
+     "points": 9
+    },
+    {
+     "key": "name",
+     "text": "add your full name",
+     "step": 1,
+     "points": 6
+    },
+    {
+     "key": "projects",
+     "text": "add a project (class, personal or work)",
+     "step": 4,
+     "points": 6
+    },
+    {
+     "key": "email",
+     "text": "add your email",
+     "step": 1,
+     "points": 5
+    },
+    {
+     "key": "phone",
+     "text": "add your phone number",
+     "step": 1,
+     "points": 5
+    },
+    {
+     "key": "title",
+     "text": "add a title, like \"HR Intern\"",
+     "step": 1,
+     "points": 5
+    },
+    {
+     "key": "extras",
+     "text": "add a certificate, language or achievement",
+     "step": 5,
+     "points": 5
+    },
+    {
+     "key": "city",
+     "text": "add your city",
+     "step": 1,
+     "points": 4
+    }
+   ]
+  }
+ },
+ "experiencedTrack": {
+  "input": {
+   "settings": {
+    "track": "experienced"
+   },
+   "workExperience": [
+    {
+     "company": "Acme",
+     "position": "Intern",
+     "startDate": "2025-01-01",
+     "description": "handled customer support daily"
+    }
+   ],
+   "education": [
+    {
+     "institution": "NED",
+     "degree": "BS",
+     "endDate": "2025-01-01"
+    }
+   ],
+   "skills": [
+    {
+     "name": "a"
+    },
+    {
+     "name": "b"
+    },
+    {
+     "name": "c"
+    },
+    {
+     "name": "d"
+    },
+    {
+     "name": "e"
+    },
+    {
+     "name": "f"
+    }
+   ],
+   "professionalSummary": {
+    "summary": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+   },
+   "certifications": [
+    {
+     "name": "CCNA"
+    }
+   ]
+  },
+  "expect": {
+   "score": 65,
+   "label": "good start",
+   "missing": [
+    {
+     "key": "name",
+     "text": "add your full name",
+     "step": 1,
+     "points": 6
+    },
+    {
+     "key": "projects",
+     "text": "add a project (class, personal or work)",
+     "step": 4,
+     "points": 6
+    },
+    {
+     "key": "email",
+     "text": "add your email",
+     "step": 1,
+     "points": 5
+    },
+    {
+     "key": "phone",
+     "text": "add your phone number",
+     "step": 1,
+     "points": 5
+    },
+    {
+     "key": "title",
+     "text": "add a title, like \"HR Intern\"",
+     "step": 1,
+     "points": 5
+    },
+    {
+     "key": "city",
+     "text": "add your city",
+     "step": 1,
+     "points": 4
+    }
+   ]
+  }
+ }
+}
