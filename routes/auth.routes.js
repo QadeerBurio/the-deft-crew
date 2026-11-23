@@ -427,9 +427,9 @@ if (referrer) {
       });
     }
 
-    // 9. Return success response without password
-    const userResponse = user.toObject();
-    delete userResponse.password;
+    // 9. Return success response: the safe shape (owner, after P3b; as admin replies): no password, codes, push
+    // tokens, webhook / store secrets or ID-card pictures (no app reads them from this reply)
+    const userResponse = require("../utils/safeRecord").safeRecord(user.toObject());
 
     res.status(201).json({
       message: "Signup successful",
