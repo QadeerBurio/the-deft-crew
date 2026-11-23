@@ -563,8 +563,8 @@ router.post("/signup/verify-otp", async (req, res) => {
     const sendLogin = () => {
       const lock = accountStatus.lockOf(user); // plan P0-6, as in /login
       if (lock.locked) return res.status(403).json(accountStatus.lockBody(lock));
-      const userObj = user.toObject();
-      delete userObj.password;
+      // owner (after P3b): the safe shape (no password, codes, push tokens, secrets, ID-card pictures)
+      const userObj = require("../utils/safeRecord").safeRecord(user.toObject());
       return res.json({ success: true, token: signToken(user), user: userObj });
     };
 
@@ -675,7 +675,7 @@ router.get("/profile/me", authMiddleware, async (req, res) => {
     }
 
     const userData = {
-      ...user.toObject(),
+      ...(require("../utils/safeRecord").safeRecord(user.toObject())), // owner (after P3b): the safe shape
       isVip: user.isVip || false,
       canApplyForTdcCard: user.canApplyForTdcCard || false,
       paymentStatus: user.paymentStatus || "None",
@@ -1329,7 +1329,7 @@ router.get("/me", authMiddleware, async (req, res) => {
     }
 
     const userData = {
-      ...user.toObject(),
+      ...(require("../utils/safeRecord").safeRecord(user.toObject())), // owner (after P3b): the safe shape
       logo: user.logo || "",
       companyName: user.companyName || user.brandName || "",
       brandName: user.brandName || "",
@@ -1490,8 +1490,8 @@ router.post("/admin-login-as-brand", authMiddleware, async (req, res) => {
     );
     
     // Remove password from response
-    const brandResponse = brand.toObject();
-    delete brandResponse.password;
+    // owner (after P3b): the safe shape (no password, codes, push tokens, store secrets, ID-card pictures)
+    const brandResponse = require("../utils/safeRecord").safeRecord(brand.toObject());
     
     // Log the activity (optional)
     console.log(`✅ Admin ${adminUser.email} logged in as brand ${brand.brandName || brand.name}`);
