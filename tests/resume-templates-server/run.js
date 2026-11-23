@@ -49,6 +49,14 @@ const cfg = reqS("./config/resumeTemplates");
   r = await call("PUT", `/api/resume/${R}`, { tok: T, body: { customStyles: { accentColor: "#AA0000" } } });
   c = doc().customStyles;
   check("an older app's colour-only save changes only that colour", c.accentColor === "#AA0000" && c.palette === "ocean" && c.size === "S");
+  console.log("-- photo link");
+  r = await call("PUT", `/api/resume/${R}`, { tok: T, body: { personalInfo: { photoUrl: "https://res.cloudinary.com/x/me.jpg" } } });
+  check("an https photo link is saved (first name untouched)", r.status === 200 && doc().personalInfo.photoUrl === "https://res.cloudinary.com/x/me.jpg" && doc().personalInfo.firstName === "Sana");
+  for (const bad of ["http://x/me.jpg", "javascript:alert(1)", "https://x/a b.jpg", 42]) {
+    await call("PUT", `/api/resume/${R}`, { tok: T, body: { personalInfo: { photoUrl: bad } } });
+    if (doc().personalInfo.photoUrl !== "") { check(`a bad photo link (${bad}) → none`, false, doc().personalInfo.photoUrl); break; }
+  }
+  check("bad photo links (http, javascript:, spaces, not text) → none", doc().personalInfo.photoUrl === "");
   check("cleanCustomStyles: nothing but known keys", Object.keys(cfg.cleanCustomStyles({ evil: 1, $where: "x", __proto__: { a: 1 }, size: "M" })).join() === "size");
   h.finish(server);
 })().catch((e) => { console.error(e); process.exit(1); });

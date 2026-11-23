@@ -621,6 +621,8 @@ router.put('/:id', auth, rejectGuest, async (req, res) => {
     if (req.body.personalInfo) {
       const existingPI = resume.personalInfo ? (resume.personalInfo.toObject ? resume.personalInfo.toObject() : resume.personalInfo) : {};
       const pi = { ...existingPI, ...req.body.personalInfo };
+      // P3-6: a photo link must be https (anything else: no photo)
+      if (pi.photoUrl !== undefined) pi.photoUrl = typeof pi.photoUrl === 'string' && /^https:\/\/\S{1,500}$/i.test(pi.photoUrl.trim()) ? pi.photoUrl.trim() : '';
 
       // Auto-parse city and country if location string provided
       if (pi.location && typeof pi.location === 'string') {

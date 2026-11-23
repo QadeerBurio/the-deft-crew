@@ -22,7 +22,9 @@ const resumeSchema = new mongoose.Schema({
     postalCode: { type: String, default: '' },
     linkedin: { type: String, default: '' },
     github: { type: String, default: '' },
-    portfolio: { type: String, default: '' }
+    portfolio: { type: String, default: '' },
+    // P3-6 (optional): a photo for templates that show one, only when the student turns it on (an https link)
+    photoUrl: { type: String, default: undefined }
   },
   professionalSummary: {
     title: { type: String, default: '' },
