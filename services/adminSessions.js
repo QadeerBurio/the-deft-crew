@@ -21,7 +21,8 @@ const enabled = () => require("../config/featureFlags").isEnabled(FLAG, null);
 const isAdmin = (u) => require("./adminAccess").isAdminAccount(u);
 const salt = () => process.env.JWT_SECRET || "tdc";
 const hash = (v) => crypto.createHash("sha256").update(`${v}:${salt()}`).digest("hex");
-const deviceOf = (req) => { const d = String(req.get?.("X-Device-Id") || "").trim(); return /^[A-Za-z0-9_-]{16,80}$/.test(d) ? hash(`device:${d}`) : null; };
+// the portal sends deviceId in the login body (no extra header, so no cross-origin preflight change); a header works too
+const deviceOf = (req) => { const d = String(req.body?.deviceId || req.get?.("X-Device-Id") || "").trim(); return /^[A-Za-z0-9_-]{16,80}$/.test(d) ? hash(`device:${d}`) : null; };
 const ipOf = (req) => { try { return hash(`ip:${require("./loginGuard").clientIp(req)}`).slice(0, 16); } catch { return null; } };
 const maskEmail = (e = "") => { const [a, d] = String(e).split("@"); return d ? `${a.slice(0, 2)}••@${d}` : ""; };
 

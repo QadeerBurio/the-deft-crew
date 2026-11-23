@@ -118,7 +118,7 @@ const acc = (id) => rows("User", (u) => String(u._id) === String(id))[0]?.adminA
 
   console.log("-- sessions (adminSessionsV1)");
   const sess = reqS("./services/adminSessions");
-  const login = (email, device) => call("POST", "/api/auth/login", { body: { email, password: PW }, headers: device ? { "x-device-id": device } : {} });
+  const login = (email, device) => call("POST", "/api/auth/login", { body: { email, password: PW, ...(device ? { deviceId: device } : {}) } }); // the portal sends it in the body
   const supEmail = rows("User", (u) => String(u._id) === String(SUP))[0].email;
   r = await login(supEmail, "device-aaaaaaaaaaaaaaaa");
   check("flag off: an admin signs in as today (a token, no code)", r.status === 200 && !!r.json.token && !r.json.requiresAdminCode);
