@@ -129,6 +129,9 @@ const FLAGS = {
   // N-7: push copy that names the specific thing, with real numbers only (services/engagement/copy.js fillV2);
   // nothing specific and real to say → no push. Off = today's copy.
   pushCopyV2: { default: false, client: true, grant: { roles: ["student"], label: "Push copy v2" } },
+  // Phase A: admin permissions are enforced (middleware/adminAccess.js). Off = shadow mode: a member admin without a
+  // permission is still allowed and the "would deny" is logged for review. Server only, Railway FLAG_ADMIN_RBAC_ENFORCE=on.
+  adminRbacEnforce: { default: false, client: false },
 };
 
 const JOBS = {
