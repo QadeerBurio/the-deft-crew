@@ -21,6 +21,8 @@ const LIMITS = {
   confession_comment: { max: 30, windowMin: 60 }, // confession comments (flag confessionSafety)
   confession_report: { max: 20, windowMin: 60 }, // confession / comment reports (flag confessionSafety)
   confession_precheck: { max: 60, windowMin: 60 }, // the text check before an image upload (flag confessionSafety)
+  crew_apply: { max: 5, windowMin: 60 }, // ambassador applications (plan P2-3, flag ambassadorV2)
+  crew_moment: { max: 10, windowMin: 60 }, // campus moments (plan P2-5, flag ambassadorV2)
 };
 
 const envKey = (name, part) => `RATE_LIMIT_${name.toUpperCase()}_${part}`;

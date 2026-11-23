@@ -26,6 +26,14 @@ const partnerApplicationSchema = new mongoose.Schema(
     },
     reviewedAt: { type: Date, default: null },
     reviewNote: { type: String, default: '' },
+    // P2-3 (additive): the in-app application. universityId: the student's university (the name above stays, for
+    // older applications); groups: campus groups / societies; why chips; source: where it came from; appliedAt: the
+    // latest (re)application (a rejected student may apply again after 30 days: the same document, back to pending)
+    universityId: { type: mongoose.Schema.Types.ObjectId, ref: 'University', default: null, index: true },
+    groups: { type: [String], default: undefined },
+    whyChips: { type: [String], default: undefined },
+    source: { type: String, enum: ['app', 'web', 'form'], default: undefined },
+    appliedAt: { type: Date, default: null },
   },
   { timestamps: true }
 );

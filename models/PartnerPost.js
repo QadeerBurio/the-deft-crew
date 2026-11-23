@@ -9,12 +9,17 @@ const partnerPostSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+    // P2-5 (additive): kind "moment" = a campus moment (photo + caption, from the ambassador hub); "link" (missing on
+    // older posts) = a link to a social post, which still needs platform and url
+    kind: { type: String, enum: ['link', 'moment'], default: undefined },
+    caption: { type: String, default: undefined, maxlength: 500 },
+    imageUrl: { type: String, default: undefined },
     platform: {
       type: String,
       enum: ['instagram', 'tiktok', 'youtube', 'twitter', 'linkedin', 'other'],
-      required: true,
+      required: function () { return this.kind !== 'moment'; },
     },
-    url: { type: String, required: true },
+    url: { type: String, required: function () { return this.kind !== 'moment'; } },
     screenshotUrl: { type: String, default: '' },
     status: {
       type: String,
