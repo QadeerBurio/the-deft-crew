@@ -3,7 +3,7 @@
 // nothing religious, sectarian, ethnic, political, sexual or insulting, in English or Roman Urdu. Left out on purpose:
 // skin-tone and colour words that can read as race (kala, gora, black, white, brown), animals that are insults in Urdu
 // (ullu / owl, gadha / donkey, bandar / monkey, kutta / dog, suar / pig), the cow (religious), "garam" / "hot",
-// brand names, class words ("wala"), anything that judges a person (pagal, sust, nalaik, moti…), and words with a slang
+// brand names, class words ("wala"), anything that judges a person (pagal, sust, nalaik, moti…), size words next to a handle (chhota, bara: owner), and words with a slang
 // second meaning (spicy, mast, rangeen).
 // Every generated handle is also checked with the confession word filter (utils/profanity + the admin's banned words)
 // before it's given (services/confessionHandles.js).
@@ -17,7 +17,7 @@ const ADJECTIVES = [
   "swift", "gentle", "happy", "calm", "bright", "golden", "silver", "misty", "breezy", "cozy", "nerdy", "snappy", "zesty",
   "jolly", "plucky", "cheerful", "dreamy", "sparkly", "crispy", "tiny", "mighty", "stellar", "electric", "minty", "rapid",
   // Roman Urdu
-  "ziddi", "khush", "nayab", "thanda", "pyara", "chhota", "bara", "neela", "peela", "hara", "sunehra", "hoshiyar",
+  "ziddi", "khush", "nayab", "thanda", "pyara", "neela", "peela", "hara", "sunehra", "hoshiyar",
   "bahadur", "sharmila", "chulbula", "nirala", "albela", "masoom", "tez", "dheema", "anokha", "zabardast", "kamaal",
   "jugaari", "befikr", "chamakta",
 ];

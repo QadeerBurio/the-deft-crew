@@ -105,7 +105,7 @@ const Models = {
   RewardRedemption: M("RewardRedemption"), ShopifyStore: M("ShopifyStore"), DailyDrop: M("DailyDrop"), EngagementProfile: M("EngagementProfile"),
   EngagementEvent: M("EngagementEvent"), PointsLedger: M("PointsLedger"), UserBadge: M("UserBadge"), DropReaction: M("DropReaction"),
   SavedItem: M("SavedItem"), Credential: M("Credential"), PartnerApplication: M("PartnerApplication"), PartnerPost: M("PartnerPost"),
-  ReferralClick: M("ReferralClick"), Post: M("Post"), Confession: M("Confession"), Story: M("Story"), Message: M("Chat", "Message"),
+  ReferralClick: M("ReferralClick"), Post: M("Post"), Confession: M("Confession"), ConfessionFollow: M("ConfessionFollow"), Story: M("Story"), Message: M("Chat", "Message"),
   Conversation: M("Chat", "Conversation"), Notification: M("Notification"), SocialNotification: M("SocialNotification"), BlockedUser: M("BlockedUser"),
   Report: M("Report"), Listing: M("Listing"), Inquiry: M("Inquiry"), SkillOffer: M("SkillOffer"), Match: M("Match"), Resume: M("Resume"),
   SkillGapCache: M("SkillGapCache"), ProfessionalProfile: M("ProfessionalProfile"), JobApplication: M("JobApplication"), JobInteraction: M("JobInteraction"),
@@ -223,9 +223,11 @@ seed(Models.Post, [
 ]);
 ids.cfT = oid();
 seed(Models.Confession, [
-  { _id: oid(), authorId: ids.S, content: "secret", image: cloud("TDC_Posts/conf.jpg"), likes: 0, likedBy: [] },
+  { _id: (ids.cfS = oid()), authorId: ids.S, content: "secret", image: cloud("TDC_Posts/conf.jpg"), likes: 0, likedBy: [] },
   { _id: ids.cfT, authorId: ids.T, content: "t secret", likes: 2, likedBy: [ids.S, ids.T], comments: [{ _id: oid(), user: ids.S, text: "same", mentions: [] }, { _id: oid(), user: ids.T, text: "ok", mentions: [ids.S] }] },
 ]);
+// P4b: S follows T's confession; T follows S's; T follows its own (stays)
+seed(Models.ConfessionFollow, [{ _id: oid(), user: ids.S, confession: ids.cfT, on: true }, { _id: oid(), user: ids.T, confession: ids.cfS, on: true }, { _id: oid(), user: ids.T, confession: ids.cfT, on: true, author: true }]);
 ids.stT = oid();
 seed(Models.Story, [
   { _id: oid(), author: ids.S, image: cloud("TDC_Stories/s.jpg"), expiresAt: later(10) },
@@ -469,6 +471,7 @@ const textAnywhere = (needle, skip = []) => [...fake.STORE].filter(([n]) => !ski
   check("S's own event deleted, T told in the app", rows(Models.Event, (e) => same(e._id, ids.evS)).length === 0 && rows(Models.Notification, (n) => same(n.recipient, ids.T) && n.title === "event cancelled").length === 1);
   check("booking kept anonymised", rows(Models.Booking, (b) => b.packageName === "Hunza" && b.customerName === "deleted user" && !same(b.userId, ids.S)).length === 1);
   check("career, scholarship, engagement and push records gone", [Models.Resume, Models.SkillGapCache, Models.ProfessionalProfile, Models.JobApplication, Models.JobInteraction, Models.Application, Models.UserBadge, Models.DropReaction, Models.SavedItem, Models.Credential, Models.PartnerApplication, Models.PartnerPost, Models.ReferralClick, Models.PushLog, Models.SocialPushDaily, Models.OtpCode].every((Mdl) => rows(Mdl).length === 0));
+  check("confession follows: the student's own and those on their confessions gone; others stay (P4b)", rows(Models.ConfessionFollow).length === 1 && same(rows(Models.ConfessionFollow)[0].user, ids.T) && same(rows(Models.ConfessionFollow)[0].confession, ids.cfT));
   check("engagement events kept anonymised (metrics history)", rows(Models.EngagementEvent).length === 2);
   const sEv = rows(Models.CareerApplicationEvent, (e) => same(e.application, appS)).sort((a, b) => a.seq - b.seq);
   check("hiring timeline: S's 5 events kept (the employer's funnel still counts the hire) with a placeholder instead of S", sEv.length === 5 && sEv.every((e) => !same(e.candidate, ids.S) && same(e.candidate, sEv[0].candidate) && same(e.employer, EMP)) && !sEv.some((e) => same(e.actor, ids.S)) && sEv[4].type === "HIRE_CONFIRMED");

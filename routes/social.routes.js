@@ -1408,7 +1408,11 @@ const featureFlags = require('../config/featureFlags');
 const v2On = (req) => !isGuestReq(req) && featureFlags.isEnabled('confessionsV2', { id: String(req.user?._id || req.userId || ''), role: req.userRole });
 const confessionHandles = require('../services/confessionHandles');
 const { MOODS: CONFESSION_MOODS } = require('../config/confessionMoods');
-const V2_FIELDS = ['handle', 'handleVerified', 'tag', 'mood', 'meTooCount'];
+const V2_FIELDS = ['handle', 'handleVerified', 'tag', 'mood', 'meTooCount', 'poll'];
+// P4b: polls, follow + reply pushes, saved list (each also behind its own flag)
+const subOn = (req, name) => !isGuestReq(req) && featureFlags.isEnabled(name, { id: String(req.user?._id || req.userId || ''), role: req.userRole });
+const confessionPolls = require('../services/confessionPolls');
+const confessionFollows = require('../services/confessionFollows');
 // hot: recent and engaged (likes, me too, live comments count double), fading with age; top: the week's most engaged
 const engagement = (c) => (Number(c.likes) || 0) + (Number(c.meTooCount) || 0) + 2 * (c.comments || []).filter((x) => !x.status || x.status === 'live').length;
 const hotScore = (c, now) => (engagement(c) + 1) / Math.pow(Math.max(0, (now - new Date(c.createdAt).getTime()) / 3600e3) + 2, 1.5);
@@ -1729,6 +1733,8 @@ router.post('/confessions/comment/:id', auth, limitIfSafety('confession_comment'
     // ✅ Send MENTION notifications (only for mentions — no auto-reply notify, since anonymous)
     const previewText = text.length > 30 ? text.substring(0, 30) + "..." : text;
     const held = commentStatus === 'pending';
+    // P4b (confessionFollow): followers hear about a live reply (not the one who wrote it); held replies: nobody
+    if (!held) setImmediate(() => confessionFollows.notifyReply({ confessionId: confession._id, commenterId: req.user._id }).catch((e) => console.warn('[confession-follow] reply push failed:', e.message)));
     // held comments notify nobody. Confessions are anonymous, so the mention never names the commenter, for everyone
     // (owner, P4-1 follow-up): anonymous text, and the sender is a fixed id that matches no account (the app then shows
     // "Someone" and opens no profile).
@@ -1887,13 +1893,19 @@ router.get('/confessions/feed', auth, async (req, res) => {
     const ranked = sort === 'hot' || sort === 'top';
     if (v2 && typeof req.query.tag === 'string' && safetySettings.TAG_ID.test(req.query.tag)) filter.$and.push({ tag: req.query.tag });
     if (ranked) filter.$and.push({ createdAt: { $gte: new Date(Date.now() - (sort === 'hot' ? 14 : 7) * 864e5) } });
+    // P4b: ?saved=1 → only the confessions this student saved (still live and visible to them)
+    const SavedItem = require('../models/SavedItem');
+    if (v2 && req.query.saved === '1') {
+      const savedIds = (await SavedItem.find({ user: currentUserId, kind: 'confession' }).select('refId').lean()).map((x) => x.refId);
+      filter.$and.push({ _id: { $in: savedIds } });
+    }
 
     let query = Confession.find(filter)
       .sort({ createdAt: -1 })
       .populate('comments.user', 'name profileImage')
       .populate('university', 'name')
       .lean();
-    if (v2) query = query.select('+meTooBy');
+    if (v2) query = query.select(subOn(req, 'confessionPolls') ? '+meTooBy +pollVoters' : '+meTooBy');
     if (ranked) query = query.limit(500); // the candidates of the last 14 / 7 days, ranked below
     else if (limit > 0) query = query.limit(limit);
     let confessions = await query;
@@ -1905,6 +1917,13 @@ router.get('/confessions/feed', auth, async (req, res) => {
       const page = Math.max(0, Math.min(100, parseInt(req.query.page, 10) || 0));
       confessions = scored.slice(page * size, page * size + size).map((x) => x.c);
     }
+
+    // P4b: which of these I follow and saved (only with the flags)
+    const pollsOn = v2 && subOn(req, 'confessionPolls');
+    const followOn = v2 && subOn(req, 'confessionFollow');
+    const pageIds = confessions.map((c) => c._id);
+    const followed = followOn ? await confessionFollows.followingSet(currentUserId, pageIds) : new Set();
+    const savedSet = v2 ? new Set((await SavedItem.find({ user: currentUserId, kind: 'confession', refId: { $in: pageIds } }).select('refId').lean()).map((x) => String(x.refId))) : new Set();
 
     const formattedConfessions = confessions.map(confession => {
       // Hide user identity of OTHER users' comments
@@ -1930,12 +1949,18 @@ router.get('/confessions/feed', auth, async (req, res) => {
 
       // P4a: the v2 fields only for a viewer with confessionsV2 (others: exactly the old shape)
       const v2Fields = v2
-        ? { meTooCount: Math.max(0, Number(confession.meTooCount) || 0), meTooByCurrentUser: !!currentUserId && (confession.meTooBy || []).some((x) => String(x) === currentUserId) }
+        ? {
+          meTooCount: Math.max(0, Number(confession.meTooCount) || 0), meTooByCurrentUser: !!currentUserId && (confession.meTooBy || []).some((x) => String(x) === currentUserId),
+          poll: pollsOn ? confessionPolls.view(confession.poll, confession.pollVoters, currentUserId) : undefined,
+          ...(followOn ? { following: followed.has(String(confession._id)) } : {}),
+          saved: savedSet.has(String(confession._id)),
+        }
         : Object.fromEntries(V2_FIELDS.map((k) => [k, undefined]));
       return {
         ...confession,
         ...v2Fields,
         meTooBy: undefined,
+        pollVoters: undefined,
         authorId: undefined,
         reportedBy: undefined,
         statusReason: undefined,
@@ -1985,6 +2010,15 @@ router.post('/confessions/create', auth, limitIfSafety('confession_post'), async
       return res.status(401).json({ error: "Sign in to post a confession." });
     }
 
+    // P4b (confessionsV2 + confessionPolls): a poll of 2-4 options; it needs the question (the text)
+    let pollIn = null;
+    if (req.body.poll != null && v2On(req) && subOn(req, 'confessionPolls')) {
+      const p = confessionPolls.cleanPoll(req.body.poll);
+      if (p.error) return res.status(400).json({ error: p.error.message, code: p.error.code });
+      if (!String(text || '').trim()) return res.status(400).json({ error: "add your question above the poll.", code: 'BAD_POLL' });
+      pollIn = p.poll;
+    }
+    const checkedText = pollIn ? [text || '', ...pollIn.options].join('\n') : (text || '');
     const currentUser = await User.findById(req.user._id).populate('university');
     
     if (!currentUser) {
@@ -2004,7 +2038,7 @@ router.post('/confessions/create', auth, limitIfSafety('confession_post'), async
     if (safetyMode === 'enforce' && safetyOn(req)) {
       const banned = confessionStrikes.bannedUntil(currentUser);
       if (banned) return banReply(res, banned);
-      const result = await confessionCheck.check({ text: text || '', image: image || '', universityId: currentUser.university?._id });
+      const result = await confessionCheck.check({ text: checkedText, image: image || '', universityId: currentUser.university?._id });
       if (result.verdict === 'edit') {
         const blocked = await confessionStrikes.noteBlocked(req.user._id, { reason: result.reasons.map((r) => r.code).join(', '), content: text });
         alertIfSevere(result, req.user._id, text, '');
@@ -2032,6 +2066,7 @@ router.post('/confessions/create', auth, limitIfSafety('confession_post'), async
       }
     }
 
+    if (pollIn) v2Extras.poll = pollIn;
     const confession = new Confession({
       ...v2Extras,
       authorId: req.user._id,
@@ -2047,10 +2082,13 @@ router.post('/confessions/create', auth, limitIfSafety('confession_post'), async
     });
 
     await confession.save();
+    if (v2On(req) && subOn(req, 'confessionFollow')) {
+      confessionFollows.setFollow(req.user._id, confession._id, true, { author: true }).catch((e) => console.warn('[confession-follow] author follow failed:', e.message));
+    }
 
     // observe mode: check in the background and log what would have happened (nothing acts)
     if (safetyMode === 'observe') {
-      setImmediate(() => safetyObserve.observePost({ kind: 'confession', text: text || '', image: image || '', universityId: currentUser.university?._id, userId: req.user._id, confessionId: confession._id }));
+      setImmediate(() => safetyObserve.observePost({ kind: 'confession', text: checkedText, image: image || '', universityId: currentUser.university?._id, userId: req.user._id, confessionId: confession._id }));
     }
 
     // held ("under review"): no push, no points, nothing public. Self-harm: support for the author, e-mail to admins.
