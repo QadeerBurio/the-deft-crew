@@ -94,6 +94,17 @@ const JobApplicationSchema = new mongoose.Schema({
         enum: ["Citizen", "Permanent Resident", "Work Visa", "Need Sponsorship", "Other"],
         default: "Citizen"
     },
+    // P3d (owner #10): the tdc resume sent with this application and its template at that moment ("my tdc resume" in
+    // the app); missing for a file the student picked, a Resume Studio version, or an older app
+    resumeSource: {
+        type: new mongoose.Schema({
+            kind: { type: String, enum: ["tdc_resume"] },
+            resumeId: { type: mongoose.Schema.Types.ObjectId, ref: "Resume" },
+            templateId: { type: String, maxlength: 40 },
+            at: { type: Date },
+        }, { _id: false }),
+        default: undefined,
+    },
     // Status Tracking
     status: {
         type: String,

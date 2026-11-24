@@ -50,13 +50,14 @@ const enforcing = () => require("../config/featureFlags").isEnabled("adminRbacEn
 
 // shadow log: one row per admin + permission + route per hour (memory dedupe)
 const seen = new Map();
+let lastWrite = Promise.resolve(); // the latest log write (tests await it: _test.flushed())
 function logShadow(user, permission, where) {
   const key = `${user._id}|${permission}|${where}`;
   const now = Date.now();
   if (seen.has(key) && now - seen.get(key) < 60 * 60 * 1000) return;
   seen.set(key, now);
   console.warn(`[admin-access] shadow: would deny ${permission} for admin ${String(user._id).slice(-6)} on ${where}`);
-  Promise.resolve()
+  lastWrite = Promise.resolve()
     .then(() => require("../models/AdminAccessShadow").create({ admin: user._id, permission, where: String(where).slice(0, 120) }))
     .catch((e) => console.warn("[admin-access] shadow log failed:", e.message));
 }
@@ -103,4 +104,4 @@ async function callerOf(req) {
   return require("../models/User").findById(id).select("role adminAccess").lean();
 }
 
-module.exports = { ADMIN_ROLE, isAdminAccount, levelOf, permissionsOf, has, decide, adminCan, adminAllowed, allowedFor, callerOf, enforcing, _test: { seen } };
+module.exports = { ADMIN_ROLE, isAdminAccount, levelOf, permissionsOf, has, decide, adminCan, adminAllowed, allowedFor, callerOf, enforcing, _test: { seen, flushed: () => lastWrite } };

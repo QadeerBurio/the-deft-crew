@@ -678,6 +678,8 @@ router.put('/:id', auth, rejectGuest, async (req, res) => {
     if (req.body.settings) {
       // P3-1: a track that isn't one of the two is ignored (never a failed save)
       if (req.body.settings.track !== undefined && !['fresher', 'experienced'].includes(req.body.settings.track)) delete req.body.settings.track;
+      // P3d: the verified line is on or off, nothing else
+      if (req.body.settings.verifiedLine !== undefined && typeof req.body.settings.verifiedLine !== 'boolean') delete req.body.settings.verifiedLine;
       resume.settings = {
         ...resume.settings,
         ...req.body.settings
@@ -1213,6 +1215,7 @@ router.post('/:id/duplicate', auth, rejectGuest, checkResumeLimit, async (req, r
     delete dupData._id;
     delete dupData.createdAt;
     delete dupData.updatedAt;
+    delete dupData.publicPage; // P3d: a copy starts with its public page off (and no link)
 
     if (dupData.personalInfo) {
       dupData.personalInfo.firstName = `Copy of ${dupData.personalInfo.firstName || 'Resume'}`;

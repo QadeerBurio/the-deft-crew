@@ -704,6 +704,15 @@ router.post("/apply/:jobId", authMiddleware, uploadResume.single('resume'), asyn
             applicationData.resumeFileName = req.file.originalname;
         }
 
+        // P3d (owner #10): "my tdc resume": which resume and template went with it, read from the student's own resume now
+        // (never what the app says the template is). A wrong or foreign id is ignored: never a failed application.
+        const tdcResumeId = String(req.body?.tdcResumeId || "");
+        if (/^[0-9a-f]{24}$/i.test(tdcResumeId)) {
+            try {
+                const own = await require("../models/Resume").findOne({ _id: tdcResumeId, user: req.userId }).select("template").lean();
+                if (own) applicationData.resumeSource = { kind: "tdc_resume", resumeId: own._id, templateId: require("../utils/resumeRender").templateOf(own.template).id, at: new Date() };
+            } catch (e) { console.warn("[apply] resume snapshot skipped:", e.message); }
+        }
         const application = new JobApplication(applicationData);
         await application.save();
         await careerLegacy.recordApplied(application._id); // FLAG_CAREER_TIMELINE pilot only

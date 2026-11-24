@@ -309,4 +309,4 @@ async function transcribe(buffer, mime = "audio/m4a") {
   return { text: str(r?.text, 2000) };
 }
 
-module.exports = { coach, check, autofix, transcribe, softSkills, CoachError, VERBS, _setClient: (c) => { client = c; }, _spellCache: spellCache };
+module.exports = { coach, check, autofix, transcribe, softSkills, CoachError, VERBS, askJson, guard, corpusOf, _setClient: (c) => { client = c; }, _spellCache: spellCache };

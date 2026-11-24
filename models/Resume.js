@@ -271,7 +271,21 @@ const resumeSchema = new mongoose.Schema({
     saveInterval: { type: Number, default: 30 },
     defaultTemplate: { type: String, default: 'modern' },
     // P3-1 / P3-2: "fresher" (no internship or job yet) or "experienced"; missing = experienced (old resumes unchanged)
-    track: { type: String, enum: ['fresher', 'experienced'] }
+    track: { type: String, enum: ['fresher', 'experienced'] },
+    // P3d: the "verified by tdc" line on this resume (facts from the server, never typed); off until the student adds it
+    verifiedLine: { type: Boolean, default: false }
+  },
+  // P3d public resume page (owner #1): off until the student turns it on; its own switch (never settings.visibility).
+  // slug: the unguessable link (22 random characters, a new one on "new link"); selfKey: added to the student's own
+  // "open my page" so their visits aren't counted. Both are never sent with the resume (select: false).
+  publicPage: {
+    on: { type: Boolean, default: false },
+    slug: { type: String, select: false, index: { unique: true, sparse: true } },
+    selfKey: { type: String, select: false },
+    showPhone: { type: Boolean, default: false },
+    showEmail: { type: Boolean, default: false },
+    views: { type: Number, default: 0 },
+    updatedAt: { type: Date },
   },
   completionPercentage: { type: Number, default: 0 },
   isComplete: { type: Boolean, default: false },
