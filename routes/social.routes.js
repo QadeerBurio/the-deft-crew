@@ -956,7 +956,8 @@ router.post('/create-post', auth, async (req, res) => {
       category: category || "General",
       image: image || "",
       poll: poll || [],
-      location: location || "Karachi"
+      // owner (after P3b): what the student sent, or no location (never a made-up "Karachi")
+      location: typeof location === "string" ? location.trim().slice(0, 120) : ""
     });
 
     await newPost.save();

@@ -427,9 +427,9 @@ if (referrer) {
       });
     }
 
-    // 9. Return success response without password
-    const userResponse = user.toObject();
-    delete userResponse.password;
+    // 9. Return success response: the safe shape (owner, after P3b; as admin replies): no password, codes, push
+    // tokens, webhook / store secrets or ID-card pictures (no app reads them from this reply)
+    const userResponse = require("../utils/safeRecord").safeRecord(user.toObject());
 
     res.status(201).json({
       message: "Signup successful",
@@ -563,8 +563,8 @@ router.post("/signup/verify-otp", async (req, res) => {
     const sendLogin = () => {
       const lock = accountStatus.lockOf(user); // plan P0-6, as in /login
       if (lock.locked) return res.status(403).json(accountStatus.lockBody(lock));
-      const userObj = user.toObject();
-      delete userObj.password;
+      // owner (after P3b): the safe shape (no password, codes, push tokens, secrets, ID-card pictures)
+      const userObj = require("../utils/safeRecord").safeRecord(user.toObject());
       return res.json({ success: true, token: signToken(user), user: userObj });
     };
 
@@ -675,7 +675,7 @@ router.get("/profile/me", authMiddleware, async (req, res) => {
     }
 
     const userData = {
-      ...user.toObject(),
+      ...(require("../utils/safeRecord").safeRecord(user.toObject())), // owner (after P3b): the safe shape
       isVip: user.isVip || false,
       canApplyForTdcCard: user.canApplyForTdcCard || false,
       paymentStatus: user.paymentStatus || "None",
@@ -1146,6 +1146,34 @@ router.get("/packages/public", async (req, res) => {
 });
 
 // ==========================================
+// GET CURRENT USER (ME)
+// (owner, after P3b: /me must come before /:id, which used to answer it with a 400)
+// ==========================================
+router.get("/me", authMiddleware, async (req, res) => {
+  try {
+    const user = await User.findById(req.userId)
+      .select("-password")
+      .populate("university");
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const userData = {
+      ...(require("../utils/safeRecord").safeRecord(user.toObject())), // owner (after P3b): the safe shape
+      logo: user.logo || "",
+      companyName: user.companyName || user.brandName || "",
+      brandName: user.brandName || "",
+    };
+
+    res.json(userData);
+  } catch (err) {
+    console.error("Error fetching user data:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ==========================================
 // GET USER BY ID
 // ==========================================
 router.get("/:id", authMiddleware, async (req, res) => {
@@ -1157,8 +1185,13 @@ router.get("/:id", authMiddleware, async (req, res) => {
         message: "Invalid User ID format or route not found.",
       });
     }
-    // A user's own account, or any account for an admin (the app only loads its own user here)
-    if (String(req.userId) !== id && !(await isAdminUser(req.userId, "students.view"))) {
+    // owner (after P3b): who may read an account here, and what they get
+    //   self   their own record, in the safe shape (no password, codes, push tokens, secrets, ID-card pictures)
+    //   admin  the Phase A check (students.view); phone and e-mail only with pii.view (masked without it, whether or
+    //          not permissions are enforced yet); ID-card pictures are select: false, so never part of this reply
+    //   anyone else (other students, brands, guests): 403, as before (no screen needs another person's record here)
+    const self = String(req.userId) === id;
+    if (!self && !(await isAdminUser(req.userId, "students.view"))) {
       return res.status(403).json({ message: "You can only view your own account." });
     }
 
@@ -1167,7 +1200,11 @@ router.get("/:id", authMiddleware, async (req, res) => {
       .populate("university");
 
     if (!user) return res.status(404).json({ message: "User not found" });
-    res.json(user);
+    const { safeRecord } = require("../utils/safeRecord");
+    if (self) return res.json(safeRecord(user.toObject()));
+    const viewer = await User.findById(req.userId).select("role adminAccess").lean();
+    const pii = adminAccess.has(viewer, "pii.view");
+    res.json(safeRecord(user.toObject(), { documents: pii, mask: !pii }));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1315,32 +1352,6 @@ router.get("/student/:id", authMiddleware, async (req, res) => {
   }
 });
 
-// ==========================================
-// GET CURRENT USER (ME)
-// ==========================================
-router.get("/me", authMiddleware, async (req, res) => {
-  try {
-    const user = await User.findById(req.userId)
-      .select("-password")
-      .populate("university");
-
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
-
-    const userData = {
-      ...user.toObject(),
-      logo: user.logo || "",
-      companyName: user.companyName || user.brandName || "",
-      brandName: user.brandName || "",
-    };
-
-    res.json(userData);
-  } catch (err) {
-    console.error("Error fetching user data:", err);
-    res.status(500).json({ error: err.message });
-  }
-});
 // ==========================================
 // CHANGE PASSWORD ROUTE
 // ==========================================
@@ -1490,8 +1501,8 @@ router.post("/admin-login-as-brand", authMiddleware, async (req, res) => {
     );
     
     // Remove password from response
-    const brandResponse = brand.toObject();
-    delete brandResponse.password;
+    // owner (after P3b): the safe shape (no password, codes, push tokens, store secrets, ID-card pictures)
+    const brandResponse = require("../utils/safeRecord").safeRecord(brand.toObject());
     
     // Log the activity (optional)
     console.log(`✅ Admin ${adminUser.email} logged in as brand ${brand.brandName || brand.name}`);
