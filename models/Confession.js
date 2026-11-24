@@ -98,6 +98,10 @@ const ConfessionSchema = new mongoose.Schema({
   // "me too": the count, and who tapped (to toggle; never sent)
   meTooCount: { type: Number, default: undefined },
   meTooBy: { type: [mongoose.Schema.Types.ObjectId], select: false, default: undefined },
+  // P4b (confessionPolls): an anonymous poll, 2-4 options with their vote counts; pollVoters (who voted for which, so
+  // a vote can be changed but not repeated) is never sent to anyone
+  poll: { type: new mongoose.Schema({ options: [String], counts: [Number] }, { _id: false }), default: undefined },
+  pollVoters: { type: [new mongoose.Schema({ user: mongoose.Schema.Types.ObjectId, option: Number }, { _id: false })], select: false, default: undefined },
 
   createdAt: { 
     type: Date, 

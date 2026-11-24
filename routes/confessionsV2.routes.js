@@ -5,6 +5,8 @@
 //                                   handle: { enabled, handle } }   handle: the student's own (made on first use), only
 //                                   once the owner approved the word lists (config/confessionHandles.js)
 //   PUT /confessions/:id/metoo   → { meToo, meTooCount }   toggles "me too" (who tapped is never sent)
+//   P4b: PUT /confessions/:id/poll { option } (+ confessionPolls) → { poll }; PUT /confessions/:id/follow { on }
+//   (+ confessionFollow) → { following }; PUT /confessions/:id/save { on } → { saved } (the list: feed ?saved=1)
 // The feed and create changes (sort, tag filter, tag / mood / post as handle) are in social.routes.js, behind the same flag.
 const express = require("express");
 const mongoose = require("mongoose");
@@ -62,6 +64,47 @@ router.put("/confessions/:id/metoo", auth, gate, wrap(async (req, res) => {
   await Confession.updateOne({ _id: c._id }, update);
   const after = await Confession.findById(c._id).select("meTooCount").lean();
   res.json({ meToo: !had, meTooCount: Math.max(0, Number(after?.meTooCount) || 0) });
+}));
+
+// ---------- P4b ----------
+const subFlag = (name) => (req, res, next) => (flags.isEnabled(name, { id: meOf(req), role: req.userRole }) ? next() : notFound(res));
+const polls = require("../services/confessionPolls");
+const follows = require("../services/confessionFollows");
+
+// a vote (or a changed vote) in a confession's poll → the poll as the student sees it (never who voted)
+router.put("/confessions/:id/poll", auth, gate, subFlag("confessionPolls"), wrap(async (req, res) => {
+  if (!isId(req.params.id)) return notFound(res);
+  const c = await Confession.findById(req.params.id).select("+pollVoters status visibility university poll").lean();
+  if (!canSee(req, c) || !c.poll?.options?.length) return notFound(res);
+  const option = Number(req.body?.option);
+  if (!Number.isInteger(option) || option < 0 || option >= c.poll.options.length) return res.status(400).json({ code: "BAD_OPTION", error: "pick one of the options.", message: "pick one of the options." });
+  const me = meOf(req);
+  const next = polls.applyVote(c.poll, c.pollVoters, new mongoose.Types.ObjectId(me), option);
+  if (next.changed) await Confession.updateOne({ _id: c._id }, { $set: { poll: next.poll, pollVoters: next.voters } });
+  res.json({ poll: polls.view(next.poll, next.voters, me) });
+}));
+
+// follow / unfollow (the author: mute / unmute their own) → { following }
+router.put("/confessions/:id/follow", auth, gate, subFlag("confessionFollow"), wrap(async (req, res) => {
+  if (!isId(req.params.id)) return notFound(res);
+  const c = await Confession.findById(req.params.id).select("status visibility university").lean();
+  if (!canSee(req, c)) return notFound(res);
+  res.json(await follows.setFollow(meOf(req), c._id, req.body?.on !== false));
+}));
+
+// save / unsave (SavedItem kind "confession") → { saved }; the saved list is the feed with ?saved=1
+router.put("/confessions/:id/save", auth, gate, wrap(async (req, res) => {
+  if (!isId(req.params.id)) return notFound(res);
+  const SavedItem = require("../models/SavedItem");
+  const on = req.body?.on !== false;
+  if (!on) {
+    await SavedItem.deleteOne({ user: meOf(req), kind: "confession", refId: req.params.id });
+    return res.json({ saved: false });
+  }
+  const c = await Confession.findById(req.params.id).select("status visibility university").lean();
+  if (!canSee(req, c)) return notFound(res);
+  try { await SavedItem.create({ user: meOf(req), kind: "confession", refId: c._id }); } catch (e) { if (e?.code !== 11000) throw e; }
+  res.json({ saved: true });
 }));
 
 module.exports = router;
