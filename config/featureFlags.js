@@ -167,6 +167,12 @@ const FLAGS = {
   confessionRecap: { default: false, client: true, grant: { roles: ["student"], label: "Confession weekly recap" } },
   // Q-3i (app only): smaller, "eco" quality pictures on a slow mobile connection (2G / 3G)
   lowDataImages: { default: false, client: true, grant: { roles: ["student"], label: "Low-data pictures on slow connections" } },
+  // Q-3c (app only): Home opens with the last deals / points saved on the phone (read-only data; deleted on sign-out)
+  persistCache: { default: false, client: true, grant: { roles: ["student"], label: "Instant reopen (saved Home data)" } },
+  // Q-3d (app only): a post's save shows at once and goes back if the server says no
+  optimisticActions: { default: false, client: true, grant: { roles: ["student"], label: "Instant save on posts" } },
+  // Q-3e (app only): touching an event card starts loading its details
+  prefetchDetails: { default: false, client: true, grant: { roles: ["student"], label: "Preload event details on touch" } },
 };
 
 const JOBS = {
