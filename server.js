@@ -58,6 +58,7 @@ app.use(require("./middleware/perfLog")());
 // Static files
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 app.use("/r", require("./routes/publicResume.routes")); // P3d public resume page (gettdc.pk/r/<link> via the portal)
+app.use("/c", require("./routes/publicConfession.routes")); // P4c shared confession page (gettdc.pk/c/<id> via the portal)
 // Mood emoji images used as the picture in push notifications
 // Mood images for push + admin. Looks in public/dots first, then uploads/dots.
 app.use("/assets/dots",

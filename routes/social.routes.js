@@ -1923,6 +1923,9 @@ router.get('/confessions/feed', auth, async (req, res) => {
     const followOn = v2 && subOn(req, 'confessionFollow');
     const pageIds = confessions.map((c) => c._id);
     const followed = followOn ? await confessionFollows.followingSet(currentUserId, pageIds) : new Set();
+    // P4c: which may be shared as a card (public, live, no open report on it)
+    const shareOn = v2 && subOn(req, 'confessionShare');
+    const reportedSet = shareOn ? await require('../services/confessionShare').openReports(pageIds) : new Set();
     const savedSet = v2 ? new Set((await SavedItem.find({ user: currentUserId, kind: 'confession', refId: { $in: pageIds } }).select('refId').lean()).map((x) => String(x.refId))) : new Set();
 
     const formattedConfessions = confessions.map(confession => {
@@ -1954,6 +1957,7 @@ router.get('/confessions/feed', auth, async (req, res) => {
           poll: pollsOn ? confessionPolls.view(confession.poll, confession.pollVoters, currentUserId) : undefined,
           ...(followOn ? { following: followed.has(String(confession._id)) } : {}),
           saved: savedSet.has(String(confession._id)),
+          ...(shareOn ? { shareable: confession.visibility !== 'campus' && (!confession.status || confession.status === 'live') && !reportedSet.has(String(confession._id)) } : {}),
         }
         : Object.fromEntries(V2_FIELDS.map((k) => [k, undefined]));
       return {
@@ -1961,6 +1965,7 @@ router.get('/confessions/feed', auth, async (req, res) => {
         ...v2Fields,
         meTooBy: undefined,
         pollVoters: undefined,
+        sharedBy: undefined,
         authorId: undefined,
         reportedBy: undefined,
         statusReason: undefined,
