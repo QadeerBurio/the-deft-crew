@@ -190,6 +190,21 @@ React App bakes it in at **build** time.
 Every portal screen now reads the address from `src/config/api.js` (checked 21 Nov 2026: no other screen
 names the production URL), so a staging portal build talks only to staging.
 
+**Forwarded pages need their own target (P3d).** `gettdc.pk/r/<link>` (the public resume page) is not built into the
+portal: the portal forwards it to the server. Two places name the production server and must point at staging on
+a staging portal, or a staging page link opens production:
+- `middleware.js` (project root): set the Vercel variable `RESUME_PAGE_ORIGIN=<staging-url>` on the staging
+  site (the default is production).
+- `vercel.json` rewrite `/r/:path*` (the fallback when the middleware doesn't run): it can't read variables, so on a
+  staging site change its destination to `<staging-url>/r/:path*` in that site's branch, or remove it there.
+- `PORTAL_PROXY_SECRET`: a staging value, the same in the staging site (Vercel) and the staging server (Railway),
+  different from production's. Without it staging still works; views and the page's rate limit then see one
+  visitor (the portal) instead of each real one.
+- The server builds page links from `PORTAL_URL`: set it to the staging portal's URL in the staging environment.
+
+`gettdc.pk/i/<code>` (invites) needs nothing: it is a static page in the portal, and its one call goes straight from
+the browser to the server in `?api=` / the build's own server, never through a forward.
+
 ---
 
 ## 5. Pointing the app at staging
