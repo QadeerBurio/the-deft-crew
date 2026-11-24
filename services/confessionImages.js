@@ -37,4 +37,17 @@ async function deleteImage(url, why = "") {
   }
 }
 
-module.exports = { deleteImage, parse, _setDestroyForTests: (fn, cloud = null) => { destroyFn = fn; cloudOverride = cloud; } };
+// P4a (owner, for everyone): a confession image must be one the app uploaded: our Cloudinary account (the app uploads
+// to "decaxpera"; the server's configured cloud too), https, an image upload URL. Anything else is refused.
+const APP_CLOUD = "decaxpera";
+function isOurImage(url) {
+  const u = String(url || "");
+  if (u.length > 500 || /\s/.test(u)) return false;
+  const p = parse(u);
+  if (!p) return false;
+  let configured = cloudOverride;
+  if (!configured) { try { configured = require("../config/cloudinary").cloudinary?.config?.()?.cloud_name || null; } catch { configured = null; } }
+  return p.cloud === APP_CLOUD || (!!configured && p.cloud === configured);
+}
+
+module.exports = { deleteImage, parse, isOurImage,_setDestroyForTests: (fn, cloud = null) => { destroyFn = fn; cloudOverride = cloud; } };

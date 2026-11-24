@@ -88,6 +88,16 @@ const ConfessionSchema = new mongoose.Schema({
   reportCount: { type: Number, default: 0 },
   // reporters (unique), never sent to anyone
   reportedBy: { type: [mongoose.Schema.Types.ObjectId], select: false, default: undefined },
+  // P4-2 / P4-3 (confessionsV2), all optional (older confessions: none):
+  // handle: the author's anonymous handle when they posted "as @handle" (a snapshot; never the name), with a verified
+  // tick only if the account was a verified student then; tag: one of the admin's tags (id); mood: one of the Dot moods
+  handle: { type: String, default: undefined },
+  handleVerified: { type: Boolean, default: undefined },
+  tag: { type: String, default: undefined },
+  mood: { type: String, default: undefined },
+  // "me too": the count, and who tapped (to toggle; never sent)
+  meTooCount: { type: Number, default: undefined },
+  meTooBy: { type: [mongoose.Schema.Types.ObjectId], select: false, default: undefined },
 
   createdAt: { 
     type: Date, 
@@ -97,6 +107,7 @@ const ConfessionSchema = new mongoose.Schema({
 
 // Indexes for better query performance
 ConfessionSchema.index({ createdAt: -1 });
+ConfessionSchema.index({ tag: 1, createdAt: -1 }, { partialFilterExpression: { tag: { $type: "string" } } }); // P4-3 tag filter
 ConfessionSchema.index({ university: 1, createdAt: -1 });
 ConfessionSchema.index({ authorId: 1 });
 ConfessionSchema.index({ university: 1, visibility: 1, createdAt: -1 });
