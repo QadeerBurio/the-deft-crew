@@ -145,7 +145,7 @@ function call(method, url, { body, tok, headers = {}, raw } = {}) {
     if (data != null) { if (raw == null) h["content-type"] = "application/json"; h["content-length"] = Buffer.byteLength(data); }
     if (tok) h.authorization = `Bearer ${tok}`;
     const q = http.request({ host: "127.0.0.1", port: PORT, method, path: url, headers: h }, (res) => {
-      let t = ""; res.on("data", (c) => (t += c)); res.on("end", () => { let j = null; try { j = JSON.parse(t); } catch {} resolve({ status: res.statusCode, json: j, text: t }); });
+      let t = ""; res.on("data", (c) => (t += c)); res.on("end", () => { let j = null; try { j = JSON.parse(t); } catch {} resolve({ status: res.statusCode, json: j, text: t, headers: res.headers }); });
     });
     q.on("error", (e) => resolve({ status: 0, json: null, text: String(e) }));
     if (data != null) q.write(data);
