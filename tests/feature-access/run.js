@@ -139,7 +139,7 @@ const on = (flag, who, role) => flags.isEnabled(flag, { id: String(ids[who] || w
   const r0 = await early;
   check("…then answers with the loaded access (taha has Surprise Box)", r0.status === 200 && r0.json.surplusBoxes === true && r0.json.loyaltyV2 === false, JSON.stringify(r0.json));
   const line = logs.find((l) => l.startsWith("[flags] admin access:")) || "";
-  check("startup line: '[flags] admin access: <flag> <count>, …'", /^\[flags\] admin access: resumeStudioV2 0, careerRatings 0, loyaltyV2 0, careerTimeline 0, careerMatching 0, surplusBoxes 1, employerFirstHireFree 0, growthV2 0, ambassadorV2 0, resumeV2 0, confessionsV2 0, confessionSafety 0, shareCards 0, chatPushV1 0, pushOpenTracking 0, pushBudgetV1 0, pushAskV2 0, unifiedInbox 0, notifSettingsV2 0, pushCopyV2 0, squadMission 0, resumeCoach 0, resumeSpeak 0, resumeTemplatesV2 0, resumeFeedback 0, resumeFinish 0, resumeVerified 0, resumePublicPage 0, resumeOutcomeStats 0, confessionPolls 0, confessionFollow 0$/.test(line), line);
+  check("startup line: '[flags] admin access: <flag> <count>, …'", /^\[flags\] admin access: resumeStudioV2 0, careerRatings 0, loyaltyV2 0, careerTimeline 0, careerMatching 0, surplusBoxes 1, employerFirstHireFree 0, growthV2 0, ambassadorV2 0, resumeV2 0, confessionsV2 0, confessionSafety 0, shareCards 0, chatPushV1 0, pushOpenTracking 0, pushBudgetV1 0, pushAskV2 0, unifiedInbox 0, notifSettingsV2 0, pushCopyV2 0, squadMission 0, resumeCoach 0, resumeSpeak 0, resumeTemplatesV2 0, resumeFeedback 0, resumeFinish 0, resumeVerified 0, resumePublicPage 0, resumeOutcomeStats 0, confessionPolls 0, confessionFollow 0, confessionShare 0, confessionRecap 0$/.test(line), line);
   check("…and carries no id", !Object.values(ids).some((i) => line.includes(String(i))));
   check("an enabled:false row gives no access", !on("surplusBoxes", "S3", "student"));
 
@@ -232,7 +232,7 @@ const on = (flag, who, role) => flags.isEnabled(flag, { id: String(ids[who] || w
   const sv = (await call("GET", `/api/admin/features/account/${S}`, { t: T.A })).json.data;
   // 6 older student features + 6 upgrade-v2 flags (growthV2, ambassadorV2, resumeV2, confessionsV2, confessionSafety, shareCards)
   // + chatPushV1 (CHAT-1) + pushOpenTracking (N-6) + pushBudgetV1 (N-2) + pushAskV2 (N-3) + unifiedInbox (N-4) + notifSettingsV2 (N-5) + pushCopyV2 (N-7) + squadMission (P2-7) + resumeCoach + resumeSpeak (P3b) + resumeTemplatesV2 (P3c) + resumeFeedback + resumeFinish + resumeVerified + resumePublicPage + resumeOutcomeStats (P3d)
-  check("student view: no First Hire Free", sv.flags.length === 30 && !sv.flags.some((f) => f.flag === "employerFirstHireFree"));
+  check("student view: no First Hire Free", sv.flags.length === 32 && !sv.flags.some((f) => f.flag === "employerFirstHireFree"));
 
   console.log("── 8. bulk");
   const before = logRows().length;
@@ -266,7 +266,7 @@ const on = (flag, who, role) => flags.isEnabled(flag, { id: String(ids[who] || w
   check("…non-grantable flag → 400", r.status === 400);
   r = await withEnvAsync({ FLAG_LOYALTY_V2: `ids:${X},${S}` }, () => call("GET", "/api/admin/features/flags", { t: T.A }));
   const lo = r.json?.data?.find((f) => f.flag === "loyaltyV2");
-  check("overview: 31 grantable flags (7 + 6 upgrade-v2 + chatPushV1 + pushOpenTracking + pushBudgetV1 + pushAskV2 + unifiedInbox + notifSettingsV2 + pushCopyV2 + squadMission + resumeCoach + resumeSpeak + resumeTemplatesV2 + 5 P3d + 2 P4b); Loyalty: 2 admin access, Railway '2 ids', railwayIdCount 2, not killed", r.json.data.length === 31 && lo.adminAccessCount === 2 && lo.railway === "2 ids" && lo.railwayIdCount === 2 && lo.killed === false, JSON.stringify(lo));
+  check("overview: 33 grantable flags (7 + 6 upgrade-v2 + chatPushV1 + pushOpenTracking + pushBudgetV1 + pushAskV2 + unifiedInbox + notifSettingsV2 + pushCopyV2 + squadMission + resumeCoach + resumeSpeak + resumeTemplatesV2 + 5 P3d + 2 P4b + 2 P4c); Loyalty: 2 admin access, Railway '2 ids', railwayIdCount 2, not killed", r.json.data.length === 33 && lo.adminAccessCount === 2 && lo.railway === "2 ids" && lo.railwayIdCount === 2 && lo.killed === false, JSON.stringify(lo));
   check("…the overview carries no Railway id", !r.text.includes(X));
 
   console.log("── 10. refresh: rows written by another server process, failures");

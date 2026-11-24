@@ -161,6 +161,10 @@ const FLAGS = {
   confessionPolls: { default: false, client: true, grant: { roles: ["student"], label: "Confession polls" } },
   // P4b: follow a confession (the author follows their own) → a push on new replies, never naming anyone; one-tap mute
   confessionFollow: { default: false, client: true, grant: { roles: ["student"], label: "Confession follow + reply pushes" } },
+  // P4c (under confessionsV2): share a public confession as an image card + its gettdc.pk/c/<id> page (text only)
+  confessionShare: { default: false, client: true, grant: { roles: ["student"], label: "Confession share card + link" } },
+  // P4c: the weekly campus recap push (numbers only; a campus with at least 5 confessions that week)
+  confessionRecap: { default: false, client: true, grant: { roles: ["student"], label: "Confession weekly recap" } },
 };
 
 const JOBS = {
