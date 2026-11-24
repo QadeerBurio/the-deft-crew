@@ -26,8 +26,10 @@ router.post('/upload', auth, (req, res) => {
     }
 
     try {
+      // Cloudinary (when configured, listingUpload.middleware.js): its https link; otherwise the file on this server
+      const cloudUrl = /^https:\/\//.test(req.file.path || '') ? req.file.path : null;
       const baseUrl = `${req.protocol}://${req.get('host')}`;
-      const url = `${baseUrl}/uploads/listings/${req.file.filename}`;
+      const url = cloudUrl || `${baseUrl}/uploads/listings/${req.file.filename}`;
       const type = req.file.mimetype.startsWith('video') ? 'video' : 'image';
 
       res.status(201).json({ url, type });

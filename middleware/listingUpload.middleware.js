@@ -10,7 +10,7 @@ if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
 
-const storage = multer.diskStorage({
+const diskStorage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadDir),
   filename: (req, file, cb) => {
     const ext = path.extname(file.originalname || '') || '';
@@ -18,6 +18,21 @@ const storage = multer.diskStorage({
     cb(null, unique);
   },
 });
+
+// Owner (25 Nov 2026): with Cloudinary configured (config/cloudinary.js), attachments go there (folder TDC_Listings,
+// images and videos: resource_type auto) instead of the container's disk, which is wiped on every deploy. Without
+// it: the disk, exactly as before. The route answers with the Cloudinary link (req.file.path) when there is one.
+const { cloudinary, hasCloudinary } = require('../config/cloudinary');
+const storage = hasCloudinary
+  ? new (require('multer-storage-cloudinary').CloudinaryStorage)({
+      cloudinary,
+      params: {
+        folder: 'TDC_Listings',
+        resource_type: 'auto',
+        public_id: () => `listing_${Date.now()}_${Math.round(Math.random() * 1e9)}`,
+      },
+    })
+  : diskStorage;
 
 const ALLOWED_MIME_TYPES = [
   'image/jpeg',
