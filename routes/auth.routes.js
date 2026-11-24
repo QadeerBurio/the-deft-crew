@@ -318,7 +318,8 @@ router.post("/signup", async (req, res) => {
       status: "Not Verified",
       // students confirm their email with a code before first sign-in
       ...(role === "student" ? { emailVerified: false } : {}),
-      city: city?.trim() || "Karachi",
+      // owner (P3b): a student who didn't give a city has none (brands / employers keep "Karachi", as before)
+      city: city?.trim() || (role === "student" ? "" : "Karachi"),
       referredBy: referrer ? referrer._id : null,
        gender: gender || "",                 // ← ADD
   academicLevel: academicLevel || "",   // ← ADD

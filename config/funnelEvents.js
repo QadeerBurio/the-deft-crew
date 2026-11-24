@@ -17,6 +17,8 @@ const EXACT = new Set([
   "resume_track_fresher", "resume_track_experienced",
   "resume_ai_bullets_used", "resume_finished", "resume_minutes_to_finish",
   "template_previewed", "template_selected", "resume_ats_badge_safe", "resume_ats_badge_design",
+  // resume coach (P3b): which mode, fix everything, the ready-to-send check, one page reached (meta: seconds, typed, taps)
+  "resume_coach_tap", "resume_coach_chat", "resume_coach_speak", "resume_fix_everything", "resume_ready_check", "resume_one_page_ready",
   // confessions (P4)
   "confession_precheck_ok", "confession_precheck_edit", "confession_precheck_hold",
   "confession_reported", "confession_shared_card", "confession_followed",
