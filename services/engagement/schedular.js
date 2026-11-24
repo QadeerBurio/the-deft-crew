@@ -261,6 +261,23 @@ function start() {
   );
 
   // ═════════════════════════════════════════════════════════════
+  // SUN 18:30 PKT — P4c WEEKLY CONFESSION RECAP (flags confessionsV2 + confessionRecap per student; numbers only;
+  // a campus with at least 5 confessions this week). Once a week across servers (JobLock).
+  // ═════════════════════════════════════════════════════════════
+  cron.schedule(
+    '30 18 * * 0',
+    async () => {
+      if (!(await lock('confession_recap', weekKey()))) return;
+      try {
+        await require('../confessionRecap').run();
+      } catch (err) {
+        console.error('[scheduler] confession_recap failed:', err.message);
+      }
+    },
+    { timezone: cfg.TZ }
+  );
+
+  // ═════════════════════════════════════════════════════════════
   // MON 00:00 PKT — WEEKLY FREEZE RESET
   // Every user gets 1 freeze back
   // ═════════════════════════════════════════════════════════════
