@@ -143,5 +143,48 @@ const api = `/api/resume/${R}/public-page`;
   const fs = require("fs");
   const missing = [...pub.FONT_FILES].filter((f) => !fs.existsSync(require("path").join(pub.FONT_DIR, f)));
   check(`every font the page can ask for is on the server (${pub.FONT_FILES.size}), with an OFL licence per family`, missing.length === 0 && pub.LICENCES.size >= 16, missing.join());
+
+  console.log("-- behind the portal (gettdc.pk → this server): the real visitor, only from the portal");
+  // every forwarded request reaches the server from the same edge address (Vercel's, added by Railway's edge)
+  const EDGE = "76.76.21.21";
+  const SECRET = "test-only-portal-proxy-secret-0123456789";
+  const viaPortal = (ip, { secret = SECRET, ua = BROWSER } = {}) => call("GET", fresh.replace(/^https:\/\/gettdc\.pk/, ""), { headers: { "user-agent": ua, "x-forwarded-for": EDGE, "x-tdc-proxy": secret, "x-tdc-visitor-ip": ip } });
+  const views = () => doc().publicPage.views;
+  pub._recent.clear();
+  let v0 = views();
+  await viaPortal("198.18.0.1"); await viaPortal("198.18.0.2");
+  check("no PORTAL_PROXY_SECRET on the server: the header is ignored (two 'visitors' from one edge address = one view)", views() === v0 + 1, `${v0} → ${views()}`);
+  process.env.PORTAL_PROXY_SECRET = SECRET;
+  pub._recent.clear();
+  v0 = views();
+  await viaPortal("198.18.0.1"); await viaPortal("198.18.0.2"); await viaPortal("198.18.0.1");
+  check("with the secret: two visitors behind the portal = two views (the same one again within 30 minutes: not counted)", views() === v0 + 2, `${v0} → ${views()}`);
+  pub._recent.clear();
+  v0 = views();
+  await viaPortal("198.18.0.9", { secret: "a-wrong-secret-of-good-length" }); await viaPortal("198.18.0.10", { secret: "a-wrong-secret-of-good-length" });
+  check("a wrong secret (someone calling the server directly with made-up headers): the edge address, one view", views() === v0 + 1);
+  pub._recent.clear();
+  v0 = views();
+  await viaPortal("not-an-address"); await viaPortal("<script>");
+  check("the right secret but not an address: the edge address", views() === v0 + 1);
+  const ca = reqS("./services/clientAddress");
+  check("clientAddress: the forwarded visitor only with the secret; else the edge address (last X-Forwarded-For entry)",
+    ca.visitorAddress({ headers: { "x-forwarded-for": `1.1.1.1, ${EDGE}`, "x-tdc-proxy": SECRET, "x-tdc-visitor-ip": "2001:db8::7" } }) === "2001:db8::7"
+    && ca.visitorAddress({ headers: { "x-forwarded-for": `1.1.1.1, ${EDGE}`, "x-tdc-visitor-ip": "198.18.0.5" } }) === EDGE);
+  process.env.PORTAL_PROXY_SECRET = "short";
+  check("a secret shorter than 16 characters counts as not configured", ca.fromPortal({ headers: { "x-tdc-proxy": "short" } }) === false);
+  process.env.PORTAL_PROXY_SECRET = SECRET;
+
+  console.log("-- rate limit per visitor behind the portal");
+  process.env.RATE_LIMIT_RESUME_PAGE_MAX = "3";
+  const statuses = [];
+  for (let i = 0; i < 4; i++) statuses.push((await viaPortal("198.18.1.1")).status);
+  const other = (await viaPortal("198.18.1.2")).status;
+  check("visitor A: 3 a minute, the 4th → 429; visitor B (same edge address) still gets the page", JSON.stringify(statuses) === "[200,200,200,429]" && other === 200, `${statuses} / ${other}`);
+  const spoofed = [];
+  for (let i = 0; i < 2; i++) spoofed.push((await viaPortal(`198.18.2.${i}`, { secret: "a-wrong-secret-of-good-length" })).status);
+  check("made-up visitor addresses without the secret share the edge address's limit (no bypass)", spoofed.every((s) => s === 429), JSON.stringify(spoofed));
+  delete process.env.RATE_LIMIT_RESUME_PAGE_MAX;
+  delete process.env.PORTAL_PROXY_SECRET;
   h.finish(server);
 })().catch((e) => { console.error(e); process.exit(1); });

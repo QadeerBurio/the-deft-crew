@@ -4,7 +4,8 @@
 //   GET /r/<link>         the page (services/publicResume.js); the same "not available" page for an unknown link, a page
 //                         that is off, an owner without the flags, or an account that is suspended / banned / deleted
 // Headers like the event ticket page: noindex, no-store, no referrer, a strict content security policy (no scripts at
-// all; styles inline; fonts from here; images only https, for the photo), rate-limited per address.
+// all; styles inline; fonts from here; images only https, for the photo), rate-limited per visitor. The visitor: the
+// address the portal's forwarder passes, only when it proves itself with PORTAL_PROXY_SECRET (services/clientAddress.js).
 const express = require("express");
 const path = require("path");
 const rateLimit = require("express-rate-limit");
@@ -16,7 +17,7 @@ const pageLimit = rateLimit({
   windowMs: 60 * 1000,
   limit: () => Math.max(1, Number(process.env.RATE_LIMIT_RESUME_PAGE_MAX) || 120),
   standardHeaders: "draft-7", legacyHeaders: false, validate: false,
-  keyGenerator: (req) => `resume-page:${require("../services/loginGuard").clientIp(req)}`,
+  keyGenerator: (req) => `resume-page:${require("../services/clientAddress").visitorAddress(req)}`, // the real visitor behind the portal (services/clientAddress.js)
   handler: (req, res) => res.status(429).type("text/plain").send("too many requests. try again in a minute."),
 });
 const headers = (res) => {
@@ -53,7 +54,7 @@ router.get("/:slug", pageLimit, async (req, res) => {
     let verified = null;
     if (resume.settings?.verifiedLine === true && isEnabled("resumeVerified", who)) verified = await require("../services/verifiedFacts").factsFor(resume.user).catch(() => null);
     const html = pub.pageHtml(resume, { verified });
-    if (pub.countsAsView({ method: req.method, userAgent: req.get("user-agent"), selfKeyGiven: req.query.k, selfKey: resume.publicPage.selfKey, ip: require("../services/loginGuard").clientIp(req), slug })) {
+    if (pub.countsAsView({ method: req.method, userAgent: req.get("user-agent"), selfKeyGiven: req.query.k, selfKey: resume.publicPage.selfKey, ip: require("../services/clientAddress").visitorAddress(req), slug })) {
       await Resume.updateOne({ _id: resume._id }, { $inc: { "publicPage.views": 1 } }).catch(() => {}); // a failed count never fails the page
     }
     headers(res);
