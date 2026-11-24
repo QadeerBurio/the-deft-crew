@@ -171,6 +171,11 @@ const api = `/api/resume/${R}/public-page`;
   check("clientAddress: the forwarded visitor only with the secret; else the edge address (last X-Forwarded-For entry)",
     ca.visitorAddress({ headers: { "x-forwarded-for": `1.1.1.1, ${EDGE}`, "x-tdc-proxy": SECRET, "x-tdc-visitor-ip": "2001:db8::7" } }) === "2001:db8::7"
     && ca.visitorAddress({ headers: { "x-forwarded-for": `1.1.1.1, ${EDGE}`, "x-tdc-visitor-ip": "198.18.0.5" } }) === EDGE);
+  const mw = require("path").join(h.SERVER, "..", "edu-boost", "middleware.js");
+  if (fs.existsSync(mw)) {
+    const src = fs.readFileSync(mw, "utf8");
+    check("the portal's forwarder (edu-boost middleware.js) sends the same two headers, from Vercel's x-real-ip and PORTAL_PROXY_SECRET", /h\["x-tdc-proxy"\] = secret/.test(src) && /h\["x-tdc-visitor-ip"\] = ip/.test(src) && /request\.headers\.get\("x-real-ip"\)/.test(src) && /env\.PORTAL_PROXY_SECRET/.test(src));
+  }
   process.env.PORTAL_PROXY_SECRET = "short";
   check("a secret shorter than 16 characters counts as not configured", ca.fromPortal({ headers: { "x-tdc-proxy": "short" } }) === false);
   process.env.PORTAL_PROXY_SECRET = SECRET;
