@@ -21,10 +21,14 @@ const cfg = reqS("./config/resumeTemplates");
 (async () => {
   const server = h.start();
   console.log("-- template ids");
-  const lib = path.join(h.SERVER, "..", "Testting", "app", "src", "services", "templates", "library.js");
-  if (fs.existsSync(lib)) {
-    const appIds = [...fs.readFileSync(lib, "utf8").matchAll(/\bid: '([a-z_]+)'/g)].map((m) => m[1]);
-    check("the server's library ids are the app's library ids", JSON.stringify(appIds) === JSON.stringify(cfg.LIBRARY_IDS), `${appIds} vs ${cfg.LIBRARY_IDS}`);
+  // P3d: the renderer (with the library) is shared byte for byte with the app (utils/resumeRender.js)
+  const render = reqS("./utils/resumeRender");
+  const libIds = render.LIBRARY.map((t) => t.id);
+  check("the accepted library ids are the shared renderer's library ids", JSON.stringify(libIds) === JSON.stringify(cfg.LIBRARY_IDS), `${libIds} vs ${cfg.LIBRARY_IDS}`);
+  const appCopy = path.join(h.SERVER, "..", "Testting", "app", "src", "utils", "resumeRender.js");
+  if (fs.existsSync(appCopy)) {
+    const norm = (s) => s.replace(/\r\n/g, "\n");
+    check("utils/resumeRender.js is the app's app/src/utils/resumeRender.js, byte for byte", norm(fs.readFileSync(appCopy, "utf8")) === norm(fs.readFileSync(path.join(h.SERVER, "utils", "resumeRender.js"), "utf8")));
   }
   let r = await call("PUT", `/api/resume/${R}/template`, { tok: T, body: { template: "campus" } });
   check("PUT /:id/template campus → saved", r.status === 200 && doc().template === "campus", r.text.slice(0, 120));
