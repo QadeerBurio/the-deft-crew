@@ -262,6 +262,17 @@ io.on('connection', (socket) => {
     socket.to(conversationId).emit('user_typing', { userId, typing: false });
   });
 
+  // P5a: the SkillShare chats (InquiryChatScreen, MatchChatScreen, every app version) send and listen for 'typing'
+  // ({ conversationId, userId, isTyping }), which the server never handled. Relayed to the room with the same checks as
+  // typing_start: the token's account, a verified user only into their own conversation.
+  socket.on('typing', async ({ conversationId, userId: claimedUserId, isTyping } = {}) => {
+    if (!conversationId) return;
+    const me = await sec.actorOf(socket, 'typing', claimedUserId);
+    if (!me) return;
+    if (me.verified && !(await sec.isMember(socket, conversationId, me.id))) return;
+    socket.to(String(conversationId)).emit('typing', { conversationId: String(conversationId), userId: me.id, isTyping: !!isTyping });
+  });
+
   // ========== WEBRTC CALLING SYSTEM ==========
 
   // 1. Initiate Call
