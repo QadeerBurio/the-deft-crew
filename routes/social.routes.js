@@ -3320,7 +3320,9 @@ router.delete('/messages/:id', auth, async (req, res) => {
 
     const io = req.app.get('io');
     if (io) {
-      io.to(message.conversationId).emit('message_deleted', { 
+      // P5a: rooms are joined with the id as a string ('join_chat'); an ObjectId here reached nobody, so the other
+      // person never saw the message go. Same event and payload as before.
+      io.to(String(message.conversationId)).emit('message_deleted', {
         messageId: messageId,
         conversationId: message.conversationId 
       });
