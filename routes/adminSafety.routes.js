@@ -6,7 +6,8 @@
 //   POST /:reportId/resolve    { action, note }          approve | remove | warn | suspend24h | suspend7d | ban
 //   POST /confession/:id/resolve { action, note, commentId? }   a held / hidden item without a report: approve | remove
 //   POST /:reportId/author     { reason }                who wrote it (required reason; every reveal logged)
-//   GET  /settings · PUT /settings                       report threshold, banned words, helplines, single-report rule
+//   GET  /settings · PUT /settings                       report threshold, banned words, helplines, single-report rule,
+//                                                        P4a: post tags (add / rename / hide) and the composer's prompt chips
 // Authors are shown by an anonymous reference (the same one the safety e-mail uses), never by name, unless revealed.
 // Every write is in AdminActionLog. The older /api/social/admin/reports routes are untouched.
 const express = require("express");
@@ -256,10 +257,10 @@ router.put("/settings", async (req, res) => {
   try {
     const before = await safetySettings.get();
     const after = await safetySettings.save(req.body || {}, req.user._id);
-    await actionLog.recordSafe({ admin: req.user._id, action: "safety.settings.update", targetType: "SafetySettings", targetId: "confessions", before: { mode: before.mode, reportThreshold: before.reportThreshold, bannedWords: before.bannedWords.length, helplines: before.helplines.length, suspendOnSingleEvidenceReport: before.suspendOnSingleEvidenceReport }, after: { mode: after.mode, reportThreshold: after.reportThreshold, bannedWords: after.bannedWords.length, helplines: after.helplines.length, suspendOnSingleEvidenceReport: after.suspendOnSingleEvidenceReport }, reason: String(req.body?.reason || "").slice(0, 300), requestId: req.id });
+    await actionLog.recordSafe({ admin: req.user._id, action: "safety.settings.update", targetType: "SafetySettings", targetId: "confessions", before: { mode: before.mode, reportThreshold: before.reportThreshold, bannedWords: before.bannedWords.length, helplines: before.helplines.length, suspendOnSingleEvidenceReport: before.suspendOnSingleEvidenceReport, tags: before.tags.length, prompts: before.prompts.length }, after: { mode: after.mode, reportThreshold: after.reportThreshold, bannedWords: after.bannedWords.length, helplines: after.helplines.length, suspendOnSingleEvidenceReport: after.suspendOnSingleEvidenceReport, tags: after.tags.length, prompts: after.prompts.length }, reason: String(req.body?.reason || "").slice(0, 300), requestId: req.id });
     ok(res, after);
   } catch (e) {
-    if (e.code === "BAD_MODE") return fail(res, 400, "BAD_MODE", e.message);
+    if (e.code === "BAD_MODE" || e.code === "NO_TAGS") return fail(res, 400, e.code, e.message);
     console.error(`[admin-safety] settings failed: ${e.name}`);
     fail(res, 500, "SERVER_ERROR", "Something went wrong");
   }

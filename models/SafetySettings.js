@@ -19,6 +19,9 @@ const safetySettingsSchema = new mongoose.Schema(
     helplines: { type: [helpline], default: undefined },
     // owner setting: one evidence report confirmed by the re-check suspends at once (default off)
     suspendOnSingleEvidenceReport: { type: Boolean },
+    // P4-3 / P4-4 (confessionsV2): the post tags (stable id, label the admin can rename, hidden) and the composer's prompt chips
+    tags: { type: [{ _id: false, id: String, label: String, hidden: Boolean }], default: undefined },
+    prompts: { type: [String], default: undefined },
     updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
   },
   { timestamps: true }

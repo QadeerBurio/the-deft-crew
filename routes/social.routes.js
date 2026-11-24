@@ -1404,6 +1404,14 @@ const isGuestReq = (req) => !!req.isGuest || req.userId === 'guest-user';
 
 // confession safety (plan P4-1): the flag is per user (the author, reporter or viewer acting)
 const featureFlags = require('../config/featureFlags');
+// P4a (confessionsV2): tags, moods, handles, me too, sort. Off: the feed and create exactly as before.
+const v2On = (req) => !isGuestReq(req) && featureFlags.isEnabled('confessionsV2', { id: String(req.user?._id || req.userId || ''), role: req.userRole });
+const confessionHandles = require('../services/confessionHandles');
+const { MOODS: CONFESSION_MOODS } = require('../config/confessionMoods');
+const V2_FIELDS = ['handle', 'handleVerified', 'tag', 'mood', 'meTooCount'];
+// hot: recent and engaged (likes, me too, live comments count double), fading with age; top: the week's most engaged
+const engagement = (c) => (Number(c.likes) || 0) + (Number(c.meTooCount) || 0) + 2 * (c.comments || []).filter((x) => !x.status || x.status === 'live').length;
+const hotScore = (c, now) => (engagement(c) + 1) / Math.pow(Math.max(0, (now - new Date(c.createdAt).getTime()) / 3600e3) + 2, 1.5);
 const safetyOn = (req) => !isGuestReq(req) && featureFlags.isEnabled('confessionSafety', { id: String(req.user?._id || req.userId || ''), role: req.userRole });
 const myIdOf = (req) => (isGuestReq(req) ? '' : String(req.user?._id || req.user?.id || ''));
 // a comment others may see: live (or written before statuses existed); my own held comment is shown to me
@@ -1873,13 +1881,30 @@ router.get('/confessions/feed', auth, async (req, res) => {
       if (muted.length) filter.$and.push({ authorId: { $nin: muted } });
     }
 
+    // P4a (confessionsV2): ?tag=<id> and ?sort=hot|top|new (&page= for hot / top). Old builds send neither.
+    const v2 = v2On(req);
+    const sort = v2 ? String(req.query.sort || '') : '';
+    const ranked = sort === 'hot' || sort === 'top';
+    if (v2 && typeof req.query.tag === 'string' && safetySettings.TAG_ID.test(req.query.tag)) filter.$and.push({ tag: req.query.tag });
+    if (ranked) filter.$and.push({ createdAt: { $gte: new Date(Date.now() - (sort === 'hot' ? 14 : 7) * 864e5) } });
+
     let query = Confession.find(filter)
       .sort({ createdAt: -1 })
       .populate('comments.user', 'name profileImage')
       .populate('university', 'name')
       .lean();
-    if (limit > 0) query = query.limit(limit);
-    const confessions = await query;
+    if (v2) query = query.select('+meTooBy');
+    if (ranked) query = query.limit(500); // the candidates of the last 14 / 7 days, ranked below
+    else if (limit > 0) query = query.limit(limit);
+    let confessions = await query;
+    if (ranked) {
+      const now = Date.now();
+      const scored = confessions.map((c) => ({ c, s: sort === 'hot' ? hotScore(c, now) : engagement(c) }));
+      scored.sort((a, b) => b.s - a.s || new Date(b.c.createdAt) - new Date(a.c.createdAt));
+      const size = limit > 0 ? limit : 20;
+      const page = Math.max(0, Math.min(100, parseInt(req.query.page, 10) || 0));
+      confessions = scored.slice(page * size, page * size + size).map((x) => x.c);
+    }
 
     const formattedConfessions = confessions.map(confession => {
       // Hide user identity of OTHER users' comments
@@ -1903,8 +1928,14 @@ router.get('/confessions/feed', auth, async (req, res) => {
         };
       });
 
+      // P4a: the v2 fields only for a viewer with confessionsV2 (others: exactly the old shape)
+      const v2Fields = v2
+        ? { meTooCount: Math.max(0, Number(confession.meTooCount) || 0), meTooByCurrentUser: !!currentUserId && (confession.meTooBy || []).some((x) => String(x) === currentUserId) }
+        : Object.fromEntries(V2_FIELDS.map((k) => [k, undefined]));
       return {
         ...confession,
+        ...v2Fields,
+        meTooBy: undefined,
         authorId: undefined,
         reportedBy: undefined,
         statusReason: undefined,
@@ -1988,7 +2019,21 @@ router.post('/confessions/create', auth, limitIfSafety('confession_post'), async
       }
     }
 
+    // P4a (confessionsV2): one of the admin's visible tags, a Dot mood, and "post as @handle" (only once the owner
+    // approved the handle words; otherwise anon. as today). Anything else is ignored, never a failed post.
+    const v2Extras = {};
+    if (v2On(req)) {
+      const visibleTags = (await safetySettings.get()).tags.filter((t) => !t.hidden).map((t) => t.id);
+      if (typeof req.body.tag === 'string' && visibleTags.includes(req.body.tag)) v2Extras.tag = req.body.tag;
+      if (CONFESSION_MOODS.includes(req.body.mood)) v2Extras.mood = req.body.mood;
+      if (req.body.postAs === 'handle') {
+        const handle = await confessionHandles.ensureHandle(req.user._id);
+        if (handle) { v2Extras.handle = handle; if (currentUser.status === 'Verified') v2Extras.handleVerified = true; }
+      }
+    }
+
     const confession = new Confession({
+      ...v2Extras,
       authorId: req.user._id,
       text: text || "",
       image: image || "",
@@ -2024,7 +2069,7 @@ router.post('/confessions/create', auth, limitIfSafety('confession_post'), async
         confession: {
           _id: confession._id, text: confession.text, image: confession.image, university: confession.university,
           location: confession.location, campusName: currentUser.university?.name || null, visibility: confession.visibility,
-          likes: confession.likes, likedBy: confession.likedBy, comments: confession.comments, createdAt: confession.createdAt, status: 'pending',
+          likes: confession.likes, likedBy: confession.likedBy, comments: confession.comments, createdAt: confession.createdAt, status: 'pending', ...v2Extras,
         },
       });
     }
@@ -2068,7 +2113,8 @@ router.post('/confessions/create', auth, limitIfSafety('confession_post'), async
         likes: confession.likes,
         likedBy: confession.likedBy,
         comments: confession.comments,
-        createdAt: confession.createdAt
+        createdAt: confession.createdAt,
+        ...v2Extras,
       }
     });
   } catch (err) {

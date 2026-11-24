@@ -281,6 +281,7 @@ app.use("/api/admin/me", require("./routes/adminMe.routes")); // Phase A: an adm
 app.use("/api/membership", require("./routes/membership.route"));
 app.use("/api/bookings", require("./routes/booking.routes"));
 app.use("/api/social", require("./routes/confessionSafety.routes")); // report / mute / rules (flag confessionSafety; 404 otherwise)
+app.use("/api/social", require("./routes/confessionsV2.routes")); // P4a: composer config, me too (flag confessionsV2; 404 otherwise)
 app.use("/api/social", require("./routes/social.routes"));
 app.use("/api/safety", require("./routes/safetyActions.routes")); // one-time links in the safety e-mail (plan P4-1b)
 app.use("/api/events", require("./routes/event.routes"));
