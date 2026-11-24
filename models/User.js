@@ -104,6 +104,9 @@ const userSchema = new mongoose.Schema(
     confessionBlocks: { type: [Date], select: false, default: undefined },
     // authors this student muted ("don't show me posts from this person"); never sent to the app
     mutedConfessionAuthors: { type: [mongoose.Schema.Types.ObjectId], select: false, default: undefined },
+    // P4-2: the student's anonymous confession handle (adjective-noun-123), unique, made on first use; never sent with
+    // the account (only to the student themselves, in the confession composer)
+    confessionHandle: { type: String, select: false, index: { unique: true, sparse: true } },
     // reports rejected as false (3 in 30 days = no reporting for 30 days)
     falseReportMarks: { type: [Date], select: false, default: undefined },
     reportingBlockedUntil: { type: Date },
