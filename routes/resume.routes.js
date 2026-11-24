@@ -621,6 +621,8 @@ router.put('/:id', auth, rejectGuest, async (req, res) => {
     if (req.body.personalInfo) {
       const existingPI = resume.personalInfo ? (resume.personalInfo.toObject ? resume.personalInfo.toObject() : resume.personalInfo) : {};
       const pi = { ...existingPI, ...req.body.personalInfo };
+      // P3-6: a photo link must be https (anything else: no photo)
+      if (pi.photoUrl !== undefined) pi.photoUrl = typeof pi.photoUrl === 'string' && /^https:\/\/\S{1,500}$/i.test(pi.photoUrl.trim()) ? pi.photoUrl.trim() : '';
 
       // Auto-parse city and country if location string provided
       if (pi.location && typeof pi.location === 'string') {
@@ -703,11 +705,11 @@ router.put('/:id', auth, rejectGuest, async (req, res) => {
 
     // colours / font from the builder: merged, only the sent keys change
     if (req.body.customStyles && typeof req.body.customStyles === 'object') {
-      const allowed = ['font', 'accentColor', 'headingColor', 'textColor', 'bgColor'];
-      const next = { ...(resume.customStyles || {}) };
-      for (const k of allowed) {
-        if (typeof req.body.customStyles[k] === 'string' && req.body.customStyles[k].length <= 40) next[k] = req.body.customStyles[k];
-      }
+      // the five colour / font keys as before, plus the template studio's (P3-6), each checked; unknown dropped
+      const cleaned = require('../config/resumeTemplates').cleanCustomStyles(req.body.customStyles);
+      const current = resume.customStyles && typeof resume.customStyles.toObject === 'function' ? resume.customStyles.toObject() : (resume.customStyles || {});
+      const next = { ...current, ...cleaned };
+      for (const k of Object.keys(next)) if (next[k] === null) delete next[k]; // null = back to the template's look
       resume.customStyles = next;
       resume.markModified('customStyles');
     }
@@ -844,10 +846,8 @@ router.put('/:id/template', auth, rejectGuest, async (req, res) => {
   try {
     const { template } = req.body;
     // Synced with Resume.js model enum — all 13 templates allowed
-    const validTemplates = [
-      'modern', 'classic', 'creative', 'minimal', 'professional',
-      'modern_ats', 'stanford', 'faang', 'jakes', 'rezi', 'flowcv', 'reactive', 'canva'
-    ];
+    // the older ids + the template studio's (P3-6, config/resumeTemplates.js)
+    const validTemplates = require('../config/resumeTemplates').TEMPLATE_IDS;
 
     if (!validTemplates.includes(template)) {
       return res.status(400).json({
