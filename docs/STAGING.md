@@ -203,7 +203,8 @@ a staging portal, or a staging page link opens production:
 - The server builds page links from `PORTAL_URL`: set it to the staging portal's URL in the staging environment.
 
 `gettdc.pk/i/<code>` (invites) needs nothing: it is a static page in the portal, and its one call goes straight from
-the browser to the server in `?api=` / the build's own server, never through a forward.
+the browser to the server (production, or the staging server when the link carries
+`?api=https://tdc-server-staging.up.railway.app`), never through a forward.
 
 ---
 
