@@ -24,6 +24,8 @@ const { tailorResume }                   = require('../services/resumeTailorServ
 const { generateResumePDF }              = require('../services/pdfService');
 const { optimizeParsedResume, withoutVerdicts } = require('../services/resumeIntelligenceService');
 const { isEnabled: flagEnabled } = require('../config/featureFlags');
+const { perUser } = require('../utils/userRateLimit');
+const resumeAiLimit = perUser('resume_ai'); // one count for both AI helpers (P3 #7)
 const OpenAI = require('openai');
 const axios = require('axios');
 const { importResume } = require('../services/resumeImport');
@@ -48,6 +50,11 @@ const rejectGuest = (req, res, next) => {
 // LIFETIME RESUME CREATION LIMIT
 // Uses LIVE count from Resume collection — no counter drift possible.
 // ============================================================
+// P3 #7: every account starts with location "Karachi, Pakistan" (models/User.js default), whether or not the student
+// gave it: that default is not used as the resume's city (empty instead); a location the student changed is
+const ACCOUNT_DEFAULT_LOCATION = "karachi, pakistan";
+const accountLocation = (u) => { const l = String(u?.location || "").trim(); return l && l.toLowerCase() !== ACCOUNT_DEFAULT_LOCATION ? l : ""; };
+
 const MAX_LIFETIME_RESUME_CREATIONS = 2;
 
 // Race-safe: the count and the creation run under a per-user lock (models/ResumeCreationLock), held until
@@ -180,7 +187,7 @@ router.post('/', auth, rejectGuest, checkResumeLimit, async (req, res) => {
         title: req.body.personalInfo.title || req.body.professionalSummary?.title || req.user?.headline || '',
         email: req.body.personalInfo.email || req.user?.email || '',
         phone: req.body.personalInfo.phone || req.user?.phone || '',
-        location: req.body.personalInfo.location || req.user?.location || '',
+        location: req.body.personalInfo.location || accountLocation(req.user),
         address: req.body.personalInfo.address || '',
         city: req.body.personalInfo.city || '',
         state: req.body.personalInfo.state || '',
@@ -197,7 +204,7 @@ router.post('/', auth, rejectGuest, checkResumeLimit, async (req, res) => {
         title: req.user?.headline || '',
         email: req.user?.email || '',
         phone: req.user?.phone || '',
-        location: req.user?.location || ''
+        location: accountLocation(req.user)
       };
     }
 
@@ -252,6 +259,8 @@ router.post('/', auth, rejectGuest, checkResumeLimit, async (req, res) => {
         saveInterval: req.body.settings.saveInterval || 30,
         defaultTemplate: req.body.settings.defaultTemplate || 'modern'
       };
+      // P3-1: the track chosen at "start fresh" (missing = experienced, as before)
+      if (['fresher', 'experienced'].includes(req.body.settings.track)) cleanData.settings.track = req.body.settings.track;
     }
 
     // the resume's name: the student's own, or (empty) "<Full name> – <title>" from the model's pre-save
@@ -262,7 +271,7 @@ router.post('/', auth, rejectGuest, checkResumeLimit, async (req, res) => {
     }
     if (typeof req.body.otherNotes === 'string') cleanData.otherNotes = req.body.otherNotes.slice(0, 5000);
 
-    const arrayFields = ['education', 'skills', 'workExperience', 'certifications', 'projects', 'languages', 'references', 'interests', 'achievements'];
+    const arrayFields = ['education', 'skills', 'workExperience', 'certifications', 'projects', 'languages', 'references', 'interests', 'achievements', 'activities', 'volunteering', 'awards', 'coursework']; // P3-3: the last four
     arrayFields.forEach(field => {
       if (req.body[field] && Array.isArray(req.body[field])) {
         cleanData[field] = req.body[field].filter(item => item && Object.keys(item).length > 0);
@@ -361,29 +370,15 @@ router.get('/primary', auth, async (req, res) => {
 
 // ========== AI ENHANCE TEXT (Lightweight) ==========
 // POST /api/resume/enhance-text
-router.post('/enhance-text', auth, rejectGuest, async (req, res) => {
+// P3 #7 (owner): OPENAI_MODEL, never asks for numbers the student didn't give (services/resumeAi.js), per-user limit
+router.post('/enhance-text', auth, rejectGuest, resumeAiLimit, async (req, res) => {
   try {
-    const { text, context } = req.body;
-    if (!text || !text.trim()) {
+    const { text, context } = req.body || {};
+    if (typeof text !== 'string' || !text.trim()) {
       return res.status(400).json({ success: false, error: 'text is required' });
     }
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [
-        {
-          role: 'system',
-          content: 'You are an expert ATS resume writer. Rewrite the given text using strong action verbs, the STAR method, and quantifiable achievements where possible. Return ONLY the rewritten text — no labels, no preamble, no markdown.'
-        },
-        {
-          role: 'user',
-          content: `Context: ${context || 'general resume content'}\n\nText to enhance:\n${text.trim()}`
-        }
-      ],
-      max_tokens: 500,
-      temperature: 0.7
-    });
-    const enhanced = completion.choices[0]?.message?.content?.trim() || text;
-    res.json({ success: true, enhanced });
+    const r = await require('../services/resumeAi').enhance({ text, context });
+    res.json({ success: true, enhanced: r.enhanced, unchanged: !!r.unchanged });
   } catch (error) {
     console.error('Enhance text error:', error);
     res.status(500).json({ success: false, error: error.message || 'Failed to enhance text' });
@@ -392,32 +387,11 @@ router.post('/enhance-text', auth, rejectGuest, async (req, res) => {
 
 // ========== AI SKILL SUGGESTIONS (Lightweight) ==========
 // POST /api/resume/suggest-skills
-router.post('/suggest-skills', auth, rejectGuest, async (req, res) => {
+// P3 #7 (owner): no assumed role (no role and no skills → no suggestions), OPENAI_MODEL, per-user limit
+router.post('/suggest-skills', auth, rejectGuest, resumeAiLimit, async (req, res) => {
   try {
-    const { currentSkills, targetRole } = req.body;
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [
-        {
-          role: 'system',
-          content: 'You are a career advisor. Given the user\'s current skills and their target role, suggest 8-12 highly relevant skills they should add to their resume. Return ONLY a JSON array of skill name strings, no explanation. Example: ["Docker", "Kubernetes", "CI/CD"]'
-        },
-        {
-          role: 'user',
-          content: `Target Role: ${targetRole || 'Software Engineer'}\n\nCurrent Skills: ${(currentSkills || []).join(', ') || 'None listed'}\n\nSuggest additional skills to add:`
-        }
-      ],
-      max_tokens: 300,
-      temperature: 0.7
-    });
-    const raw = completion.choices[0]?.message?.content?.trim() || '[]';
-    let suggestions = [];
-    try {
-      const match = raw.match(/\[.*\]/s);
-      suggestions = match ? JSON.parse(match[0]) : [];
-    } catch {
-      suggestions = [];
-    }
+    const { currentSkills, targetRole } = req.body || {};
+    const suggestions = await require('../services/resumeAi').suggestSkills({ currentSkills, targetRole });
     res.json({ success: true, suggestions });
   } catch (error) {
     console.error('Skill suggestions error:', error);
@@ -700,6 +674,8 @@ router.put('/:id', auth, rejectGuest, async (req, res) => {
     }
 
     if (req.body.settings) {
+      // P3-1: a track that isn't one of the two is ignored (never a failed save)
+      if (req.body.settings.track !== undefined && !['fresher', 'experienced'].includes(req.body.settings.track)) delete req.body.settings.track;
       resume.settings = {
         ...resume.settings,
         ...req.body.settings
@@ -714,7 +690,7 @@ router.put('/:id', auth, rejectGuest, async (req, res) => {
     }
     if (typeof req.body.otherNotes === 'string') resume.otherNotes = req.body.otherNotes.slice(0, 5000);
 
-    const arrayFields = ['education', 'skills', 'workExperience', 'certifications', 'projects', 'languages', 'references', 'interests', 'achievements'];
+    const arrayFields = ['education', 'skills', 'workExperience', 'certifications', 'projects', 'languages', 'references', 'interests', 'achievements', 'activities', 'volunteering', 'awards', 'coursework']; // P3-3: the last four
     arrayFields.forEach(field => {
       if (req.body[field] !== undefined) {
         resume[field] = req.body[field];

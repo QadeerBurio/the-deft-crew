@@ -23,6 +23,7 @@ const LIMITS = {
   confession_precheck: { max: 60, windowMin: 60 }, // the text check before an image upload (flag confessionSafety)
   crew_apply: { max: 5, windowMin: 60 }, // ambassador applications (plan P2-3, flag ambassadorV2)
   crew_moment: { max: 10, windowMin: 60 }, // campus moments (plan P2-5, flag ambassadorV2)
+  resume_ai: { max: 120, windowMin: 60 }, // the builder's AI helpers (enhance-text, suggest-skills; P3 #7: generous)
 };
 
 const envKey = (name, part) => `RATE_LIMIT_${name.toUpperCase()}_${part}`;
