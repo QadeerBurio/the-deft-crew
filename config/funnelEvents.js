@@ -26,6 +26,8 @@ const EXACT = new Set([
   // confessions (P4)
   "confession_precheck_ok", "confession_precheck_edit", "confession_precheck_hold",
   "confession_reported", "confession_shared_card", "confession_followed",
+  // P4b: polls, follow / mute, save
+  "confession_poll_created", "confession_poll_voted", "confession_unfollowed", "confession_saved", "confession_unsaved",
 ]);
 
 const SUFFIX = "[a-z0-9][a-z0-9_-]{0,39}";

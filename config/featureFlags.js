@@ -157,6 +157,10 @@ const FLAGS = {
   resumePublicPage: { default: false, client: true, grant: { roles: ["student"], label: "Public resume page" } },
   // P3d: interview rates per template in the gallery (only templates with >= 30 applications and >= 10 interviews)
   resumeOutcomeStats: { default: false, client: true, grant: { roles: ["student"], label: "Resume outcome stats" } },
+  // P4b (under confessionsV2): anonymous polls in confessions (2-4 options; who voted for what is never sent)
+  confessionPolls: { default: false, client: true, grant: { roles: ["student"], label: "Confession polls" } },
+  // P4b: follow a confession (the author follows their own) → a push on new replies, never naming anyone; one-tap mute
+  confessionFollow: { default: false, client: true, grant: { roles: ["student"], label: "Confession follow + reply pushes" } },
 };
 
 const JOBS = {
