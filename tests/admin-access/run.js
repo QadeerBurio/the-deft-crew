@@ -40,10 +40,10 @@ const P = reqS("./config/adminPermissions");
 
   console.log("-- shadow and enforced");
   let d = access.decide(member, "students.view", "GET /api/admin/users/all");
-  await new Promise((r) => setTimeout(r, 30));
+  await access._test.flushed(); // the log write is done (no fixed wait)
   check("shadow (default): the member is allowed, reason 'shadow', logged", d.allowed && d.reason === "shadow" && rows("AdminAccessShadow").length === 1 && rows("AdminAccessShadow")[0].permission === "students.view");
   access.decide(member, "students.view", "GET /api/admin/users/all");
-  await new Promise((r) => setTimeout(r, 30));
+  await access._test.flushed(); // the log write is done (no fixed wait)
   check("…the same again within the hour: logged once", rows("AdminAccessShadow").length === 1);
   process.env.FLAG_ADMIN_RBAC_ENFORCE = "on";
   d = access.decide(member, "students.view", "x");
