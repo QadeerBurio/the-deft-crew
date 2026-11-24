@@ -64,7 +64,8 @@ const IMG = (name, cloud = "decaxpera") => `https://res.cloudinary.com/${cloud}/
   check("enforce: a post blocked with an image → 422 and the image deleted (public id blocked1)", r.status === 422 && destroyed.includes("blocked1"), JSON.stringify(destroyed));
   r = await post("flag", "kill everyone lol", { image: IMG("other1", "someoneelse") });
   await tick();
-  check("…an image in another Cloudinary account is never touched", r.status === 422 && !destroyed.includes("other1"));
+  // P4a (owner): an image from another Cloudinary account is refused before anything else (400 BAD_IMAGE)
+  check("…an image in another Cloudinary account is refused and never touched", r.status === 400 && r.json?.code === "BAD_IMAGE" && !destroyed.includes("other1"), `${r.status} ${JSON.stringify(destroyed)}`);
 
   console.log("-- observe");
   await settings.save({ mode: "observe" }, null);

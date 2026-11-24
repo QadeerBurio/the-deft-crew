@@ -1567,47 +1567,10 @@ router.delete('/confessions/:id', auth, async (req, res) => {
   }
 });
 
-// FIXED: Get User's Own Confessions
-router.get('/confessions/my-confessions', auth, async (req, res) => {
-  try {
-    // IMPORTANT: Use .select('+authorId') to include the hidden field
-    const myConfessions = await Confession.find({ authorId: req.user.id })
-      .select('+authorId') // Include authorId for ownership check
-      .populate('comments.user', 'name profileImage')
-      .sort({ createdAt: -1 });
-    
-    // Remove authorId from response but keep it for internal use
-    const sanitizedConfessions = myConfessions.map(confession => {
-      const obj = confession.toObject();
-      delete obj.authorId; // Remove from response
-      return obj;
-    });
-    
-    res.json(sanitizedConfessions);
-  } catch (err) {
-    console.error("My Confessions Fetch Error:", err);
-    res.status(500).json({ error: "Could not fetch your confessions." });
-  }
-});
 
-// FIXED: Get Confession Likes
-router.get('/confessions/likes/:id', auth, async (req, res) => {
-  try {
-    const confession = await Confession.findById(req.params.id);
-    if (!confession) return res.status(404).json({ message: "Confession not found" });
-    if (!canAccessConfession(req, confession)) {
-      return res.status(404).json({ message: "Confession not found" });
-    }
-    
-    const users = await User.find({ _id: { $in: confession.likedBy } })
-      .select('name profileImage');
-    
-    res.json({ likes: users });
-  } catch (err) {
-    console.error("Get Confession Likes Error:", err);
-    res.status(500).json({ message: "Server Error" });
-  }
-});
+
+// P4a: the second copies of GET /confessions/my-confessions and GET /confessions/likes/:id that stood here were never
+// reached (Express runs the first match, above); removed. The second likes copy returned names to anyone.
 
 // FIXED: Like/Unlike Confession
 router.put('/confessions/like/:id', auth, async (req, res) => {
@@ -1977,6 +1940,15 @@ router.post('/confessions/create', auth, limitIfSafety('confession_post'), async
 
     if (!text && !image) {
       return res.status(400).json({ error: "Confession cannot be empty." });
+    }
+    // P4a (owner, for everyone): at most 1,000 characters (the app's limit; the new composer stops at 500), and an image
+    // only from our Cloudinary account (what the app uploads; services/confessionImages.isOurImage)
+    if (typeof text === 'string' && text.length > 1000) {
+      return res.status(400).json({ error: "keep your confession under 1,000 characters.", code: 'TOO_LONG' });
+    }
+    if (text != null && typeof text !== 'string') return res.status(400).json({ error: "Confession cannot be empty." });
+    if (image && !confessionImages.isOurImage(image)) {
+      return res.status(400).json({ error: "that image can't be used. pick it again in the app.", code: 'BAD_IMAGE' });
     }
     if (isGuestReq(req)) {
       return res.status(401).json({ error: "Sign in to post a confession." });
