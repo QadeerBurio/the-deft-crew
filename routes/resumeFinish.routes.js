@@ -5,6 +5,7 @@
 //   GET  /verified-facts → { facts: [{ kind, text, url? }] } (services/verifiedFacts.js)   flag resumeVerified
 //   GET  /:id/public-page, PUT /:id/public-page { on?, showPhone?, showEmail? }, POST /:id/public-page/new-link
 //        → { on, url, selfUrl, showPhone, showEmail, views }      flag resumePublicPage (the page itself: routes/publicResume)
+//   GET  /template-outcomes → { templates: [{ id, applications, interviews, rate }], minimum }   flag resumeOutcomeStats
 const express = require("express");
 const auth = require("../middleware/auth.middleware");
 const { perUser } = require("../utils/userRateLimit");
@@ -82,6 +83,12 @@ router.post("/:id/public-page/new-link", auth, gate(...PAGE), handle(async (req,
   if (!r.publicPage?.slug) return fail(res, 409, "NO_PAGE", "turn your page on first");
   await setPage(req, { "publicPage.slug": true });
   ok(res, pageView(await ownResume(req, PAGE_FIELDS)));
+}));
+
+// ---------- outcomes per template (owner P3d #7): only templates with >= 30 applications and >= 10 interviews ----------
+router.get("/template-outcomes", auth, gate("resumeV2", "resumeOutcomeStats"), handle(async (req, res) => {
+  const o = require("../services/resumeOutcomes");
+  ok(res, { templates: await o.publicStats(), minimum: { applications: o.MIN_APPLICATIONS, interviews: o.MIN_INTERVIEWS } });
 }));
 
 // ---------- P3-7 feedback ----------
