@@ -678,6 +678,8 @@ router.put('/:id', auth, rejectGuest, async (req, res) => {
     if (req.body.settings) {
       // P3-1: a track that isn't one of the two is ignored (never a failed save)
       if (req.body.settings.track !== undefined && !['fresher', 'experienced'].includes(req.body.settings.track)) delete req.body.settings.track;
+      // P3d: the verified line is on or off, nothing else
+      if (req.body.settings.verifiedLine !== undefined && typeof req.body.settings.verifiedLine !== 'boolean') delete req.body.settings.verifiedLine;
       resume.settings = {
         ...resume.settings,
         ...req.body.settings

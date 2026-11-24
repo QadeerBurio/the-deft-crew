@@ -2,6 +2,7 @@
 // P3d, mounted at /api/resume before routes/resume.routes.js (new paths only; nothing there changes). Each feature needs
 // resumeV2 + its own flag for the signed-in student; off: 404, as if absent.
 //   POST /:id/feedback   → feedback (services/resumeFeedback.js)            flag resumeFeedback, shared limit resume_ai
+//   GET  /verified-facts → { facts: [{ kind, text, url? }] } (services/verifiedFacts.js)   flag resumeVerified
 const express = require("express");
 const auth = require("../middleware/auth.middleware");
 const { perUser } = require("../utils/userRateLimit");
@@ -28,6 +29,11 @@ const ownResume = async (req, select) => {
   if (select) q.select(select);
   return q.lean();
 };
+
+// ---------- "verified by tdc" (the student's own facts; the line shows on a resume only when settings.verifiedLine) ----------
+router.get("/verified-facts", auth, gate("resumeV2", "resumeVerified"), handle(async (req, res) => {
+  ok(res, { facts: await require("../services/verifiedFacts").factsFor(req.userId) });
+}));
 
 // ---------- P3-7 feedback ----------
 router.post("/:id/feedback", auth, gate("resumeV2", "resumeFeedback"), perUser("resume_ai"), handle(async (req, res) => {

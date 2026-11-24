@@ -271,7 +271,9 @@ const resumeSchema = new mongoose.Schema({
     saveInterval: { type: Number, default: 30 },
     defaultTemplate: { type: String, default: 'modern' },
     // P3-1 / P3-2: "fresher" (no internship or job yet) or "experienced"; missing = experienced (old resumes unchanged)
-    track: { type: String, enum: ['fresher', 'experienced'] }
+    track: { type: String, enum: ['fresher', 'experienced'] },
+    // P3d: the "verified by tdc" line on this resume (facts from the server, never typed); off until the student adds it
+    verifiedLine: { type: Boolean, default: false }
   },
   completionPercentage: { type: Number, default: 0 },
   isComplete: { type: Boolean, default: false },

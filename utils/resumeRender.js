@@ -3,6 +3,7 @@
 // The app prints the PDF from it (expo-print); the server renders the public resume page (P3d) with it, so the web page
 // looks like the PDF. Pure: no imports, no I/O. Fonts are added by the caller as @font-face text (opts.fontCss).
 //   renderResumeHTML(resume, templateId, customStyles?, _isPrinting?, opts?) -> full HTML document
+//     opts: { fontCss: "@font-face …", verified: [{ text, url? }] (P3d "verified by tdc" line) }
 //   TEMPLATES (the five), LIBRARY (P3c templates as config), templateOf(id), canonicalTemplate(id), customise()
 //   PALETTES, FONT_PAIRS, SIZES, DENSITY, MARGINS, HEADING_STYLES, SECTION_KEYS, MODEL_DEFAULT_COLOURS
 // One renderer, single-column ATS-friendly layouts: real text (no tables, no columns), A4 with page margins on every
@@ -223,7 +224,13 @@ const entry = (title, sub, date, body) => `
 
 const section = (title, inner) => (inner ? `<section><h2>${esc(title)}</h2>${inner}</section>` : '');
 
-function body(resume, look = {}) {
+// P3d "verified by tdc": facts the server checked (never typed), each with its verify link; nothing when absent
+const verifiedLine = (facts) => {
+  const items = list(facts).filter((f) => f && str(f.text)).map((f) => esc(str(f.text)) + (str(f.url) ? ` (<a href="${esc(str(f.url))}" style="color: inherit; text-decoration: none;">${esc(str(f.url).replace(/^https?:\/\/(www\.)?/i, ''))}</a>)` : ''));
+  return items.length ? `\n    <div class="verified" style="margin-top: 3px; font-size: 0.92em;">✓ verified by tdc: ${items.join(' · ')}</div>` : '';
+};
+
+function body(resume, look = {}, verified) {
   let r = resume || {};
   for (const k of look.hidden || []) if (HIDE[k]) r = HIDE[k](r);
   if (look.sectionOrder && !Array.isArray(r.sectionOrder)) r = { ...r, sectionOrder: look.sectionOrder };
@@ -279,7 +286,7 @@ function body(resume, look = {}) {
   <header>${look.photoUrl ? `<img class="photo" src="${esc(look.photoUrl)}" alt="">` : ''}
     <h1 dir="auto">${esc(name || 'Your name')}</h1>
     ${title ? `<div class="title" dir="auto">${esc(title)}</div>` : ''}
-    ${contact.length ? `<div class="contact">${contact.join('<span class="sep"> | </span>')}</div>` : ''}
+    ${contact.length ? `<div class="contact">${contact.join('<span class="sep"> | </span>')}</div>` : ''}${verifiedLine(verified)}
   </header>
   ${section(H('summary', 'Summary'), summary ? `<p dir="auto">${esc(summary)}</p>` : '')}
   ${ordered(r, workFirst, {
@@ -426,7 +433,7 @@ const renderResumeHTML = (resume, templateId, customStyles = {}, _isPrinting = f
 <title>${esc([str(resume?.personalInfo?.firstName), str(resume?.personalInfo?.lastName)].filter(Boolean).join(' ') || 'Resume')} Resume</title>
 <style>${opts.fontCss || ''}${css(look, library || look !== base.look ? cleanStyles : customStyles || resume?.customStyles || {})}</style>
 </head>
-<body data-template="${id}"><main class="page">${body(resume, look)}</main></body>
+<body data-template="${id}"><main class="page">${body(resume, look, opts.verified)}</main></body>
 </html>`;
 };
 
