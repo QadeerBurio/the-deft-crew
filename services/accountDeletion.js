@@ -239,6 +239,9 @@ async function deleteInDatabase({ id, role, deletionId, ghost, session }) {
 
   // ── their own content ──
   await del(Post, { author: id });
+  // P4b: follows of the student's own confessions (anyone's) and every follow the student made
+  const ownConfessionIds = (await q(Confession.find({ authorId: id }).select("_id"))).map((x) => x._id);
+  await del(require("../models/ConfessionFollow"), { $or: [{ user: id }, { confession: { $in: ownConfessionIds } }] });
   await del(Confession, { authorId: id });
   await del(Story, { author: id });
 
