@@ -8,6 +8,11 @@ const shopPattern = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.myshopify\.com$/;
 const opaquePattern = /^[a-f0-9]{64}$/;
 const pathPrefix = "/api/shopify-app/link-shop/connect/";
 const cookieName = "tdcShopifyLink";
+// How long a connection link from Shopify Admin stays usable. Long enough to look up test credentials
+// and sign in without the link expiring; still short-lived and single-use.
+const LINK_TTL_MS = 30 * 60 * 1000;
+// The app's handle in the Shopify Partner Dashboard (shopify.app.toml `handle`).
+const DEFAULT_APP_HANDLE = "the-deft-crew-student-deals";
 const digest = (value) => createHash("sha256").update(value).digest("hex");
 const random = () => randomBytes(32).toString("hex");
 
@@ -17,6 +22,15 @@ function browserOrigin() {
     throw new Error("SHOPIFY_CONNECT_ORIGIN must be an HTTPS origin");
   }
   return url.origin;
+}
+
+// https://admin.shopify.com/store/<store>/apps/<handle>: where the merchant returns after connecting.
+// `shop` is always a validated <store>.myshopify.com domain (shopPattern).
+function shopifyAdminUrl(shop) {
+  if (!shopPattern.test(shop || "")) return null;
+  const configured = process.env.SHOPIFY_APP_HANDLE;
+  const handle = /^[a-z0-9-]+$/.test(configured || "") ? configured : DEFAULT_APP_HANDLE;
+  return "https://admin.shopify.com/store/" + shop.slice(0, -".myshopify.com".length) + "/apps/" + handle;
 }
 
 function browserCookie(req) {
@@ -90,21 +104,34 @@ function registerShopifyLink(router, verifyApiKey) {
       throw new LinkError(409, "This Shopify store already has a brand connection.");
     }
     const ticket = random();
-    await Ticket.create({ _id: digest(ticket), shop, expiresAt: new Date(Date.now() + 10 * 60 * 1000) });
+    await Ticket.create({ _id: digest(ticket), shop, expiresAt: new Date(Date.now() + LINK_TTL_MS) });
     res.json({ authorizationUrl: origin + pathPrefix + ticket });
   }));
 
+  // A person opens this URL in the browser, so failures are shown as a page, not raw JSON.
   router.get("/link-shop/connect/:ticket", route(async (req, res) => {
-    await loadTicket(req);
     const nonce = random();
+    res.set("Content-Security-Policy", "default-src 'none'; script-src 'nonce-" + nonce +
+      "'; style-src 'nonce-" + nonce + "'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
+    try {
+      await loadTicket(req);
+    } catch (error) {
+      if (!(error instanceof LinkError)) throw error;
+      // The shop is known while an expired or used ticket is still stored: offer the way back to it.
+      const stored = opaquePattern.test(req.params.ticket || "")
+        ? await Ticket.findById(digest(req.params.ticket)).select("shop redeemedAt").lean() : null;
+      const adminUrl = shopifyAdminUrl(stored?.shop);
+      const page = stored?.redeemedAt
+        ? messagePage(nonce, "Store already connected", "This store connection is complete. Return to Shopify to continue in tdc.", adminUrl)
+        : messagePage(nonce, "Link expired", "This connection link expired. Return to Shopify Admin, open tdc, and click Connect your TDC account again.", adminUrl);
+      return res.status(error.status).type("html").send(page);
+    }
     if (!browserCookie(req)) {
       res.cookie(cookieName, random(), {
-        httpOnly: true, secure: true, sameSite: "lax", maxAge: 10 * 60 * 1000,
+        httpOnly: true, secure: true, sameSite: "lax", maxAge: LINK_TTL_MS,
         path: pathPrefix + req.params.ticket,
       });
     }
-    res.set("Content-Security-Policy", "default-src 'none'; script-src 'nonce-" + nonce +
-      "'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
     res.type("html").send(connectionPage(nonce));
   }));
 
@@ -130,6 +157,7 @@ function registerShopifyLink(router, verifyApiKey) {
     const browserDigest = authenticatedBrowser(req);
     const brandId = req.body?.brandId;
     if (brandId !== String(req.user._id)) throw new LinkError(403, "You can only connect your own TDC brand.");
+    let shop;
     await mongoose.connection.transaction(async (session) => {
       const ticket = await loadTicket(req, session);
       if (String(ticket.brandId) !== brandId || ticket.browserDigest !== browserDigest) {
@@ -144,21 +172,44 @@ function registerShopifyLink(router, verifyApiKey) {
         _id: ticket._id, redeemedAt: { $exists: false }, expiresAt: { $gt: new Date() },
       }, { $set: { redeemedAt: new Date() } }, { session });
       if (!redeemed.matchedCount) throw new LinkError(410, "Start a new connection from Shopify Admin.");
+      shop = ticket.shop;
     });
-    res.json({ success: true });
+    res.json({ success: true, shop, shopifyAdminUrl: shopifyAdminUrl(shop) });
   }));
+}
+
+const pageStyle = (nonce) => `<style nonce="${nonce}">
+body{margin:0;font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;background:#f6f6f7;color:#202223}
+main{max-width:28rem;margin:3rem auto;padding:2rem;background:#fff;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.12)}
+h1{font-size:1.4rem;margin:0 0 1rem}label{display:block;margin:0 0 1rem}
+input{display:block;box-sizing:border-box;width:100%;margin-top:.25rem;padding:.6rem;font:inherit;border:1px solid #8c9196;border-radius:8px}
+button,.button{display:inline-block;padding:.65rem 1.1rem;font:inherit;font-weight:600;color:#fff;background:#008060;border:0;border-radius:8px;text-decoration:none;cursor:pointer}
+button:disabled{opacity:.6;cursor:default}#status{color:#d72c0d}[hidden]{display:none!important}
+@media (max-width:480px){main{margin:0;border-radius:0;min-height:100vh;padding:1.5rem 1rem}}
+</style>`;
+
+const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+
+function messagePage(nonce, title, message, adminUrl) {
+  return `<!doctype html><html lang="en"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${escapeHtml(title)}</title>${pageStyle(nonce)}
+<main><h1>${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p>
+${adminUrl ? `<p><a class="button" href="${escapeHtml(adminUrl)}">Return to Shopify</a></p>` : ""}</main></html>`;
 }
 
 function connectionPage(nonce) {
   return `<!doctype html><html lang="en"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Connect your TDC account</title>
-<main><h1>Connect your TDC account</h1>
+<title>Connect your TDC account</title>${pageStyle(nonce)}
+<main><section id="start"><h1>Connect your TDC account</h1>
 <form id="login">
 <label>Email <input name="email" type="email" autocomplete="username" required></label>
 <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
 <button>Sign in</button></form>
-<section id="review" hidden><p id="selection"></p><button id="confirm">Confirm store connection</button></section>
+<section id="review" hidden><p id="selection"></p><button id="confirm">Confirm store connection</button></section></section>
+<section id="done" hidden><h1>Connected</h1><p id="doneText"></p>
+<p><a id="back" class="button" href="https://admin.shopify.com/">Return to Shopify</a></p></section>
 <p id="status" role="status"></p></main>
 <script nonce="${nonce}">
 const form = document.querySelector("#login");
@@ -171,7 +222,8 @@ async function post(url, body, auth) {
   if (auth) headers.Authorization = "Bearer " + token;
   const response = await fetch(url, {method: "POST", headers, body: JSON.stringify(body)});
   if (response.status >= 500) throw new Error("TDC is temporarily unavailable. Try again shortly.");
-  const data = await response.json();
+  const data = await response.json().catch(() => ({}));
+  if (data.needsVerification) throw new Error("This TDC account's email address isn't verified yet. Verify it in the tdc app, then sign in again.");
   if (!response.ok) throw new Error(data.error || data.message || "Try again from Shopify Admin.");
   return data;
 }
@@ -197,10 +249,15 @@ confirm.addEventListener("click", async () => {
   confirm.disabled = true;
   status.textContent = "";
   try {
-    await post(location.pathname + "/confirm", {brandId: selected.brandId}, true);
+    const result = await post(location.pathname + "/confirm", {brandId: selected.brandId}, true);
     token = null;
-    review.hidden = true;
-    status.textContent = "Store connected. Return to Shopify Admin, open Apps, and select tdc.";
+    document.querySelector("#start").hidden = true;
+    document.querySelector("#doneText").textContent = selected.shop + " is now connected to " + selected.brandName +
+      ". Return to Shopify to open tdc and create your student discounts.";
+    if (String(result.shopifyAdminUrl || "").startsWith("https://admin.shopify.com/store/")) {
+      document.querySelector("#back").href = result.shopifyAdminUrl;
+    }
+    document.querySelector("#done").hidden = false;
   } catch (error) {
     status.textContent = error.message;
     confirm.disabled = false;
