@@ -289,6 +289,7 @@ app.use("/api/jobs", require("./routes/jobs.routes"));
 app.use("/api/traveler", require("./routes/traveler.routes"));
 // P3b: the resume coach (flags resumeV2 + resumeCoach; speech: resumeSpeak), before the resume routes
 app.use("/api/resume/ai", require("./routes/resumeCoach.routes"));
+app.use("/api/resume", require("./routes/resumeFinish.routes")); // P3d: feedback, verified facts, public page, outcomes (new paths only)
 app.use("/api/resume", require("./routes/resume.routes"));
 app.use('/api/career/resume', require('./routes/careerResume.routes')); // AI Resume Studio, before /api/career (FLAG_RESUME_STUDIO_V2)
 app.use('/api/career/matching', require('./routes/careerMatching.routes')); // candidate matching, before /api/career (FLAG_CAREER_MATCHING)
