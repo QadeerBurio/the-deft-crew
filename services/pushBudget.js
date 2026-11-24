@@ -44,7 +44,7 @@ const BROADCAST = [
   "social_post", "social_confession", "skillshare_listing", "daily_drop", "new_offer", "app_update", "Update",
   "Promotion", "Brand", "new_event", "campus_news", "announcement",
   "streak_warning", "streak_warning_one", "streak_broken", "streak_broken_one", "win_back_soft", "win_back_ghost",
-  "welcome_back", "confession_tease", "try_discounts", "try_scholarship", "try_jobs", "try_resume", "try_events",
+  "welcome_back", "confession_tease", "confession_recap", "try_discounts", "try_scholarship", "try_jobs", "try_resume", "try_events",
   "try_social", "try_skillshare", "try_traveling",
 ];
 const TABLE = new Map([...PERSONAL.map((t) => [t, "personal"]), ...RELEVANT.map((t) => [t, "relevant"]), ...BROADCAST.map((t) => [t, "broadcast"])]);

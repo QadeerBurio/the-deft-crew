@@ -107,4 +107,18 @@ router.put("/confessions/:id/save", auth, gate, wrap(async (req, res) => {
   res.json({ saved: true });
 }));
 
+// ---------- P4c: share as an image card + its gettdc.pk/c/<id> page ----------
+// the server decides (owner rules: public, live, no open report); the card never carries a handle
+router.post("/confessions/:id/share", auth, gate, subFlag("confessionShare"), wrap(async (req, res) => {
+  if (!isId(req.params.id)) return notFound(res);
+  const share = require("../services/confessionShare");
+  const c = await Confession.findById(req.params.id).select("text status visibility university").lean();
+  if (!canSee(req, c)) return notFound(res);
+  const no = share.refusal(c, { openReport: (await share.openReports([c._id])).size > 0 });
+  if (no) return res.status(no.status).json({ code: no.code, error: no.message, message: no.message });
+  await Confession.updateOne({ _id: c._id, sharedAt: { $exists: false } }, { $set: { sharedAt: new Date() } }); // the first share
+  await Confession.updateOne({ _id: c._id }, { $set: { sharedBy: new mongoose.Types.ObjectId(meOf(req)) }, $inc: { shareCount: 1 } });
+  res.json({ url: share.pageUrl(String(c._id)), text: String(c.text || "") });
+}));
+
 module.exports = router;

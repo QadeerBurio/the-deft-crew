@@ -102,6 +102,11 @@ const ConfessionSchema = new mongoose.Schema({
   // a vote can be changed but not repeated) is never sent to anyone
   poll: { type: new mongoose.Schema({ options: [String], counts: [Number] }, { _id: false }), default: undefined },
   pollVoters: { type: [new mongoose.Schema({ user: mongoose.Schema.Types.ObjectId, option: Number }, { _id: false })], select: false, default: undefined },
+  // P4c (confessionShare): shared as an image card / link; its gettdc.pk/c/<id> page shows only while it's public, live,
+  // without an open report and the latest sharer still has the flag. sharedBy is never sent to anyone.
+  sharedAt: { type: Date, default: undefined },
+  sharedBy: { type: mongoose.Schema.Types.ObjectId, select: false, default: undefined },
+  shareCount: { type: Number, default: undefined },
 
   createdAt: { 
     type: Date, 
