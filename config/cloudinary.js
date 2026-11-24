@@ -9,23 +9,34 @@ require("dotenv").config();
 // ─────────────────────────────────────────────────────────
 // Cloudinary credential check
 // ─────────────────────────────────────────────────────────
-const hasCloudinary =
-  process.env.CLOUDINARY_NAME &&
-  process.env.CLOUDINARY_API_KEY &&
-  process.env.CLOUDINARY_API_SECRET;
+// Owner (25 Nov 2026): the key and secret are also read from CLOUDINARY_KEY / CLOUDINARY_SECRET (the names production
+// uses), so uploads don't fall back to the container's disk (wiped on every deploy) because of a naming difference.
+// CLOUDINARY_API_KEY / CLOUDINARY_API_SECRET win when both are set. Only the names are ever logged, never the values.
+const pick = (...names) => {
+  for (const n of names) { const v = String(process.env[n] || "").trim(); if (v) return { name: n, value: v }; }
+  return { name: null, value: "" };
+};
+const CRED = {
+  cloud: pick("CLOUDINARY_NAME"),
+  key: pick("CLOUDINARY_API_KEY", "CLOUDINARY_KEY"),
+  secret: pick("CLOUDINARY_API_SECRET", "CLOUDINARY_SECRET"),
+};
+const hasCloudinary = !!(CRED.cloud.value && CRED.key.value && CRED.secret.value);
+// which variable names were used (for logs and tests; never the values)
+const cloudinarySource = { cloud: CRED.cloud.name, key: CRED.key.name, secret: CRED.secret.name };
 
 if (hasCloudinary) {
   cloudinary.config({
-    cloud_name: process.env.CLOUDINARY_NAME,
-    api_key: process.env.CLOUDINARY_API_KEY,
-    api_secret: process.env.CLOUDINARY_API_SECRET,
+    cloud_name: CRED.cloud.value,
+    api_key: CRED.key.value,
+    api_secret: CRED.secret.value,
     secure: true,
   });
   console.log("✅ Cloudinary configured successfully");
-  console.log(`📁 Cloud Name: ${process.env.CLOUDINARY_NAME}`);
+  console.log(`📁 Cloud Name: ${CRED.cloud.value} (key from ${CRED.key.name}, secret from ${CRED.secret.name})`);
 } else {
-  console.log("⚠️ [Cloudinary] Credentials missing. Falling back to local disk storage.");
-  console.log("   Required: CLOUDINARY_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET");
+  const missing = [!CRED.cloud.value && "CLOUDINARY_NAME", !CRED.key.value && "CLOUDINARY_API_KEY (or CLOUDINARY_KEY)", !CRED.secret.value && "CLOUDINARY_API_SECRET (or CLOUDINARY_SECRET)"].filter(Boolean);
+  console.error(`❌ [Cloudinary] not configured, missing: ${missing.join(", ")}. Uploads go to the local disk, which is wiped on every deploy.`);
 }
 
 // ─────────────────────────────────────────────────────────
@@ -381,6 +392,7 @@ module.exports = {
   deleteFromCloudinary,
   getCloudinaryUrl,
   hasCloudinary,
+  cloudinarySource,
   profileStorage,
   resumeStorage,
   jobResumeStorage,
