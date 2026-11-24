@@ -2,6 +2,7 @@
 // authoritative records, for admins, brands and employers only (students get nothing new; no flag needed).
 //   GET /admin/overview?from&to    admin: discounts, loyalty, Surprise Box, hiring, employers
 //   GET /admin/metrics?preset|from&to  admin: the metrics + overview pages (Karachi days, vs previous period)
+//   GET /admin/resume-metrics      admin: resume templates, applications, interviews, hires, public pages (P3d)
 //   GET /brands/me?from&to         brand: its own redemptions, repeat customers, loyalty, Surprise Box
 //   GET /employers/me?from&to      employer: its own hiring funnel (+ First Hire Free summary when piloted)
 // Each is limited per user (RATE_LIMIT_ANALYTICS_MAX / _WINDOW_MIN, default 60 per 10 minutes): 429 RATE_LIMITED.
@@ -35,6 +36,8 @@ const role = (r) => async (req, res, next) => {
 router.get("/admin/overview", auth, role("admin"), limit, handle(async (req, res) => ok(req, res, await analytics.adminOverview(req.query))));
 // the metrics and overview pages (one calculation: services/analytics/adminMetrics.js)
 router.get("/admin/metrics", auth, role("admin"), limit, handle(async (req, res) => ok(req, res, await require("../services/analytics/adminMetrics").adminMetrics(req.query))));
+// P3d: the resume metrics table (templates, applications with "my tdc resume", interviews, hires, public pages)
+router.get("/admin/resume-metrics", auth, role("admin"), limit, handle(async (req, res) => ok(req, res, await require("../services/analytics/resumeMetrics").resumeMetrics())));
 router.get("/brands/me", auth, role("brand"), limit, handle(async (req, res) => ok(req, res, await analytics.brandInsights(req.userId, req.query))));
 router.get("/employers/me", auth, role("employee"), limit, handle(async (req, res) => {
   ok(req, res, await analytics.employerResults(req.userId, req.query, { trialService: require("../services/career/trialService") }));
@@ -45,6 +48,7 @@ router.get("/employers/me", auth, role("employee"), limit, handle(async (req, re
 require("../middleware/adminAccess").applyPermissions(router, {
   "GET /admin/overview": "analytics.view",
   "GET /admin/metrics": "analytics.view",
+  "GET /admin/resume-metrics": "analytics.view",
 }, "analytics.routes.js");
 
 module.exports = router;
