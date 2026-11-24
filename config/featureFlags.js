@@ -173,6 +173,14 @@ const FLAGS = {
   optimisticActions: { default: false, client: true, grant: { roles: ["student"], label: "Instant save on posts" } },
   // Q-3e (app only): touching an event card starts loading its details
   prefetchDetails: { default: false, client: true, grant: { roles: ["student"], label: "Preload event details on touch" } },
+  // P5b (app only): the header's brand search button
+  headerSearch: { default: false, client: true, grant: { roles: ["student"], label: "Header search button" } },
+  // P5b: "is your city right?" once on Home (POST /api/me/city)
+  cityCheck: { default: false, client: true, grant: { roles: ["student"], label: "City check on Home" } },
+  // P5b (app only): empty lists show a Dot, one line and one action
+  polishEmptyStates: { default: false, client: true, grant: { roles: ["student"], label: "Friendlier empty lists" } },
+  // P5b (app only): more celebration moments (first claim, a confession's 10th like, level up)
+  celebrationsPlus: { default: false, client: true, grant: { roles: ["student"], label: "More celebrations" } },
 };
 
 const JOBS = {

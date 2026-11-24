@@ -208,6 +208,9 @@ city: {
   default: function () { return this.isNew !== false && this.role === "student" ? "" : "Karachi"; },
   trim: true,
 },
+    // P5b (flag cityCheck): when the student confirmed or changed their city (POST /api/me/city). Unset = never
+    // asked (an old account may still have the old "Karachi" default). Optional: old apps ignore it.
+    cityConfirmedAt: { type: Date },
     // --- STUDENT SPECIFICS ---
     rollNo: { type: String },
     phone: { type: String },

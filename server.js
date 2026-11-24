@@ -266,6 +266,7 @@ app.use("/api/webhooks", require("./routes/webhook.routes"));
 
 // Now register all other routes
 app.use("/api/auth", require("./routes/auth.routes"));
+app.use("/api/me", require("./routes/meCity.routes")); // P5b: "is your city right?" (flag cityCheck; 404 otherwise)
 app.use("/api/universities", require("./routes/university.routes"));
 app.use("/api/offers", require("./routes/offer.routes"));
 app.use("/api/brands", require("./routes/brands.routes"));
