@@ -165,6 +165,8 @@ const FLAGS = {
   confessionShare: { default: false, client: true, grant: { roles: ["student"], label: "Confession share card + link" } },
   // P4c: the weekly campus recap push (numbers only; a campus with at least 5 confessions that week)
   confessionRecap: { default: false, client: true, grant: { roles: ["student"], label: "Confession weekly recap" } },
+  // Q-3i (app only): smaller, "eco" quality pictures on a slow mobile connection (2G / 3G)
+  lowDataImages: { default: false, client: true, grant: { roles: ["student"], label: "Low-data pictures on slow connections" } },
 };
 
 const JOBS = {
