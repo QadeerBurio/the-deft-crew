@@ -66,6 +66,20 @@ const T = token(U, "student");
   out.bad = { status: bad.status, json: bad.json };
   const anon = await h.call("POST", "/api/listings/upload", {});
   out.anon = anon.status;
+  // a guest (no token) sending a real file: refused, nothing stored
+  const b2 = "----tdc" + Math.random().toString(16).slice(2);
+  const raw2 = Buffer.concat([Buffer.from(`--${b2}
+Content-Disposition: form-data; name="file"; filename="guest.jpg"
+Content-Type: image/jpeg
+
+`), jpg, Buffer.from(`
+--${b2}--
+`)]);
+  const before = uploads.length;
+  const dir0 = path.join(SERVER, "uploads", "listings");
+  const filesBefore = fs.existsSync(dir0) ? fs.readdirSync(dir0).length : 0;
+  const guest = await h.call("POST", "/api/listings/upload", { raw: raw2, headers: { "content-type": `multipart/form-data; boundary=${b2}` } });
+  out.guest = { status: guest.status, json: guest.json, uploaded: uploads.length - before, newFiles: (fs.existsSync(dir0) ? fs.readdirSync(dir0).length : 0) - filesBefore };
   out.uploads = uploads.map((u) => ({ folder: u.params.folder, resource_type: u.params.resource_type, bytes: u.bytes }));
   const dir = path.join(SERVER, "uploads", "listings");
   out.diskFile = ok.json && ok.json.url && /\/uploads\/listings\//.test(ok.json.url) ? fs.existsSync(path.join(dir, ok.json.url.split("/").pop())) : false;

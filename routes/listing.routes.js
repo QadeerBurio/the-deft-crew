@@ -15,6 +15,9 @@ const getUserId = (req) => {
 
 // 0. POST /api/listings/upload - Upload a single attachment (image/video) for a paid listing
 router.post('/upload', auth, (req, res) => {
+  // owner (25 Nov 2026): guests can't upload (the auth middleware lets a request without a token through as a guest);
+  // refused before the file is read, so nothing is stored
+  if (req.isGuest) return res.status(401).json({ error: 'Sign in first', message: 'Sign in first' });
   upload.single('file')(req, res, (err) => {
     if (err) {
       // multer errors (bad type, file too large) land here, not in the outer try/catch
