@@ -1215,6 +1215,7 @@ router.post('/:id/duplicate', auth, rejectGuest, checkResumeLimit, async (req, r
     delete dupData._id;
     delete dupData.createdAt;
     delete dupData.updatedAt;
+    delete dupData.publicPage; // P3d: a copy starts with its public page off (and no link)
 
     if (dupData.personalInfo) {
       dupData.personalInfo.firstName = `Copy of ${dupData.personalInfo.firstName || 'Resume'}`;
