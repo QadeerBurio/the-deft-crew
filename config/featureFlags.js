@@ -146,6 +146,17 @@ const FLAGS = {
   // P3c (under resumeV2): the template studio: the library (approved templates only), gallery, customisation,
   // recommended row, ATS-safe badges, embedded fonts. Off: the five templates, as today.
   resumeTemplatesV2: { default: false, client: true, grant: { roles: ["student"], label: "Resume template studio" } },
+  // P3d (under resumeV2): recruiter-style feedback (strong / weak / improvements; one AI pass, cached per content)
+  resumeFeedback: { default: false, client: true, grant: { roles: ["student"], label: "Resume feedback" } },
+  // P3d: the finish moment (celebration, download / share link / matching jobs, the resume-ready card)
+  resumeFinish: { default: false, client: true, grant: { roles: ["student"], label: "Resume finish moment" } },
+  // P3d: the "verified by tdc" line (verified student, ambassador / founder credentials): off on each resume until added
+  resumeVerified: { default: false, client: true, grant: { roles: ["student"], label: "Resume verified-by-tdc line" } },
+  // P3d: the public resume page (gettdc.pk/r/<link>): off on each resume until the student turns it on; the page also
+  // goes away when this flag is off for its owner
+  resumePublicPage: { default: false, client: true, grant: { roles: ["student"], label: "Public resume page" } },
+  // P3d: interview rates per template in the gallery (only templates with >= 30 applications and >= 10 interviews)
+  resumeOutcomeStats: { default: false, client: true, grant: { roles: ["student"], label: "Resume outcome stats" } },
 };
 
 const JOBS = {
