@@ -26,7 +26,11 @@ const bcrypt = reqS("bcryptjs");
   const was = new Map(before.routes.map((r) => [key(r), r]));
   check(`the inventory read every router (${after.routes.length} write routes, none failed to load)`, after.routes.length > 250 && after.loaded.every((l) => !l.error), after.loaded.filter((l) => l.error).map((l) => `${l.file}: ${l.error}`).join(" | "));
   const isAllowed = (r) => guard.allowed(r.method, r.path.replace(/^\/api/, "").replace(/:(\w+)/g, "x"));
-  const closed = after.routes.filter((r) => !isAllowed(r));
+  // the guard sits on /api; a write route outside /api (the Shopify webhooks at /webhooks, since r8 a router the
+  // inventory sees) must refuse a signed-out, unsigned caller itself: 401 / 403
+  const outsideApi = after.routes.filter((r) => !r.path.startsWith("/api/"));
+  check(`every write route outside /api refuses an unsigned caller itself (${outsideApi.length} routes)`, outsideApi.every((r) => r.status === 401 || r.status === 403), outsideApi.filter((r) => r.status !== 401 && r.status !== 403).map((r) => `${r.status} ${key(r)}`).join(" | "));
+  const closed = after.routes.filter((r) => r.path.startsWith("/api/") && !isAllowed(r));
   const notBlocked = closed.filter((r) => !(r.status === 401 && /SIGN_IN_REQUIRED/.test(r.text)));
   check(`every non-allowlisted write route answers a guest 401 SIGN_IN_REQUIRED (${closed.length} routes)`, notBlocked.length === 0, notBlocked.slice(0, 8).map((r) => `${r.status} ${key(r)}`).join(" | "));
   const open = after.routes.filter(isAllowed);
