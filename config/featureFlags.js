@@ -185,6 +185,8 @@ const FLAGS = {
   onboardingGoals: { default: false, client: true, grant: { roles: ["student"], label: "Goals after signup" } },
   // P5c: one "next best action" card at the top of Home (GET /api/engagement/next-action)
   homeNextAction: { default: false, client: true, grant: { roles: ["student"], label: "Next best action on Home" } },
+  // Q-3a (app only): the home stack on the native stack (chosen when the app starts)
+  nativeStackDrawer: { default: false, client: true, grant: { roles: ["student"], label: "Native navigation (home stack)" } },
 };
 
 const JOBS = {
