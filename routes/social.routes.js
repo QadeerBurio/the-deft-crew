@@ -1909,7 +1909,8 @@ router.get('/confessions/feed', auth, async (req, res) => {
       .populate('comments.user', 'name profileImage')
       .populate('university', 'name')
       .lean();
-    if (v2) query = query.select(subOn(req, 'confessionPolls') ? '+meTooBy +pollVoters' : '+meTooBy');
+    // +authorId only to decide whether a handle may show (owner: off = anon.); removed from every row below
+    if (v2) query = query.select(subOn(req, 'confessionPolls') ? '+meTooBy +pollVoters +authorId' : '+meTooBy +authorId');
     if (ranked) query = query.limit(500); // the candidates of the last 14 / 7 days, ranked below
     else if (limit > 0) query = query.limit(limit);
     let confessions = await query;
@@ -1925,6 +1926,8 @@ router.get('/confessions/feed', auth, async (req, res) => {
     // P4b: which of these I follow and saved (only with the flags)
     const pollsOn = v2 && subOn(req, 'confessionPolls');
     const followOn = v2 && subOn(req, 'confessionFollow');
+    // owner (25 Nov 2026): a handle with a word the admin blocked later shows as "anon." (no app update)
+    const blockedHandleWords = v2 ? ((await safetySettings.get()).blockedHandleWords || []) : [];
     const pageIds = confessions.map((c) => c._id);
     const followed = followOn ? await confessionFollows.followingSet(currentUserId, pageIds) : new Set();
     // P4c: which may be shared as a card (public, live, no open report on it)
@@ -1962,6 +1965,9 @@ router.get('/confessions/feed', auth, async (req, res) => {
           ...(followOn ? { following: followed.has(String(confession._id)) } : {}),
           saved: savedSet.has(String(confession._id)),
           ...(shareOn ? { shareable: confession.visibility !== 'campus' && (!confession.status || confession.status === 'live') && !reportedSet.has(String(confession._id)) } : {}),
+          // a handle shows only while its author has confessionHandles and it has no blocked word (owner); never the author
+          ...(confession.handle && (confessionHandles.hasBlockedWord(confession.handle, blockedHandleWords) || !confessionHandles.enabled(confession.authorId)) ? { handle: undefined, handleVerified: undefined } : {}),
+          authorId: undefined,
         }
         : Object.fromEntries(V2_FIELDS.map((k) => [k, undefined]));
       return {

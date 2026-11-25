@@ -22,6 +22,8 @@ const safetySettingsSchema = new mongoose.Schema(
     // P4-3 / P4-4 (confessionsV2): the post tags (stable id, label the admin can rename, hidden) and the composer's prompt chips
     tags: { type: [{ _id: false, id: String, label: String, hidden: Boolean }], default: undefined },
     prompts: { type: [String], default: undefined },
+    // owner (25 Nov 2026): words taken out of confession handles later (no app update)
+    blockedHandleWords: { type: [String], default: undefined },
     updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
   },
   { timestamps: true }

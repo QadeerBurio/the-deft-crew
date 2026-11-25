@@ -189,6 +189,9 @@ const FLAGS = {
   nativeStackDrawer: { default: false, client: true, grant: { roles: ["student"], label: "Native navigation (home stack)" } },
   // Q-4 (app only): on a tablet (iPad), every screen in a centred column of at most 600 pt
   tabletLayout: { default: false, client: true, grant: { roles: ["student"], label: "Tablet layout (centred)" } },
+  // owner (25 Nov 2026): confession handles ("adjective-noun-123"), separate from confessionsV2; off = everyone "anon.".
+  // The owner approves the word list before switching it on; single words can be blocked later in Safety settings.
+  confessionHandles: { default: false, client: true, grant: { roles: ["student"], label: "Confession handles" } },
 };
 
 const JOBS = {

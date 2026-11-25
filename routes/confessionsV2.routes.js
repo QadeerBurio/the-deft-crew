@@ -42,7 +42,7 @@ const canSee = (req, c) => {
 
 router.get("/confessions/v2/config", auth, gate, wrap(async (req, res) => {
   const s = await settings.get();
-  const handle = handles.enabled() ? await handles.ensureHandle(meOf(req)) : null;
+  const handle = handles.enabled(meOf(req)) ? await handles.ensureHandle(meOf(req)) : null;
   res.json({
     tags: s.tags.filter((t) => !t.hidden).map((t) => ({ id: t.id, label: t.label })),
     prompts: settings.promptsThisWeek(s),

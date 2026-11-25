@@ -52,6 +52,8 @@ function merge(doc) {
     suspendOnSingleEvidenceReport: typeof d.suspendOnSingleEvidenceReport === "boolean" ? d.suspendOnSingleEvidenceReport : DEFAULTS.suspendOnSingleEvidenceReport,
     tags: Array.isArray(d.tags) && d.tags.length ? d.tags.filter((t) => t && TAG_ID.test(String(t.id || ""))).map((t) => ({ id: String(t.id), label: String(t.label || t.id).slice(0, 24), hidden: t.hidden === true })) : DEFAULTS.tags.map((t) => ({ ...t })),
     prompts: Array.isArray(d.prompts) && d.prompts.length ? d.prompts.map((p) => String(p).trim()).filter(Boolean) : [...DEFAULTS.prompts],
+    // owner (25 Nov 2026): words taken out of confession handles later (services/confessionHandles.js)
+    blockedHandleWords: Array.isArray(d.blockedHandleWords) ? d.blockedHandleWords.map((w) => String(w).trim().toLowerCase()).filter(Boolean) : [],
   };
 }
 
@@ -84,6 +86,7 @@ async function save(patch, adminId) {
     if (!set.tags.length) throw Object.assign(new Error("keep at least one tag (hide the others)"), { code: "NO_TAGS" });
   }
   if (patch.prompts !== undefined) set.prompts = (Array.isArray(patch.prompts) ? patch.prompts : String(patch.prompts).split(/\n/)).map((p) => String(p).trim().slice(0, 80)).filter(Boolean).slice(0, 40);
+  if (patch.blockedHandleWords !== undefined) set.blockedHandleWords = [...new Set((Array.isArray(patch.blockedHandleWords) ? patch.blockedHandleWords : String(patch.blockedHandleWords).split(/[,\n]/)).map((w) => String(w).trim().toLowerCase()).filter((w) => /^[a-z]{2,20}$/.test(w)))].slice(0, 200);
   if (adminId) set.updatedBy = adminId;
   const doc = await SafetySettings.findOneAndUpdate({ key: "confessions" }, { $set: set, $setOnInsert: { key: "confessions" } }, { upsert: true, new: true }).lean();
   cache = merge(doc);

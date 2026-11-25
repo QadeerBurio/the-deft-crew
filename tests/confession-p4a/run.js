@@ -69,22 +69,22 @@ const create = (tok, body) => call("POST", "/api/social/confessions/create", { t
   r = await call("GET", "/api/social/confessions/v2/config", { tok: T.A });
   const cfg = r.json || {};
   check("config: 9 visible tags, 3 prompts, the 8 Dot moods, 500 characters", r.status === 200 && cfg.tags.length === 9 && cfg.tags[0].id === "crush" && cfg.prompts.length === 3 && cfg.moods.join() === "excited,broke,panic,sus,shook,sleepy,cheeky,sorted" && cfg.maxLength === 500, r.text.slice(0, 200));
-  check("…handle off until the owner approves the words", cfg.handle.enabled === false && cfg.handle.handle === null && !rows("User").some((u) => u.confessionHandle));
+  check("…handle off without the confessionHandles flag (owner: its own flag)", cfg.handle.enabled === false && cfg.handle.handle === null && !rows("User").some((u) => u.confessionHandle));
   r = await create(T.A, { text: "a rant with a mood", tag: "rant", mood: "sus", postAs: "handle" });
   let doc = rows("Confession").find((c) => String(c._id) === String(r.json?.confession?._id));
-  check("a post keeps a visible tag and a known mood; 'as @handle' stays anon. (not approved)", r.status === 201 && doc.tag === "rant" && doc.mood === "sus" && !doc.handle && r.json.confession.tag === "rant");
+  check("a post keeps a visible tag and a known mood; 'as @handle' stays anon. (confessionHandles off)", r.status === 201 && doc.tag === "rant" && doc.mood === "sus" && !doc.handle && r.json.confession.tag === "rant");
   r = await create(T.A, { text: "made-up tag", tag: "politics", mood: "angry" });
   doc = rows("Confession").find((c) => String(c._id) === String(r.json?.confession?._id));
   check("an unknown tag or mood is ignored (posted, without them)", r.status === 201 && !doc.tag && !doc.mood);
 
-  console.log("-- handles (owner sign-off simulated)");
+  console.log("-- handles (flag confessionHandles on; owner: switched on after approving the words)");
   const lists = reqS("./config/confessionHandles");
   const handles = reqS("./services/confessionHandles");
-  lists.APPROVED = true;
+  process.env.FLAG_CONFESSION_HANDLES = "on";
   r = await create(T.A, { text: "posted as my handle", postAs: "handle" });
   doc = rows("Confession").find((c) => String(c._id) === String(r.json?.confession?._id));
   const mine = rows("User").find((u) => String(u._id) === String(ids.A)).confessionHandle;
-  check("approved: 'as @handle' → the student's handle on the post, with the verified tick (a verified student)", /^[a-z]+-[a-z]+-\d{3}$/.test(doc.handle || "") && doc.handle === mine && doc.handleVerified === true, JSON.stringify({ h: doc.handle, mine }));
+  check("confessionHandles on: 'as @handle' → the student's handle on the post, with the verified tick (a verified student)", /^[a-z]+-[a-z]+-\d{3}$/.test(doc.handle || "") && doc.handle === mine && doc.handleVerified === true, JSON.stringify({ h: doc.handle, mine }));
   r = await create(T.A, { text: "again as my handle", postAs: "handle" });
   check("…the same handle next time (stable)", rows("Confession").find((c) => String(c._id) === String(r.json?.confession?._id)).handle === mine);
   r = await call("GET", "/api/social/confessions/v2/config", { tok: T.A });
@@ -98,7 +98,7 @@ const create = (tok, body) => call("POST", "/api/social/confessions/create", { t
   let generatedOk = true;
   for (let i = 0; i < 3000; i++) { const c = handles.candidate(); if (!handles.clean(c)) { generatedOk = false; break; } }
   check("3,000 generated handles all pass the filter", generatedOk);
-  lists.APPROVED = false;
+  delete process.env.FLAG_CONFESSION_HANDLES;
 
   console.log("-- me too");
   const feedOf = async (tok, q = "scope=all") => { const x = await call("GET", `/api/social/confessions/feed?${q}`, { tok }); return Array.isArray(x.json) ? x.json : []; };
