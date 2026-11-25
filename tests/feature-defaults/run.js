@@ -126,7 +126,7 @@ const defaultRows = (f = () => true) => rows("FeatureDefault", f);
     && withEnv({ FLAG_LOYALTY_V2: "100%" }, () => on("loyaltyV2", "S", "student")) && withEnv({ FLAG_LOYALTY_V2: "on" }, () => on("loyaltyV2", "S", "student")));
   check("off;ids:X is on for X (not a kill switch)", withEnv({ FLAG_LOYALTY_V2: `off;ids:${S}` }, () => on("loyaltyV2", "S", "student") && !flags.isKilled("loyaltyV2")));
   check("the state says which step decided (railway)", state("loyaltyV2", "S", "student").source === "railway" && state("loyaltyV2", "S", "student").studentDefault === null && state("loyaltyV2", "S", "student").forced === null);
-  check("startup line: every defaultable flag 'not set' (no ids)", flags.describeDefaults() === "[flags] defaults: student {resumeStudioV2 not set, careerRatings not set, loyaltyV2 not set, careerTimeline not set, careerMatching not set, surplusBoxes not set}, brand {loyaltyV2 not set, surplusBoxes not set}, employee {careerTimeline not set, careerMatching not set, careerRatings not set, employerFirstHireFree not set}", flags.describeDefaults());
+  check("startup line: every defaultable flag 'not set' (no ids)", flags.describeDefaults() === "[flags] defaults: student {resumeStudioV2 not set, careerRatings not set, loyaltyV2 not set, careerTimeline not set, careerMatching not set, surplusBoxes not set, launchV2 not set, launchLinks not set}, brand {loyaltyV2 not set, surplusBoxes not set}, employee {careerTimeline not set, careerMatching not set, careerRatings not set, employerFirstHireFree not set}", flags.describeDefaults());
 
   console.log("── 2. the student default (admin portal)");
   let r = await call("PUT", "/api/admin/features/defaults/loyaltyV2", { body: { role: "student", enabled: true }, t: T.A });

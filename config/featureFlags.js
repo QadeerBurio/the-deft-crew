@@ -196,7 +196,28 @@ const FLAGS = {
   confessionsVoting: { default: false, client: true, grant: { roles: ["student"], label: "Confession voting (auto-hide only)" } },
   // r7 (P3-9, under resumeV2): a cover letter from the resume + a job, and a LinkedIn headline / about (English only)
   resumeWriter: { default: false, client: true, grant: { roles: ["student"], label: "Cover letter + LinkedIn writer" } },
+  // r9 launch (owner, 25 Nov 2026): master switches. launchV2 turns on LAUNCH_V2 below for that account; launchLinks
+  // turns on LAUNCH_LINKS (the gettdc.pk links: only once gettdc.pk is on Vercel). Both off by default; per account,
+  // or for every student (admin → features → "default for all students", opt-in: no row = off), or Railway.
+  launchV2: { default: false, client: true, grant: { roles: ["student"], label: "Launch: all v2 features" } },
+  launchLinks: { default: false, client: true, grant: { roles: ["student"], label: "Launch: gettdc.pk links (after DNS)" } },
 };
+
+// r9: what each master switch turns on for an account (unless that flag is killed in Railway or forced off for the
+// account). Never in a switch, always separate: confessionsVoting, accountStatusEnforce, socketTokenRequired,
+// adminRbacEnforce, adminSessionsV1, referralVerifyGate.
+const LAUNCH_V2 = Object.freeze([
+  "growthV2", "ambassadorV2", "shareCards", "squadMission", "chatPushV1", "pushOpenTracking", "pushBudgetV1", "pushAskV2",
+  "unifiedInbox", "notifSettingsV2", "pushCopyV2", "resumeV2", "resumeCoach", "resumeSpeak", "resumeTemplatesV2",
+  "resumeFeedback", "resumeFinish", "resumeVerified", "resumeOutcomeStats", "resumeWriter", "confessionsV2",
+  "confessionSafety", "confessionPolls", "confessionFollow", "confessionRecap", "confessionHandles", "lowDataImages",
+  "persistCache", "optimisticActions", "prefetchDetails", "headerSearch", "cityCheck", "polishEmptyStates",
+  "celebrationsPlus", "onboardingGoals", "homeNextAction", "tabletLayout", "nativeStackDrawer",
+]);
+const LAUNCH_LINKS = Object.freeze(["resumePublicPage", "confessionShare"]);
+const LAUNCH_NEVER = Object.freeze(["confessionsVoting", "accountStatusEnforce", "socketTokenRequired", "adminRbacEnforce", "adminSessionsV1", "referralVerifyGate"]);
+// opt-in role defaults: listed in ROLE_DEFAULTS (so admins get the "all students" switch) but no row = off
+const OPT_IN_DEFAULTS = new Set(["launchV2", "launchLinks"]);
 
 const JOBS = {
   eventIngestion: "events/scheduler: hourly Karachi event import, plus one pass 10s after start",
@@ -309,7 +330,7 @@ const forcedOffCounts = () => Object.fromEntries(Object.keys(FLAGS).filter((k) =
 // role defaults: every listed feature is ON for every account of the role, unless an admin turned that role's
 // default off (FeatureDefault row enabled: false). No row = on. Roles not listed (admin, traveler) get none.
 const ROLE_DEFAULTS = {
-  student: ["resumeStudioV2", "careerRatings", "loyaltyV2", "careerTimeline", "careerMatching", "surplusBoxes"],
+  student: ["resumeStudioV2", "careerRatings", "loyaltyV2", "careerTimeline", "careerMatching", "surplusBoxes", "launchV2", "launchLinks"],
   brand: ["loyaltyV2", "surplusBoxes"],
   employee: ["careerTimeline", "careerMatching", "careerRatings", "employerFirstHireFree"],
 };
@@ -349,6 +370,7 @@ function roleDefaultOf(flag, role) {
   if (!defaultable(flag, role)) return null;
   const k = rdKey(role, flag);
   if (roleDefaults.has(k)) return roleDefaults.get(k);
+  if (OPT_IN_DEFAULTS.has(flag)) return null; // r9 master switches: no row = not set (Railway decides: off by default)
   return builtInDefaults ? true : null; // no row = on
 }
 /** Was the default set by an admin (a row), or is it the built-in "on"? */
@@ -422,6 +444,12 @@ function flagState(flag, user = null) {
   else if (forced) { source = "account"; effective = forced === "on"; }
   else if (studentDefault !== null) { source = "default"; effective = studentDefault; }
   else { source = "railway"; effective = fromRailway; }
+  // r9: a master switch turns the flag on when nothing above said "off" on purpose (kill switch, the account forced
+  // off, the role's default turned off by an admin)
+  if (!effective && !killed && forced !== "off" && studentDefault !== false) {
+    const master = LAUNCH_V2.includes(flag) ? "launchV2" : LAUNCH_LINKS.includes(flag) ? "launchLinks" : null;
+    if (master && flagState(master, user).effective) { source = master; effective = true; }
+  }
   return { killed, forced, studentDefault, fromRailway, granted: forced === "on", source, effective };
 }
 
@@ -536,4 +564,5 @@ module.exports = {
   forcedOffCounts, describeForcedOff, STUDENT_DEFAULTABLE, setDefaults, applyDefault, studentDefaultOf, describeDefaults,
   ROLE_DEFAULTS, DEFAULT_ROLES, DEFAULTABLE_FLAGS, defaultable, roleDefaultOf, roleDefaultSet, setBuiltInDefaults,
   setNonStudentIds, setAccountRoles, markAccountRole, accountRoleOf, isNonStudentListLoaded: () => accountRolesLoaded,
+  LAUNCH_V2, LAUNCH_LINKS, LAUNCH_NEVER,
 };
