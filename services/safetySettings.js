@@ -5,8 +5,10 @@ const SafetySettings = require("../models/SafetySettings");
 
 const MODES = ["off", "observe", "enforce"];
 const DEFAULTS = Object.freeze({
-  // enforce = the checks act for accounts with the confessionSafety flag (as signed off in P4-1)
-  mode: "enforce",
+  // owner (r9 launch): OBSERVE by default: every confession is checked after saving and "would have acted" is logged,
+  // nothing is held or blocked. After 3 days of reviewing "would have blocked" in admin → Safety, an admin switches it
+  // to enforce (Safety → settings; FLAG-ROLLOUT.md). A saved setting always wins over this default.
+  mode: "observe",
   reportThreshold: 3,
   bannedWords: [],
   // Pakistani helplines (plan §12 #18). The owner call-tests each before launch; editable in admin.

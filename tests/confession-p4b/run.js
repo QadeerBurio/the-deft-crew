@@ -12,7 +12,7 @@
 process.env.OPENAI_API_KEY = process.env.OPENAI_API_KEY || "test-only-not-a-key";
 const h = require("../hiring-fixes/harness")(process.argv[2], {
   extraRoutes: [["/api/social", "./routes/confessionsV2.routes"], ["/api/social", "./routes/social.routes"]],
-  models: ["Confession", "University", "Report", "Post", "SocialNotification", "ConfessionFollow", "SavedItem", "EngagementProfile"],
+  models: ["Confession", "University", "Report", "Post", "SocialNotification", "ConfessionFollow", "SavedItem", "EngagementProfile", "SafetySettings"],
 });
 const { call, check, oid, user, token, fake, coll, rows, same, reqS } = h;
 
@@ -42,6 +42,8 @@ const allIds = Object.values(ids).filter((x) => x !== ids.N).join(",");
 
 (async () => {
   const server = h.start();
+  // owner (r9 launch): the built-in default is now observe; this suite tests enforce, so it sets it, as an admin would
+  await reqS("./services/safetySettings").save({ mode: "enforce" });
   const C0 = oid();
   fake.seed(coll("Confession"), [{ _id: C0, authorId: ids.A, text: "a plain post", university: U, visibility: "public", likes: 0, likedBy: [], comments: [], createdAt: new Date() }]);
 

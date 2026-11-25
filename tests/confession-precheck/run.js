@@ -63,6 +63,8 @@ const tick = (ms = 20) => new Promise((r) => setTimeout(r, ms));
 
 (async () => {
   const server = h.start();
+  // owner (r9 launch): the built-in default is now observe; this suite tests enforce, so it sets it, as an admin would
+  await reqS("./services/safetySettings").save({ mode: "enforce" });
 
   console.log("-- flag off");
   let r = await post(T.O, "call me 03001234567");

@@ -59,6 +59,8 @@ const tick = (ms = 30) => new Promise((r) => setTimeout(r, ms));
 
 (async () => {
   const server = h.start();
+  // owner (r9 launch): the built-in default is now observe; this suite tests enforce, so it sets it, as an admin would
+  await reqS("./services/safetySettings").save({ mode: "enforce" });
 
   console.log("-- flag off");
   for (const [m, p] of [["POST", `/api/social/confessions/${C.ok}/report`], ["POST", `/api/social/confessions/${C.ok}/mute-author`], ["POST", "/api/social/confessions/rules/accept"], ["GET", "/api/social/confessions/safety/me"]]) {

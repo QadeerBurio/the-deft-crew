@@ -50,8 +50,10 @@ const IMG = (name, cloud = "decaxpera") => `https://res.cloudinary.com/${cloud}/
   check("parse: transformations dropped, a folder kept (tdc_uploads)", images.parse("https://res.cloudinary.com/decaxpera/image/upload/w_400,c_fill/v12/tdc_uploads/pic.png").publicId === "tdc_uploads/pic");
   check("parse: not Cloudinary → null", images.parse("https://example.com/x.jpg") === null);
 
-  console.log("-- enforce (default)");
-  check("default mode is enforce", (await settings.get()).mode === "enforce");
+  console.log("-- the default (owner, r9 launch): observe; then enforce, set by an admin");
+  check("default mode is observe (nothing held or blocked until an admin switches to enforce)", (await settings.get()).mode === "observe");
+  await settings.save({ mode: "enforce" });
+  check("…an admin's enforce is saved and wins over the default", (await settings.get()).mode === "enforce");
   let r = await call("POST", "/api/social/confessions/precheck", { tok: T.flag, body: { text: "call me 0300-1234567" } });
   check("precheck, enforce: phone → edit with the reason", r.status === 200 && r.json?.verdict === "edit" && r.json.reasons.some((x) => x.code === "personal_info"), r.text);
   r = await call("POST", "/api/social/confessions/precheck", { tok: T.flag, body: { text: "the canteen is fine" } });
