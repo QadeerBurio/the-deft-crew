@@ -1933,6 +1933,9 @@ router.get('/confessions/feed', auth, async (req, res) => {
     // P4c: which may be shared as a card (public, live, no open report on it)
     const shareOn = v2 && subOn(req, 'confessionShare');
     const reportedSet = shareOn ? await require('../services/confessionShare').openReports(pageIds) : new Set();
+    // r7 (confessionsVoting): my own vote on each (never anyone else's, never a count)
+    const votingOn = v2 && subOn(req, 'confessionsVoting');
+    const myVotes = votingOn ? await require('../services/confessionVotes').myVotes(currentUserId, pageIds) : new Map();
     const savedSet = v2 ? new Set((await SavedItem.find({ user: currentUserId, kind: 'confession', refId: { $in: pageIds } }).select('refId').lean()).map((x) => String(x.refId))) : new Set();
 
     const formattedConfessions = confessions.map(confession => {
@@ -1964,6 +1967,8 @@ router.get('/confessions/feed', auth, async (req, res) => {
           poll: pollsOn ? confessionPolls.view(confession.poll, confession.pollVoters, currentUserId) : undefined,
           ...(followOn ? { following: followed.has(String(confession._id)) } : {}),
           saved: savedSet.has(String(confession._id)),
+          // (not on my own confession: no myVote, so the app shows no arrows there)
+          ...(votingOn && String(confession.authorId || '') !== String(currentUserId || '') ? { myVote: myVotes.get(String(confession._id)) || null } : {}),
           ...(shareOn ? { shareable: confession.visibility !== 'campus' && (!confession.status || confession.status === 'live') && !reportedSet.has(String(confession._id)) } : {}),
           // a handle shows only while its author has confessionHandles and it has no blocked word (owner); never the author
           ...(confession.handle && (confessionHandles.hasBlockedWord(confession.handle, blockedHandleWords) || !confessionHandles.enabled(confession.authorId)) ? { handle: undefined, handleVerified: undefined } : {}),

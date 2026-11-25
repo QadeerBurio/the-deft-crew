@@ -7,6 +7,7 @@
 //   PUT /confessions/:id/metoo   → { meToo, meTooCount }   toggles "me too" (who tapped is never sent)
 //   P4b: PUT /confessions/:id/poll { option } (+ confessionPolls) → { poll }; PUT /confessions/:id/follow { on }
 //   (+ confessionFollow) → { following }; PUT /confessions/:id/save { on } → { saved } (the list: feed ?saved=1)
+//   r7: PUT /confessions/:id/vote { vote: up | down | null } (+ confessionsVoting) → { vote }; used only for auto-hide
 // The feed and create changes (sort, tag filter, tag / mood / post as handle) are in social.routes.js, behind the same flag.
 const express = require("express");
 const mongoose = require("mongoose");
@@ -119,6 +120,19 @@ router.post("/confessions/:id/share", auth, gate, subFlag("confessionShare"), wr
   await Confession.updateOne({ _id: c._id, sharedAt: { $exists: false } }, { $set: { sharedAt: new Date() } }); // the first share
   await Confession.updateOne({ _id: c._id }, { $set: { sharedBy: new mongoose.Types.ObjectId(meOf(req)) }, $inc: { shareCount: 1 } });
   res.json({ url: share.pageUrl(String(c._id)), text: String(c.text || "") });
+}));
+
+// ---------- r7: voting (confessionsVoting), used only for auto-hide ----------
+// PUT /confessions/:id/vote { vote: "up" | "down" | null } → { vote }. No counts, ever. Not on your own confession.
+router.put("/confessions/:id/vote", auth, gate, subFlag("confessionsVoting"), wrap(async (req, res) => {
+  if (!isId(req.params.id)) return notFound(res);
+  const dir = req.body?.vote;
+  if (!(dir === "up" || dir === "down" || dir === null)) return res.status(400).json({ error: "vote: up | down | null", message: "vote: up | down | null" });
+  const c = await Confession.findById(req.params.id).select("+authorId status statusReason visibility university").lean();
+  if (!canSee(req, c)) return notFound(res);
+  if (String(c.authorId || "") === meOf(req)) return res.status(400).json({ code: "OWN_CONFESSION", error: "you can't vote on your own confession.", message: "you can't vote on your own confession." });
+  const r = await require("../services/confessionVotes").vote(c, meOf(req), dir);
+  res.json({ vote: r.vote });
 }));
 
 module.exports = router;

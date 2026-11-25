@@ -107,6 +107,12 @@ const ConfessionSchema = new mongoose.Schema({
   sharedAt: { type: Date, default: undefined },
   sharedBy: { type: mongoose.Schema.Types.ObjectId, select: false, default: undefined },
   shareCount: { type: Number, default: undefined },
+  // r7 (confessionsVoting): up / down votes, used only for auto-hide (services/confessionVotes.js); who voted and the
+  // counts are never sent to anyone
+  voteUp: { type: [mongoose.Schema.Types.ObjectId], select: false, default: undefined },
+  voteDown: { type: [mongoose.Schema.Types.ObjectId], select: false, default: undefined },
+  voteUpCount: { type: Number, select: false, default: undefined },
+  voteDownCount: { type: Number, select: false, default: undefined },
   // P5b (celebrationsPlus): when its author was told it reached 10 likes (once per confession; never sent)
   likes10CelebratedAt: { type: Date, select: false, default: undefined },
 
