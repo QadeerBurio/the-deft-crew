@@ -120,6 +120,8 @@ const profileSchema = new mongoose.Schema(
     // P5c (flag onboardingGoals): the 1-2 goals the student picked (save_money, internship, meet_people, resume);
     // unset = never asked. Home's missions put the matching cards first.
     goals: { type: [String], default: undefined },
+    // owner (25 Nov 2026): the goals sheet shows once only: set the first time it is shown (skip or not)
+    goalsAskedAt: { type: Date, default: undefined },
     push: {
       weekKey:       { type: String, default: null },
       sentThisWeek:  { type: Number, default: 0 },

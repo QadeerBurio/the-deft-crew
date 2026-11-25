@@ -546,7 +546,8 @@ router.get('/home', auth, async (req, res) => {
         cards,
         next: goals.length ? goalsSvc.nextCardFor(profile, goals) : missions.nextCard(profile),
       },
-      ...(goalsOn ? { goals } : {}),
+      // goalsAsked: the sheet was shown once already, or goals are picked (owner: never again after skip or completion)
+      ...(goalsOn ? { goals, goalsAsked: !!(goals.length || profile?.goalsAskedAt) } : {}),
       streak: profile?.streak
         ? {
             count: profile.streak.count || 0,
@@ -569,6 +570,13 @@ router.get('/home', auth, async (req, res) => {
 router.post('/goals', auth, async (req, res) => {
   try {
     if (req.isGuest || !isEnabled('onboardingGoals', { id: String(req.userId), role: req.userRole || 'student' })) return res.status(404).json({ message: 'Not found' });
+    // owner (25 Nov 2026): { asked: true } when the sheet is shown (once only; a skip changes nothing else)
+    if (req.body?.asked === true) {
+      const p = await EngagementProfile.findOne({ user: req.userId }).select('goalsAskedAt').lean();
+      if (!p) await EngagementProfile.updateOne({ user: req.userId }, { $set: { goalsAskedAt: new Date() } }, { upsert: true });
+      else if (!p.goalsAskedAt) await EngagementProfile.updateOne({ user: req.userId }, { $set: { goalsAskedAt: new Date() } });
+      return res.json({ asked: true });
+    }
     const goals = goalsSvc.cleanGoals(req.body?.goals);
     if (!goals) return res.status(400).json({ message: 'pick one or two goals.', error: 'pick one or two goals.' });
     await EngagementProfile.updateOne({ user: req.userId }, { $set: { goals } }, { upsert: true });

@@ -46,6 +46,28 @@ const prof = (id) => rows("EngagementProfile", (p) => same(p.user, id))[0];
   r = await call("GET", "/api/engagement/home", { tok: T.S });
   check("…social done → next is events", r.json.missions.next === "events");
 
+  // owner (25 Nov 2026): shown once only — { asked: true } when shown; goalsAsked then stays true
+  const N2 = oid();
+  fake.seed(coll("User"), [user(N2, "student", "Noor New")]);
+  fake.seed(coll("EngagementProfile"), [{ _id: oid(), user: N2, sorted: {}, sortedCount: 0 }]);
+  process.env.FLAG_ONBOARDING_GOALS = `ids:${S},${D},${N2}`;
+  r = await call("GET", "/api/engagement/home", { tok: token(N2, "student") });
+  check("never shown: goalsAsked false (the sheet may show)", r.json.goalsAsked === false && JSON.stringify(r.json.goals) === "[]");
+  r = await call("POST", "/api/engagement/goals", { tok: token(N2, "student"), body: { asked: true } });
+  const askedAt = prof(N2).goalsAskedAt;
+  check("shown → { asked: true } records it", r.status === 200 && r.json.asked === true && !!askedAt);
+  await call("POST", "/api/engagement/goals", { tok: token(N2, "student"), body: { asked: true } });
+  check("…a second time keeps the first time", String(prof(N2).goalsAskedAt) === String(askedAt));
+  r = await call("GET", "/api/engagement/home", { tok: token(N2, "student") });
+  check("after it was shown (skipped): goalsAsked true, goals still []", r.json.goalsAsked === true && JSON.stringify(r.json.goals) === "[]");
+  r = await call("GET", "/api/engagement/home", { tok: T.S });
+  check("goals picked: goalsAsked true", r.json.goalsAsked === true);
+  const N3 = oid();
+  fake.seed(coll("User"), [user(N3, "student", "No Profile Yet")]);
+  process.env.FLAG_ONBOARDING_GOALS = `ids:${S},${D},${N2},${N3}`;
+  r = await call("POST", "/api/engagement/goals", { tok: token(N3, "student"), body: { asked: true } });
+  check("a student without an engagement profile yet: recorded too", r.status === 200 && !!prof(N3)?.goalsAskedAt);
+
   // ── next action ──
   r = await call("GET", "/api/engagement/next-action", { tok: T.S });
   check("next action, flag off: 404", r.status === 404);
