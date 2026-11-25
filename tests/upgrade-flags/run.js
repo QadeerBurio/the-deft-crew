@@ -1,7 +1,8 @@
 // Upgrade v2 flags (upgrade/p0-safety, plan P0-1 + P0-6), on in-memory data:
-//   - growthV2, ambassadorV2, resumeV2, confessionsV2, confessionSafety, shareCards exist, are sent by
-//     GET /api/app/flags/me, and are OFF for every role (student, brand, employer, admin, guest) with no Railway value
-//     and no admin row, while the older student features stay on by default (production behaviour)
+//   - growthV2, ambassadorV2, resumeV2, confessionsV2, confessionSafety, shareCards exist and are sent by
+//     GET /api/app/flags/me. r10 (owner): ON for every student by default through launchV2 (a student role default);
+//     OFF for brand, employer, admin and guest. With the students' launchV2 default turned off they are off for every
+//     role, as before r10 (the per-account checks below run that way)
 //   - none of them is in ROLE_DEFAULTS; each can be granted to students only, shows in the admin features overview
 //   - an admin row turns one on for exactly that student; the Railway kill switch ("off") still wins
 //   - a Railway ids rule turns one on for a test account only
@@ -44,9 +45,13 @@ const me = async (tok) => (await call("GET", "/api/app/flags/me", { tok })).json
   check("none is in ROLE_DEFAULTS (no role gets them on by default)", Object.values(flags.ROLE_DEFAULTS).every((list) => NEW.every((f) => !list.includes(f))) && NEW.every((f) => !flags.FLAGS[f].studentDefault));
   check("accountStatusEnforce: server only, not grantable, off by default", flags.FLAGS.accountStatusEnforce && flags.FLAGS.accountStatusEnforce.default === false && !flags.FLAGS.accountStatusEnforce.client && !flags.FLAGS.accountStatusEnforce.grant);
 
-  // what each role's app sees
+  // what each role's app sees: r10, students have them by default through launchV2 (no row needed)
+  const s0 = await me(T.S);
+  check("r10: student with no settings: every upgrade flag on (launchV2, a student default)", s0.launchV2 === true && NEW.every((f) => s0[f] === true), JSON.stringify(s0));
+  // the rest of this suite: the students' launchV2 default turned off by an admin = the rules as before r10
+  flags.applyDefault("launchV2", "student", false);
   const s = await me(T.S);
-  check("student: every upgrade flag is false", NEW.every((f) => s[f] === false), JSON.stringify(s));
+  check("students' launchV2 default off: every upgrade flag is false", NEW.every((f) => s[f] === false), JSON.stringify(s));
   check("student: the older student features are still on by default (unchanged)", s.loyaltyV2 === true && s.resumeStudioV2 === true, JSON.stringify(s));
   for (const [who, tok] of [["brand", T.B], ["employer", T.E], ["admin", T.A]]) {
     const v = await me(tok);

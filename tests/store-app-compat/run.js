@@ -7,12 +7,14 @@ const os = require("os");
 const fs = require("fs");
 const { spawnSync } = require("child_process");
 const serverDir = path.resolve(process.argv[2] || path.join(__dirname, "..", ".."));
-const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "store-compat-")), "now.json");
-const r = spawnSync(process.execPath, [path.join(__dirname, "collect.js"), serverDir, out], { encoding: "utf8", timeout: 5 * 60 * 1000 });
-if (r.status !== 0) { console.log(`FAIL  collect crashed: ${(r.stderr || "").split("\n").slice(0, 4).join(" | ")}`); console.log("0/1 passed"); process.exit(1); }
 const old = JSON.parse(fs.readFileSync(path.join(__dirname, "old-shapes.json"), "utf8"));
-const now = JSON.parse(fs.readFileSync(out, "utf8"));
 let pass = 0; let total = 0;
+// r10: twice: every flag off, and launchV2 on (production since r10: every student has it by default)
+for (const mode of ["flags off", "launchV2 on"]) {
+const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "store-compat-")), "now.json");
+const r = spawnSync(process.execPath, [path.join(__dirname, "collect.js"), serverDir, out], { encoding: "utf8", timeout: 5 * 60 * 1000, env: { ...process.env, COMPAT_LAUNCH: mode === "launchV2 on" ? "1" : "" } });
+if (r.status !== 0) { console.log(`FAIL  collect crashed (${mode}): ${(r.stderr || "").split("\n").slice(0, 4).join(" | ")}`); console.log("0/1 passed"); process.exit(1); }
+const now = JSON.parse(fs.readFileSync(out, "utf8"));
 for (const [key, o] of Object.entries(old)) {
   if (key.startsWith("_")) continue;
   total++;
@@ -28,7 +30,8 @@ for (const [key, o] of Object.entries(old)) {
     }
   }
   if (!problems.length) pass++;
-  console.log(`${problems.length ? "FAIL" : "PASS"}  ${key}: ${Object.keys(o.shape).length} fields the store app may read${problems.length ? `  (${problems.slice(0, 6).join("; ")})` : ""}`);
+  console.log(`${problems.length ? "FAIL" : "PASS"}  [${mode}] ${key}: ${Object.keys(o.shape).length} fields the store app may read${problems.length ? `  (${problems.slice(0, 6).join("; ")})` : ""}`);
+}
 }
 console.log(`\n${pass}/${total} passed`);
 process.exit(pass === total ? 0 : 1);

@@ -19,6 +19,8 @@ const h = require("../hiring-fixes/harness")(serverDir, {
   models: ["Confession", "University", "Resume", "Notification", "Report"],
 });
 const { call, oid, user, token, fake, coll } = h;
+// r10: COMPAT_LAUNCH=1 → every student has launchV2 (as in production since r10); set after the harness clears FLAG_*
+if (process.env.COMPAT_LAUNCH === "1") process.env.FLAG_LAUNCH_V2 = "on";
 
 const U = oid(); const S = oid(); const O = oid(); const R = oid(); const C1 = oid(); const C2 = oid();
 const now = new Date("2026-11-20T10:00:00Z");

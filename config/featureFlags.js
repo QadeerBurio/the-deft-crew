@@ -197,8 +197,10 @@ const FLAGS = {
   // r7 (P3-9, under resumeV2): a cover letter from the resume + a job, and a LinkedIn headline / about (English only)
   resumeWriter: { default: false, client: true, grant: { roles: ["student"], label: "Cover letter + LinkedIn writer" } },
   // r9 launch (owner, 25 Nov 2026): master switches. launchV2 turns on LAUNCH_V2 below for that account; launchLinks
-  // turns on LAUNCH_LINKS (the gettdc.pk links: only once gettdc.pk is on Vercel). Both off by default; per account,
-  // or for every student (admin → features → "default for all students", opt-in: no row = off), or Railway.
+  // turns on LAUNCH_LINKS (the gettdc.pk links: only once gettdc.pk is on Vercel).
+  // r10 (owner): launchV2 is ON for every student by default (a student role default, like loyaltyV2): no admin row
+  // needed; never employers or brands. An admin can still force it off per account or turn the students' default off;
+  // the Railway kill switch (FLAG_LAUNCH_V2=off) beats both. launchLinks stays off (opt-in) until DNS.
   launchV2: { default: false, client: true, grant: { roles: ["student"], label: "Launch: all v2 features" } },
   launchLinks: { default: false, client: true, grant: { roles: ["student"], label: "Launch: gettdc.pk links (after DNS)" } },
 };
@@ -216,8 +218,9 @@ const LAUNCH_V2 = Object.freeze([
 ]);
 const LAUNCH_LINKS = Object.freeze(["resumePublicPage", "confessionShare"]);
 const LAUNCH_NEVER = Object.freeze(["confessionsVoting", "accountStatusEnforce", "socketTokenRequired", "adminRbacEnforce", "adminSessionsV1", "referralVerifyGate"]);
-// opt-in role defaults: listed in ROLE_DEFAULTS (so admins get the "all students" switch) but no row = off
-const OPT_IN_DEFAULTS = new Set(["launchV2", "launchLinks"]);
+// opt-in role defaults: listed in ROLE_DEFAULTS (so admins get the "all students" switch) but no row = off.
+// r10: launchV2 left this list (owner: on by default for students); launchLinks stays opt-in until gettdc.pk is on Vercel.
+const OPT_IN_DEFAULTS = new Set(["launchLinks"]);
 
 const JOBS = {
   eventIngestion: "events/scheduler: hourly Karachi event import, plus one pass 10s after start",
@@ -370,7 +373,7 @@ function roleDefaultOf(flag, role) {
   if (!defaultable(flag, role)) return null;
   const k = rdKey(role, flag);
   if (roleDefaults.has(k)) return roleDefaults.get(k);
-  if (OPT_IN_DEFAULTS.has(flag)) return null; // r9 master switches: no row = not set (Railway decides: off by default)
+  if (OPT_IN_DEFAULTS.has(flag)) return null; // opt-in switches (launchLinks): no row = not set (Railway decides: off)
   return builtInDefaults ? true : null; // no row = on
 }
 /** Was the default set by an admin (a row), or is it the built-in "on"? */
