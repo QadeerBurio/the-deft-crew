@@ -73,6 +73,7 @@ const REQUESTS = [
     const r = await call(m, url, { tok });
     result[key] = { status: r.status, shape: r.json === undefined ? {} : shape(r.json) };
   }
+  fs.mkdirSync(require("path").dirname(out), { recursive: true }); // the temp folder may have been cleaned meanwhile
   fs.writeFileSync(out, JSON.stringify(result, null, 1));
   server.close();
   process.exit(0);

@@ -13,6 +13,9 @@ const Module = require("module");
 
 const SERVER = path.resolve(process.argv[2] || path.join(__dirname, "..", ".."));
 const reqS = Module.createRequire(path.join(SERVER, "server.js"));
+// r10 (owner): launchV2 is on for every student by default; this suite tests its flag on / off per account, so the
+// students' launchV2 default is turned off first, as an admin can (the per-account rules are then exactly as before)
+reqS("./config/featureFlags").applyDefault("launchV2", "student", false);
 process.env.JWT_SECRET = "test-only";
 for (const k of Object.keys(process.env)) if (/^(FLAG|JOB|PUSH_BUDGET)_|^MONGO|^SOCIAL_PUSH|^EXPO_ACCESS|^DISABLE_NOTIFICATION_PUSH$/.test(k)) delete process.env[k];
 
