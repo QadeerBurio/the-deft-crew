@@ -107,8 +107,10 @@ const ConfessionSchema = new mongoose.Schema({
   sharedAt: { type: Date, default: undefined },
   sharedBy: { type: mongoose.Schema.Types.ObjectId, select: false, default: undefined },
   shareCount: { type: Number, default: undefined },
+  // P5b (celebrationsPlus): when its author was told it reached 10 likes (once per confession; never sent)
+  likes10CelebratedAt: { type: Date, select: false, default: undefined },
 
-  createdAt: { 
+  createdAt: {
     type: Date, 
     default: Date.now 
   }

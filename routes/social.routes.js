@@ -1620,6 +1620,10 @@ router.put('/confessions/like/:id', auth, async (req, res) => {
       likes: confession.likes,
       liked: isLiked
     });
+    // P5b (celebrationsPlus): the author hears once when it reaches 10 likes (after the reply; never blocks it)
+    if (isLiked && confession.likes >= 10) {
+      require("../services/confessionMilestones").maybeCelebrateTenLikes(confession._id).catch((e) => console.warn("[confession-milestone]", e.message));
+    }
   } catch (err) {
     console.error("Like Confession Error:", err);
     res.status(500).json({ error: "Error updating like" });
