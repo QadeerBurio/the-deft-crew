@@ -26,6 +26,12 @@ const handle = (fn) => async (req, res) => {
     return fail(res, 500, "SERVER_ERROR", "something went wrong. try again in a moment.");
   }
 };
+// owner (25 Nov 2026): templates the admin took out of the gallery (no app update) → { ok, data: { hidden: [ids] } }
+router.get("/templates/hidden", auth, gate("resumeV2", "resumeTemplatesV2"), handle(async (req, res) => {
+  const { hiddenTemplates } = await require("../services/resumeSettings").get();
+  res.json({ ok: true, data: { hidden: hiddenTemplates } });
+}));
+
 const ownResume = async (req, select) => {
   if (!isId(req.params.id)) return null;
   const q = require("../models/Resume").findOne({ _id: req.params.id, user: req.userId });

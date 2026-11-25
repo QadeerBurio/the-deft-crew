@@ -277,6 +277,7 @@ app.use("/api/admin/actions", require("./routes/adminActions.routes")); // the u
 app.use("/api/admin/universities", require("./routes/adminUniversities.routes")); // the shared university list (admin only, logged)
 app.use("/api/admin/features", require("./routes/adminFeatures.routes")); // features per account (admin only, logged)
 app.use("/api/admin/safety", require("./routes/adminSafety.routes")); // confession safety log (plan P4-7, admins only)
+app.use("/api/admin/resume-settings", require("./routes/adminResumeSettings.routes")); // owner: hide a template without an app update
 app.use("/api/admin", require("./routes/admin.routes"));
 app.use("/api/admin/team", require("./routes/adminTeam.routes")); // Phase A: team & access (super admins)
 app.use("/api/admin/me", require("./routes/adminMe.routes")); // Phase A: an admin's own access and sessions
