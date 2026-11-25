@@ -222,7 +222,24 @@ const entry = (title, sub, date, body) => `
     ${body || ''}
   </div>`;
 
-const section = (title, inner) => (inner ? `<section><h2>${esc(title)}</h2>${inner}</section>` : '');
+const section = (title, inner, icon = '') => (inner ? `<section><h2>${icon}${esc(title)}</h2>${inner}</section>` : '');
+
+// heading icons (studio: customStyles.headingIcons, off by default): small line drawings in the heading's colour. Vector
+// only, no text, so the PDF's text (what an ATS reads) is the same with or without them.
+const ICON_PATHS = {
+  summary: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/>',
+  experience: '<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M3 13h18"/>',
+  education: '<path d="M2 9l10-5 10 5-10 5z"/><path d="M6 11v5c0 1.7 2.7 3 6 3s6-1.3 6-3v-5"/>',
+  projects: '<path d="M8 8l-5 4 5 4M16 8l5 4-5 4M14 5l-4 14"/>',
+  skills: '<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>',
+  certifications: '<circle cx="12" cy="9" r="6"/><path d="M8.5 14l-1.5 7 5-3 5 3-1.5-7"/>',
+  languages: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z"/>',
+  activities: '<path d="M5 21V4M5 4h11l-2 4 2 4H5"/>',
+  volunteering: '<path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/>',
+  awards: '<path d="M7 4h10v5a5 5 0 0 1-10 0zM7 6H4a3 3 0 0 0 3 4M17 6h3a3 3 0 0 1-3 4M12 14v4M8 21h8"/>',
+  achievements: '<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>',
+};
+const iconOf = (look, key) => (look.icons && ICON_PATHS[key] ? `<svg class="hi" viewBox="0 0 24 24" aria-hidden="true">${ICON_PATHS[key]}</svg>` : '');
 
 // P3d "verified by tdc": facts the server checked (never typed), each with its verify link; nothing when absent
 const verifiedLine = (facts) => {
@@ -288,19 +305,19 @@ function body(resume, look = {}, verified) {
     ${title ? `<div class="title" dir="auto">${esc(title)}</div>` : ''}
     ${contact.length ? `<div class="contact">${contact.join('<span class="sep"> | </span>')}</div>` : ''}${verifiedLine(verified)}
   </header>
-  ${section(H('summary', 'Summary'), summary ? `<p dir="auto">${esc(summary)}</p>` : '')}
+  ${section(H('summary', 'Summary'), summary ? `<p dir="auto">${esc(summary)}</p>` : '', iconOf(look, 'summary'))}
   ${ordered(r, workFirst, {
-    experience: section(H('experience', 'Experience'), work),
-    education: section(H('education', 'Education'), eduWithCourses),
-    projects: section(H('projects', 'Projects'), projects),
-    skills: section(H('skills', 'Skills'), skills.length ? `<p class="skills" dir="auto">${skills.map(esc).join(look.skillSep || ', ')}</p>` : ''),
-    certifications: section(H('certifications', 'Certifications'), certs),
-    languages: section(H('languages', 'Languages'), langs.length ? `<p dir="auto">${langs.join(', ')}</p>` : ''),
-    activities: section(H('activities', 'Leadership & Activities'), activities),
-    volunteering: section(H('volunteering', 'Volunteering'), volunteering),
-    awards: section(H('awards', 'Awards'), awards),
+    experience: section(H('experience', 'Experience'), work, iconOf(look, 'experience')),
+    education: section(H('education', 'Education'), eduWithCourses, iconOf(look, 'education')),
+    projects: section(H('projects', 'Projects'), projects, iconOf(look, 'projects')),
+    skills: section(H('skills', 'Skills'), skills.length ? `<p class="skills" dir="auto">${skills.map(esc).join(look.skillSep || ', ')}</p>` : '', iconOf(look, 'skills')),
+    certifications: section(H('certifications', 'Certifications'), certs, iconOf(look, 'certifications')),
+    languages: section(H('languages', 'Languages'), langs.length ? `<p dir="auto">${langs.join(', ')}</p>` : '', iconOf(look, 'languages')),
+    activities: section(H('activities', 'Leadership & Activities'), activities, iconOf(look, 'activities')),
+    volunteering: section(H('volunteering', 'Volunteering'), volunteering, iconOf(look, 'volunteering')),
+    awards: section(H('awards', 'Awards'), awards, iconOf(look, 'awards')),
   }, look.order)}
-  ${section(H('achievements', 'Achievements'), achievements.length ? `<ul>${achievements.map((a) => `<li dir="auto">${esc(a)}</li>`).join('')}</ul>` : '')}
+  ${section(H('achievements', 'Achievements'), achievements.length ? `<ul>${achievements.map((a) => `<li dir="auto">${esc(a)}</li>`).join('')}</ul>` : '', iconOf(look, 'achievements'))}
   ${section('Additional information', str(r.otherNotes) ? lines(r.otherNotes) : '')}`;
 }
 
@@ -380,6 +397,7 @@ function extras(look, { accent, heading, text }) {
   if (look.h2x === 'none') out.push('h2 { border: none; padding: 0; letter-spacing: 0.02em; }');
   if (look.h2case === 'title') out.push('h2 { text-transform: none; letter-spacing: 0.01em; }');
   if (look.pageSize === 'Letter') out.push('@page { size: Letter; }');
+  if (look.icons) out.push('h2 .hi { display: inline-block; width: 0.95em; height: 0.95em; vertical-align: -0.12em; margin-right: 0.35em; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }');
   if (look.photoUrl) out.push(`header .photo { float: right; width: 72px; height: 72px; object-fit: cover; margin: 0 0 6px 12px; border-radius: ${{ circle: '50%', rounded: '10px', square: '0' }[look.photoShape] || '50%'}; }`);
   if (look.dateAccent) out.push(`.d { color: ${accent}; font-weight: 600; }`);
   if (look.subPlain) out.push(`.sub { font-style: normal; color: ${text}; opacity: 0.85; }`);
@@ -398,7 +416,7 @@ function customise(look, styles = {}, { library = false, resume } = {}) {
   if (library) for (const [k, v] of Object.entries(MODEL_DEFAULT_COLOURS)) if (str(colours[k]).toUpperCase() === v) delete colours[k];
   const pal = PALETTES.find((x) => x.id === st.palette);
   if (pal) { delete colours.accentColor; delete colours.headingColor; delete colours.textColor; }
-  if (!keys.some((k) => st[k] !== undefined && st[k] !== null) && !library) return { look, styles: st };
+  if (!keys.some((k) => st[k] !== undefined && st[k] !== null) && st.headingIcons !== true && !library) return { look, styles: st };
   const l = { ...look };
   if (pal) Object.assign(l, { accent: pal.accent, heading: pal.heading, text: pal.text });
   const fp = FONT_PAIRS.find((x) => x.id === st.fontPair);
@@ -408,6 +426,7 @@ function customise(look, styles = {}, { library = false, resume } = {}) {
   if (MARGINS[st.margins]) l.margin = MARGINS[st.margins];
   if (st.headingCase === 'title') l.h2case = 'title';
   if (HEADING_STYLES[st.headingStyle]) l.h2x = HEADING_STYLES[st.headingStyle];
+  if (st.headingIcons === true) l.icons = true;
   if (Array.isArray(st.hiddenSections) && st.hiddenSections.length) l.hidden = st.hiddenSections;
   if (Array.isArray(st.sectionOrder) && st.sectionOrder.length) l.sectionOrder = st.sectionOrder;
   if (st.headings && typeof st.headings === 'object') l.headings = { ...(look.headings || {}), ...st.headings };
@@ -437,7 +456,50 @@ const renderResumeHTML = (resume, templateId, customStyles = {}, _isPrinting = f
 </html>`;
 };
 
+/**
+ * P3-9 (flag resumeWriter): a cover letter in the resume's own design (same theme, fonts, colours and header). letter:
+ * { company, paragraphs: [text], date? }. The greeting and sign-off use only real data: the company the student typed
+ * and their own name. The resume's renderer above is not touched (a resume prints exactly as before).
+ */
+const renderCoverLetterHTML = (resume, templateId, customStyles = {}, letter = {}, opts = {}) => {
+  const base = templateOf(templateId);
+  const library = LIBRARY.some((t) => t.id === base.id);
+  const chosen = customStyles || resume?.customStyles || {};
+  const { look, styles: cleanStyles } = customise(base.look, chosen, { library, resume });
+  const pi = resume?.personalInfo || {};
+  const name = [str(pi.firstName), str(pi.lastName)].filter(Boolean).join(' ');
+  const title = str(pi.title) || str(resume?.professionalSummary?.title);
+  const ln = look.linkStyle === 'short' ? shortLink : link;
+  const contact = [esc(getDisplayLocation(resume || {})), esc(str(pi.phone)), str(pi.email) ? `<a href="mailto:${esc(str(pi.email))}">${esc(str(pi.email))}</a>` : '', ln(pi.linkedin)].filter(Boolean);
+  const company = str(letter.company);
+  const paras = list(letter.paragraphs).map(str).filter(Boolean);
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=794">
+<title>${esc(name || 'Cover')} Cover Letter</title>
+<style>${opts.fontCss || ''}${css(look, library || look !== base.look ? cleanStyles : customStyles || resume?.customStyles || {})}
+.letter p { margin: 0 0 0.9em; }
+.letter .date { margin: 1.4em 0 1.2em; }</style>
+</head>
+<body data-template="${base.id}" data-doc="cover-letter"><main class="page">
+  <header>
+    <h1 dir="auto">${esc(name || 'Your name')}</h1>
+    ${title ? `<div class="title" dir="auto">${esc(title)}</div>` : ''}
+    ${contact.length ? `<div class="contact">${contact.join('<span class="sep"> | </span>')}</div>` : ''}
+  </header>
+  <section class="letter">
+    ${str(letter.date) ? `<p class="date">${esc(str(letter.date))}</p>` : '<p class="date"></p>'}
+    <p dir="auto">Dear hiring team${company ? ` at ${esc(company)}` : ''},</p>
+    ${paras.map((t) => `<p dir="auto">${esc(t)}</p>`).join('\n    ')}
+    <p dir="auto">Sincerely,<br>${esc(name || '')}</p>
+  </section>
+</main></body>
+</html>`;
+};
+
 module.exports = {
   PALETTES, FONT_PAIRS, SIZES, DENSITY, MARGINS, HEADING_STYLES, SECTION_KEYS, MODEL_DEFAULT_COLOURS,
-  LIBRARY, TEMPLATES, canonicalTemplate, templateOf, getDisplayLocation, formatDate, formatDateRange, customise, renderResumeHTML,
+  LIBRARY, TEMPLATES, canonicalTemplate, templateOf, getDisplayLocation, formatDate, formatDateRange, customise, renderResumeHTML, renderCoverLetterHTML,
 };

@@ -6,6 +6,7 @@
 //   GET  /:id/public-page, PUT /:id/public-page { on?, showPhone?, showEmail? }, POST /:id/public-page/new-link
 //        → { on, url, selfUrl, showPhone, showEmail, views }      flag resumePublicPage (the page itself: routes/publicResume)
 //   GET  /template-outcomes → { templates: [{ id, applications, interviews, rate }], minimum }   flag resumeOutcomeStats
+//   POST /:id/cover-letter, POST /:id/linkedin (r7, P3-9) → services/resumeWriter.js   flag resumeWriter, limit resume_ai
 const express = require("express");
 const auth = require("../middleware/auth.middleware");
 const { perUser } = require("../utils/userRateLimit");
@@ -102,6 +103,28 @@ router.post("/:id/feedback", auth, gate("resumeV2", "resumeFeedback"), perUser("
   const resume = await ownResume(req);
   if (!resume) return fail(res, 404, "NOT_FOUND", "resume not found");
   ok(res, await require("../services/resumeFeedback").feedback(resume, { userId: req.userId }));
+}));
+
+// ---------- r7, P3-9: cover letter + LinkedIn (flag resumeWriter; English only; nothing the resume doesn't have) ----------
+//   POST /:id/cover-letter { jobTitle, company, jobDescription? } → { paragraphs: [...], ai }
+//   POST /:id/linkedin → { headline, about: [...], ai }
+// 400 NEED_JOB / NEED_MORE; the AI unavailable or too little supported → 200 { ai: false, message } (nothing made up);
+// shares the resume_ai limit with feedback
+const writerFail = (res, e) => {
+  const { WriterError } = require("../services/resumeWriter");
+  if (e instanceof WriterError) return fail(res, e.status, e.code, e.message);
+  throw e;
+};
+router.post("/:id/cover-letter", auth, gate("resumeV2", "resumeWriter"), perUser("resume_ai"), handle(async (req, res) => {
+  const resume = await ownResume(req);
+  if (!resume) return fail(res, 404, "NOT_FOUND", "resume not found");
+  const b = req.body || {};
+  try { ok(res, await require("../services/resumeWriter").coverLetter(resume, { jobTitle: b.jobTitle, company: b.company, jobDescription: b.jobDescription })); } catch (e) { writerFail(res, e); }
+}));
+router.post("/:id/linkedin", auth, gate("resumeV2", "resumeWriter"), perUser("resume_ai"), handle(async (req, res) => {
+  const resume = await ownResume(req);
+  if (!resume) return fail(res, 404, "NOT_FOUND", "resume not found");
+  try { ok(res, await require("../services/resumeWriter").linkedin(resume)); } catch (e) { writerFail(res, e); }
 }));
 
 module.exports = router;
