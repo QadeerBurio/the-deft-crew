@@ -192,6 +192,10 @@ const FLAGS = {
   // owner (25 Nov 2026): confession handles ("adjective-noun-123"), separate from confessionsV2; off = everyone "anon.".
   // The owner approves the word list before switching it on; single words can be blocked later in Safety settings.
   confessionHandles: { default: false, client: true, grant: { roles: ["student"], label: "Confession handles" } },
+  // r7 (P4-3, under confessionsV2): up / down votes, used only for auto-hide (no counts shown or sent)
+  confessionsVoting: { default: false, client: true, grant: { roles: ["student"], label: "Confession voting (auto-hide only)" } },
+  // r7 (P3-9, under resumeV2): a cover letter from the resume + a job, and a LinkedIn headline / about (English only)
+  resumeWriter: { default: false, client: true, grant: { roles: ["student"], label: "Cover letter + LinkedIn writer" } },
 };
 
 const JOBS = {

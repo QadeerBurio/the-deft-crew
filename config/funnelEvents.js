@@ -30,6 +30,10 @@ const EXACT = new Set([
   "confession_poll_created", "confession_poll_voted", "confession_unfollowed", "confession_saved", "confession_unsaved",
   // P4c: the share link made / refused, a confession opened from a link, the weekly recap opened
   "confession_share_link", "confession_share_refused", "confession_link_opened", "confession_recap_opened",
+  // r7: a student banned from confessions opened the appeal email (P4-1 appeals)
+  "confession_appeal_opened",
+  // r7 (P3-9, resumeWriter): a letter / linkedin text written, copied, saved as a pdf
+  "resume_writer_letter", "resume_writer_linkedin", "resume_writer_copied", "resume_writer_pdf",
 ]);
 
 const SUFFIX = "[a-z0-9][a-z0-9_-]{0,39}";

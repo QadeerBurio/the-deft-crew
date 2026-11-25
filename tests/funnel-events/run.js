@@ -34,7 +34,7 @@ const events = (f = () => true) => rows("EngagementEvent", f);
   const m = ic[0]?.meta || {};
   check("…meta: plain values kept, nested and bad keys dropped, long string cut to 100", m.channel === "wa" && m.n === 3 && m.ok === true && !("deep" in m) && !("bad key" in m) && m.long.length === 100, JSON.stringify(m));
 
-  for (const n of ["amb_intro_card_3", "resume_step_done_4", "share_card_savings", "template_customised_palette", "resume_downloaded_campus", "confession_precheck_hold"]) {
+  for (const n of ["amb_intro_card_3", "resume_step_done_4", "share_card_savings", "template_customised_palette", "resume_downloaded_campus", "confession_precheck_hold", "confession_appeal_opened", "resume_writer_letter", "resume_writer_pdf"]) {
     r = await ev(T.S2, n, {});
     check(`${n} → 204, stored`, r.status === 204 && events((e) => e.name === n).length === 1, r.text);
   }
