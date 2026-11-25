@@ -19,7 +19,7 @@ const ALLOW = [
   ["POST", /^\/webhooks\/shopify\/confirm\/?$/i],
   ["POST", /^\/brand\/store\/woocommerce\/callback\/?$/i], // WooCommerce sends the store's keys here after the brand approves
   // the tdc Shopify app, server to server: each checks X-API-KEY (routes/shopifyApp.routes.js verifyApiKey)
-  ["POST", /^\/shopify-app\/(link-shop|link-shop\/start|discount|order-webhook|compliance)\/?$/i],
+  ["POST", /^\/shopify-app\/(link-shop|link-shop\/start|discount|order-webhook)\/?$/i], // ("compliance" removed: no such route; the webhook is /webhooks/compliance, outside /api)
   // the app at launch, before sign-in: which build it is (no user data), and app-open style events (a no-op for guests)
   ["POST", /^\/app\/meta-build\/?$/i],
   ["POST", /^\/engagement\/events\/?$/i],
