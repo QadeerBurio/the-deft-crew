@@ -57,7 +57,7 @@ router.get("/verify/:id", verifyLimit, handle(async (req, res) => {
 // ---------- public: may the web /ambassador page send students to the app? ----------
 // ambassadorV2 as for nobody in particular: on only when FLAG_AMBASSADOR_V2 is "on" for everyone (per-account rules
 // can't apply before sign-in). Off: the web page keeps today's form.
-router.get("/config", (req, res) => {
+router.get("/config", require("../middleware/publicLimit")("crew-config", "RATE_LIMIT_PUBLIC_CONFIG_MAX", 120), (req, res) => { // r8: public, per address
   res.set("Cache-Control", "public, max-age=60");
   res.json({ applyInApp: isEnabled("ambassadorV2", null) });
 });
@@ -87,7 +87,7 @@ router.post("/credentials/:id/link", ...v2, handle(async (req, res) => {
   const base = String(process.env.PUBLIC_BASE_URL || "https://the-deft-crew-production.up.railway.app").replace(/\/$/, "");
   ok(res, { url: `${base}/api/crew/credentials/${c._id}/pdf?t=${encodeURIComponent(t)}`, expiresInSeconds: 600 });
 }));
-router.get("/credentials/:id/pdf", handle(async (req, res) => {
+router.get("/credentials/:id/pdf", require("../middleware/publicLimit")("credential-pdf", "RATE_LIMIT_CREDENTIAL_PDF_MAX", 30), handle(async (req, res) => { // r8: signed link, per-address limit
   let userId = null;
   if (req.query.t) {
     try {

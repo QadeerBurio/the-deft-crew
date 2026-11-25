@@ -32,7 +32,7 @@ const limit = rateLimit({
 // GET /api/invites/config → { enabled }: may a signed-out phone show the invite features (the "paste invite code"
 // button at signup)? growthV2 as for nobody in particular: on only when FLAG_GROWTH_V2 is "on" for everyone (per-account
 // rules can't apply before sign-in). Kept apart from GET /api/app/flags, whose reply stays exactly as before.
-router.get("/config", (req, res) => {
+router.get("/config", require("../middleware/publicLimit")("invites-config", "RATE_LIMIT_PUBLIC_CONFIG_MAX", 120), (req, res) => { // r8: public, per address
   res.set("Cache-Control", "public, max-age=60");
   res.json({ enabled: require("../config/featureFlags").isEnabled("growthV2", null) });
 });

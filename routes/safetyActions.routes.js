@@ -40,7 +40,8 @@ const WHAT = {
   restore: "undo the suspension and the confession strikes, and make the account active again",
 };
 
-router.get("/action/:token", async (req, res) => {
+const actionLimit = require("../middleware/publicLimit")("safety-action", "RATE_LIMIT_SAFETY_ACTION_MAX", 30); // r8: public, per address
+router.get("/action/:token", actionLimit, async (req, res) => {
   res.set("Cache-Control", "no-store");
   try {
     const { a, error } = await findLink(req.params.token);
@@ -53,7 +54,7 @@ router.get("/action/:token", async (req, res) => {
   }
 });
 
-router.post("/action/:token", async (req, res) => {
+router.post("/action/:token", actionLimit, async (req, res) => {
   res.set("Cache-Control", "no-store");
   try {
     const { a, error } = await findLink(req.params.token);

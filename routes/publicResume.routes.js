@@ -30,7 +30,7 @@ const headers = (res) => {
 const notFound = (res) => { headers(res); return res.status(404).type("html").send(pub.notFoundHtml()); };
 const CLOSED = new Set(["suspended", "banned", "deleted", "deactivated"]);
 
-router.get("/fonts/:file", (req, res) => {
+router.get("/fonts/:file", require("../middleware/publicLimit")("resume-fonts", "RATE_LIMIT_RESUME_FONTS_MAX", 300), (req, res) => { // r8: public, per address
   const f = String(req.params.file || "");
   if (!pub.FONT_FILES.has(f) && !pub.LICENCES.has(f)) return res.status(404).type("text/plain").send("not found");
   res.set("Cache-Control", "public, max-age=31536000, immutable");
