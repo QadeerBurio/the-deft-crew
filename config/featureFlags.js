@@ -187,6 +187,8 @@ const FLAGS = {
   homeNextAction: { default: false, client: true, grant: { roles: ["student"], label: "Next best action on Home" } },
   // Q-3a (app only): the home stack on the native stack (chosen when the app starts)
   nativeStackDrawer: { default: false, client: true, grant: { roles: ["student"], label: "Native navigation (home stack)" } },
+  // Q-4 (app only): on a tablet (iPad), every screen in a centred column of at most 600 pt
+  tabletLayout: { default: false, client: true, grant: { roles: ["student"], label: "Tablet layout (centred)" } },
 };
 
 const JOBS = {
