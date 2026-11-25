@@ -181,6 +181,10 @@ const FLAGS = {
   polishEmptyStates: { default: false, client: true, grant: { roles: ["student"], label: "Friendlier empty lists" } },
   // P5b (app only): more celebration moments (first claim, a confession's 10th like, level up)
   celebrationsPlus: { default: false, client: true, grant: { roles: ["student"], label: "More celebrations" } },
+  // P5c: "what tdc does for you" + pick 1-2 goals after signing up; Home's missions follow the goals
+  onboardingGoals: { default: false, client: true, grant: { roles: ["student"], label: "Goals after signup" } },
+  // P5c: one "next best action" card at the top of Home (GET /api/engagement/next-action)
+  homeNextAction: { default: false, client: true, grant: { roles: ["student"], label: "Next best action on Home" } },
 };
 
 const JOBS = {

@@ -14,6 +14,7 @@ const missions = require('../services/engagement/missions');
 const { recordSafe } = require('../services/domainEvents');
 const streakSvc = require('../services/engagement/streak');
 const drops = require('../services/engagement/drops');
+const goalsSvc = require('../services/engagement/goals'); // P5c (onboardingGoals, homeNextAction)
 const { track } = require('../services/engagement');
 const { dayKey, semesterKey } = require('../utils/karachiTime');
 const CodeGenerator = require('../services/codeGenerator');
@@ -522,7 +523,10 @@ router.get('/home', auth, async (req, res) => {
     // shows the result and the "view" button
     const dropDTO = dropDoc ? await drops.dropForUser(dropDoc, req.userId) : null;
 
-    const cards = missions.FEATURES.map((f) => ({
+    // P5c (onboardingGoals): with goals picked, their cards come first and "next" comes from them (same shape)
+    const goalsOn = goalsSvc && isEnabled('onboardingGoals', { id: String(req.userId), role: req.userRole || 'student' });
+    const goals = goalsOn ? (profile?.goals || []) : [];
+    const baseCards = missions.FEATURES.map((f) => ({
       feature: f,
       mood: profile?.sorted?.[f] ? 'sorted' : 'broke',
       sorted: !!profile?.sorted?.[f],
@@ -532,6 +536,7 @@ router.get('/home', auth, async (req, res) => {
       route: missions.ROUTES[f].route,
       params: missions.ROUTES[f].params,
     }));
+    const cards = goals.length ? goalsSvc.orderCards(baseCards, goals) : baseCards;
 
     res.json({
       drop: dropDTO,
@@ -539,8 +544,9 @@ router.get('/home', auth, async (req, res) => {
         sortedCount: profile?.sortedCount || 0,
         total: 8,
         cards,
-        next: missions.nextCard(profile),
+        next: goals.length ? goalsSvc.nextCardFor(profile, goals) : missions.nextCard(profile),
       },
+      ...(goalsOn ? { goals } : {}),
       streak: profile?.streak
         ? {
             count: profile.streak.count || 0,
@@ -553,6 +559,51 @@ router.get('/home', auth, async (req, res) => {
   } catch (err) {
     console.error('[engagement/home] error:', err);
     res.status(500).json({ message: err.message });
+  }
+});
+
+// ============================================================
+// P5c (flag onboardingGoals): POST /api/engagement/goals { goals: [1-2 of save_money, internship, meet_people,
+// resume] } → { goals }. Off (or a guest): 404, as if absent.
+// ============================================================
+router.post('/goals', auth, async (req, res) => {
+  try {
+    if (req.isGuest || !isEnabled('onboardingGoals', { id: String(req.userId), role: req.userRole || 'student' })) return res.status(404).json({ message: 'Not found' });
+    const goals = goalsSvc.cleanGoals(req.body?.goals);
+    if (!goals) return res.status(400).json({ message: 'pick one or two goals.', error: 'pick one or two goals.' });
+    await EngagementProfile.updateOne({ user: req.userId }, { $set: { goals } }, { upsert: true });
+    res.json({ goals });
+  } catch (err) {
+    console.error('[engagement/goals] error:', err.message);
+    res.status(500).json({ message: 'something went wrong. try again.' });
+  }
+});
+
+// ============================================================
+// P5c (flag homeNextAction): GET /api/engagement/next-action → { action: { kind, mood, line, cta } | null }
+// One card at a time, from facts the server already has (services/engagement/goals.js nextAction). Off: 404.
+// ============================================================
+router.get('/next-action', auth, async (req, res) => {
+  try {
+    if (req.isGuest || !isEnabled('homeNextAction', { id: String(req.userId), role: req.userRole || 'student' })) return res.status(404).json({ message: 'Not found' });
+    const Resume = require('../models/Resume');
+    const [profile, user, resume, dropDoc] = await Promise.all([
+      EngagementProfile.findOne({ user: req.userId }).select('sorted').lean(),
+      User.findById(req.userId).select('referralCount').lean(),
+      Resume.findOne({ user: req.userId }).sort({ updatedAt: -1 }).select('completionPercentage').lean(),
+      drops.todayDrop(),
+    ]);
+    const drop = dropDoc ? await drops.dropForUser(dropDoc, req.userId) : null;
+    const action = goalsSvc.nextAction({
+      resumePercent: resume ? Number(resume.completionPercentage || 0) : null,
+      claimedEver: !!profile?.sorted?.discounts,
+      dropOpenNotAnswered: !!drop && !drop.myChoice,
+      referralCount: Number(user?.referralCount || 0),
+    });
+    res.json({ action });
+  } catch (err) {
+    console.error('[engagement/next-action] error:', err.message);
+    res.status(500).json({ message: 'something went wrong. try again.' });
   }
 });
 
