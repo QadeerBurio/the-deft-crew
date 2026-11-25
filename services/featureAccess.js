@@ -234,6 +234,11 @@ async function pilotStudents(flag, brandId) {
   };
 }
 
+// r11 (owner): the launch switch behind a flag, for the admin display (the decision itself is flagState's)
+const launchMaster = (flag) => (flags.LAUNCH_V2.includes(flag) ? "launchV2" : flags.LAUNCH_LINKS.includes(flag) ? "launchLinks" : null);
+/** is a launch switch on for every student (no admin row needed): its student default, or a Railway rule for students */
+const launchOnForStudents = (master) => !flags.isKilled(master) && (flags.roleDefaultOf(master, "student") === true || flags.railwayCoversRole(master, "student"));
+
 async function accountView(accountId) {
   if (!isId(accountId)) throw new FeatureAccessError(400, "BAD_ACCOUNT", "Unknown account");
   const stored = await User.findById(accountId).select("role name brandName").lean();
@@ -244,12 +249,24 @@ async function accountView(accountId) {
   const byFlag = new Map(rows.map((r) => [r.flag, r]));
   const admins = new Map((await User.find({ _id: { $in: [...new Set(rows.map((r) => String(r.setBy)))] } }).select("name").lean()).map((u) => [String(u._id), u.name || "admin"]));
   const list = [];
+  const who = { id: String(user._id), role: user.role };
+  // what the app sees: exactly what GET /api/app/flags/me answers this account right now
+  const appView = flags.clientFlags(who);
   for (const flag of GRANTABLE) {
     if (!FLAGS[flag].grant.roles.includes(user.role)) continue;
     const row = byFlag.get(flag);
+    const state = flags.flagState(flag, who);
+    const master = launchMaster(flag);
     const item = {
       ...flagInfo(flag),
-      ...flags.flagState(flag, { id: String(user._id), role: user.role }),
+      ...state,
+      // r11: "launch" when the flag is on because of launchV2 (flagState says "launchV2"), "launchLinks" for that switch;
+      // otherwise flagState's own source (kill, account, default, railway)
+      source: state.source === "launchV2" ? "launch" : state.source,
+      // r11: the launch switch behind this flag (null when none): which one, and whether it is on for this account
+      launch: master ? { by: master, on: flags.isEnabled(master, who) } : null,
+      // r11: the value GET /api/app/flags/me gives this account (client flags; server-only flags: null)
+      app: Object.prototype.hasOwnProperty.call(appView, flag) ? appView[flag] : null,
       // the student default for this flag (students only): true / false / null (not set)
       // the default for this account's role: true / false, or null (the role has none for this flag)
       defaultForRole: flags.roleDefaultOf(flag, user.role),
@@ -259,8 +276,6 @@ async function accountView(accountId) {
     if (user.role === "brand" && (flag === "loyaltyV2" || flag === "surplusBoxes")) item.students = await pilotStudents(flag, user._id);
     list.push(item);
   }
-  // what the app sees: exactly what GET /api/app/flags/me answers this account right now
-  const appView = flags.clientFlags({ id: String(user._id), role: user.role });
   return {
     account: { id: String(user._id), role: user.role, roleStored: !!stored.role, name: user.brandName || user.name || "" },
     flags: list,
@@ -296,6 +311,8 @@ async function flagsOverview() {
         ? { enabled: flags.studentDefaultOf(flag), reason: row?.reason || null, setAt: row?.setAt || null, setBy: who(row) }
         : null,
       defaults,
+      // r11: the launch switch behind this flag, and whether it is on for every student (main features page)
+      launch: launchMaster(flag) ? { by: launchMaster(flag), onForStudents: launchOnForStudents(launchMaster(flag)) } : null,
     };
   });
 }
