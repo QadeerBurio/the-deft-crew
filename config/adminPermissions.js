@@ -56,6 +56,8 @@ var PERMISSIONS = [
   ["credentials.issue", "crew", "issue credentials"],
   ["safety.view", "safety", "see reports and held posts"],
   ["safety.act", "safety", "decide reports, hide or restore posts, strikes"],
+  ["safety.intake.view", "safety", "read restricted safety reports"],
+  ["safety.intake.act", "safety", "handle restricted safety reports"],
   ["identity.reveal", "safety", "see who wrote an anonymous post"],
   ["pii.view", "data", "see full phone numbers, e-mails and documents"],
   ["data.export", "data", "download CSV files"],
@@ -71,17 +73,17 @@ function expand(list) {
     if (typeof k !== "string") return;
     if (/\.\*$/.test(k)) {
       var area = k.slice(0, -2);
-      KEYS.forEach(function (x) { if (x.split(".")[0] === area && out.indexOf(x) < 0) out.push(x); });
+      KEYS.forEach(function (x) { if (x.split(".")[0] === area && !x.startsWith("safety.intake.") && out.indexOf(x) < 0) out.push(x); });
     } else if (KEYS.indexOf(k) >= 0 && out.indexOf(k) < 0) out.push(k);
   });
   return out;
 }
 var allBut = function (except) { return KEYS.filter(function (k) { return except.indexOf(k) < 0; }); };
-var views = KEYS.filter(function (k) { return /\.view$/.test(k) && k !== "pii.view"; });
+var views = KEYS.filter(function (k) { return /\.view$/.test(k) && !["pii.view", "safety.intake.view"].includes(k); });
 
 var TEMPLATES = [
   { id: "super", label: "super admin", level: "super", permissions: KEYS.slice() },
-  { id: "core_team", label: "core team", permissions: allBut(["team.manage", "identity.reveal", "students.delete"]) },
+  { id: "core_team", label: "core team", permissions: allBut(["team.manage", "identity.reveal", "students.delete", "safety.intake.view", "safety.intake.act"]) },
   { id: "employer_success", label: "employer success", permissions: expand(["employers.*", "jobs.manage", "hiring.manage", "disputes.manage", "ratings.moderate", "students.view", "dashboard.view"]) },
   { id: "brand_partnerships", label: "brand partnerships", permissions: expand(["brands.*", "offers.manage", "loyalty.manage", "surplus.manage", "revenue.view", "dashboard.view"]) },
   { id: "campus_students", label: "campus & students", permissions: expand(["students.view", "students.edit", "students.verify", "universities.manage", "cards.manage", "crew.*", "events.manage", "scholarships.manage"]) },

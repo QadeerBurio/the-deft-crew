@@ -192,6 +192,8 @@ app.use("/api/profile", require("./routes/profile.routes"));
 app.use("/api/admin/actions", require("./routes/adminActions.routes")); // the unified admin action log (read-only)
 app.use("/api/admin/universities", require("./routes/adminUniversities.routes")); // the shared university list (admin only, logged)
 app.use("/api/admin/features", require("./routes/adminFeatures.routes")); // features per account (admin only, logged)
+app.use("/api/safety", require("./routes/safetyReports.routes").intake);
+app.use("/api/admin/safety-reports", require("./routes/safetyReports.routes").moderation);
 app.use("/api/admin/safety", require("./routes/adminSafety.routes")); // confession safety log (plan P4-7, admins only)
 app.use("/api/admin/resume-settings", require("./routes/adminResumeSettings.routes")); // owner: hide a template without an app update
 app.use("/api/admin", require("./routes/admin.routes"));

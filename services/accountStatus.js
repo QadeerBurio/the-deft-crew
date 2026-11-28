@@ -27,7 +27,7 @@ function lockOf(user, now = new Date()) {
   return { locked: false };
 }
 
-/** Where a student appeals (Railway SAFETY_APPEAL_EMAIL, e.g. safety@gettdc.pk), or null when unset. */
+/** Where a student appeals (Railway SAFETY_APPEAL_EMAIL), or null when unset. */
 const appealEmail = () => {
   const v = String(process.env.SAFETY_APPEAL_EMAIL || "").trim();
   return /^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(v) ? v : null;
