@@ -3,7 +3,8 @@
 // narrows it. Levels:
 //   super   SUPER_ADMIN_IDS (SEC-2) or adminAccess.level "super": every permission, incl. team.manage
 //   legacy  an admin without adminAccess (every admin today): every permission except team.manage (owner: making
-//           admins stays with the listed / explicit super admins; nobody loses anything else)
+//           admins stays with the listed / explicit super admins; nobody loses anything else). Never the restricted
+//           child-safety intake (safety.intake.*): only designated responders (member or super) get those.
 //   member  adminAccess.level "member": exactly adminAccess.permissions (config/adminPermissions.js)
 //   suspended  adminAccess.status "suspended": nothing (always enforced: only a super admin sets it)
 // Shadow mode (flag adminRbacEnforce off, the default): a member without the permission is still allowed and the
@@ -11,6 +12,8 @@
 const perms = require("../config/adminPermissions");
 
 const ADMIN_ROLE = "admin";
+// what a legacy admin never has: making admins, and the restricted child-safety intake (designated responders only)
+const LEGACY_EXCLUDED = (k) => k === "team.manage" || String(k).startsWith("safety.intake.");
 /** Is this account an admin account (the role, nothing about its permissions)? For checks on a target account. */
 const isAdminAccount = (user) => !!user && user.role === ADMIN_ROLE;
 
@@ -32,7 +35,7 @@ function levelOf(user) {
 function permissionsOf(user) {
   const level = levelOf(user);
   if (level === "super") return perms.KEYS.slice();
-  if (level === "legacy") return perms.KEYS.filter((k) => k !== "team.manage");
+  if (level === "legacy") return perms.KEYS.filter((k) => !LEGACY_EXCLUDED(k));
   if (level === "member") return perms.expand(user.adminAccess.permissions || []);
   return [];
 }
@@ -40,7 +43,7 @@ function permissionsOf(user) {
 function has(user, permission) {
   const level = levelOf(user);
   if (level === "super") return true;
-  if (level === "legacy") return permission !== "team.manage";
+  if (level === "legacy") return perms.KEYS.includes(permission) ? !LEGACY_EXCLUDED(permission) : permission !== "team.manage";
   if (level === "member") return permissionsOf(user).includes(permission);
   return false;
 }
