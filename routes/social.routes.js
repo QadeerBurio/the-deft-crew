@@ -1891,16 +1891,18 @@ router.get('/confessions/feed', auth, async (req, res) => {
       if (muted.length) filter.$and.push({ authorId: { $nin: muted } });
     }
 
-    // P4a (confessionsV2): ?tag=<id> and ?sort=hot|top|new (&page= for hot / top). Old builds send neither.
+    // Ranked feed choices are available independently of the composer and card rollout.
     const v2 = v2On(req);
-    const sort = v2 ? String(req.query.sort || '') : '';
+    const sort = req.query.sort;
     const ranked = sort === 'hot' || sort === 'top';
     if (v2 && typeof req.query.tag === 'string' && safetySettings.TAG_ID.test(req.query.tag)) filter.$and.push({ tag: req.query.tag });
     if (ranked) filter.$and.push({ createdAt: { $gte: new Date(Date.now() - (sort === 'hot' ? 14 : 7) * 864e5) } });
     // P4b: ?saved=1 → only the confessions this student saved (still live and visible to them)
     const SavedItem = require('../models/SavedItem');
-    if (v2 && req.query.saved === '1') {
-      const savedIds = (await SavedItem.find({ user: currentUserId, kind: 'confession' }).select('refId').lean()).map((x) => x.refId);
+    if (req.query.saved === '1') {
+      const savedIds = currentUserId
+        ? (await SavedItem.find({ user: currentUserId, kind: 'confession' }).select('refId').lean()).map((x) => x.refId)
+        : [];
       filter.$and.push({ _id: { $in: savedIds } });
     }
 

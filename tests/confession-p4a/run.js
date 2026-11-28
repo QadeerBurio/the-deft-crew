@@ -131,6 +131,8 @@ const create = (tok, body) => call("POST", "/api/social/confessions/create", { t
   check("hot: a fresh post with a few likes beats a 6-day-old one with many (fades with age); 20 days old left out", hot.indexOf(String(S.fresh)) < hot.indexOf(String(S.popularOld)) && !hot.includes(String(S.tooOld)));
   const page1 = order(await feedOf(T.A, "scope=all&sort=top&limit=1&page=1"));
   check("pages: limit 1, page 1 → the second", page1.length === 1 && page1[0] === String(S.popularOld));
+  const campusTagPage = order(await feedOf(T.A, "scope=campus&sort=top&limit=1&page=1&tag=rant"));
+  check("ranked pagination respects the selected campus and tag", campusTagPage.length === 1 && campusTagPage[0] === String(S.popularOld));
   const rants = await feedOf(T.A, "scope=all&tag=rant");
   check("tag filter: only that tag", rants.length >= 2 && rants.every((c) => c.tag === "rant"));
   const newest = order(await feedOf(T.A, "scope=all&sort=new"));
@@ -139,7 +141,7 @@ const create = (tok, body) => call("POST", "/api/social/confessions/create", { t
   console.log("-- flag-off viewers");
   process.env.FLAG_CONFESSIONS_V2 = `ids:${ids.A}`;
   const offFeed = await call("GET", "/api/social/confessions/feed?scope=all&sort=top&tag=rant", { tok: T.B });
-  check("sort / tag ignored, newest first, and no v2 field at all (the old shape)", Array.isArray(offFeed.json) && String(offFeed.json[0]._id) !== String(S.weekTop) && !/"(meTooCount|meTooByCurrentUser|handle|handleVerified|tag|mood)":/.test(offFeed.text));
+  check("explicit ranking works without enabling tag filtering or v2 fields", Array.isArray(offFeed.json) && String(offFeed.json[0]._id) === String(S.weekTop) && !/"(meTooCount|meTooByCurrentUser|handle|handleVerified|tag|mood)":/.test(offFeed.text));
   process.env.FLAG_CONFESSIONS_V2 = `ids:${ids.A},${ids.B}`;
 
   console.log("-- admin settings: tags and prompts");
