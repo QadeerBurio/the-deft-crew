@@ -15,9 +15,12 @@ const ok = (res, data) => res.json({ ok: true, data });
 const fail = (res, status, code, message) => res.status(status).json({ ok: false, error: { code, message } });
 // what the gallery offers, from the shared registry (the five + the library; the older aliases aren't offered)
 const OFFERED = OFFERED_IDS;
+// resume full fix: the names and collections too (the portal shows them, grouped; the ids stay as they were)
+const REG = require("../utils/resumeRender");
+const CATALOG = REG.REGISTRY.filter((t) => OFFERED.includes(t.id)).map((t) => ({ id: t.id, name: t.name, collection: t.collection, collectionName: REG.COLLECTIONS[t.collection] || t.collection, ats: t.ats, layout: t.layout }));
 
 router.get("/", async (req, res) => {
-  try { ok(res, { ...(await settings.get()), templates: OFFERED.filter((id) => TEMPLATE_IDS.includes(id)) }); }
+  try { ok(res, { ...(await settings.get()), templates: OFFERED.filter((id) => TEMPLATE_IDS.includes(id)), catalog: CATALOG }); }
   catch (e) { fail(res, 500, "SERVER_ERROR", "Something went wrong"); }
 });
 
@@ -26,7 +29,7 @@ router.put("/", async (req, res) => {
     const before = await settings.get();
     const after = await settings.save({ hiddenTemplates: req.body?.hiddenTemplates }, req.user._id);
     await actionLog.recordSafe({ admin: req.user._id, action: "resume.settings.update", targetType: "ResumeSettings", targetId: "resume", before: { hiddenTemplates: before.hiddenTemplates }, after: { hiddenTemplates: after.hiddenTemplates }, reason: String(req.body?.reason || "").slice(0, 300), requestId: req.id });
-    ok(res, { ...after, templates: OFFERED.filter((id) => TEMPLATE_IDS.includes(id)) });
+    ok(res, { ...after, templates: OFFERED.filter((id) => TEMPLATE_IDS.includes(id)), catalog: CATALOG });
   } catch (e) {
     if (e.status === 400) return fail(res, 400, "BAD_SETTINGS", e.message);
     fail(res, 500, "SERVER_ERROR", "Something went wrong");

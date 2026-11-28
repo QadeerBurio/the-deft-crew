@@ -69,7 +69,7 @@ const EXP_ORDER = ['experience', 'projects', 'education', 'skills', 'certificati
 const TWO = { layout: 'two-col', side: ['skills', 'languages', 'certifications', 'awards'], sidePos: 'left', size: 9.8, line: 1.33, nameSize: 22, gap: 8 };
 // rows: [id, name, description, look (on top of BASE), fit (what "recommended for you" reads: fields, level, roles)]
 // ats: two columns start as 'design' and only earn 'safe' when the PDF test reads them in order (ATS_SAFE_TWO_COL)
-const ATS_SAFE_TWO_COL = [];
+const ATS_SAFE_TWO_COL = ['canvas']; // the PDF test (tests/app/resume-ats.test.js): pdftotext reads only this one in order
 const lib = (collection, rows) => rows.map(([id, name, description, look, fit]) => ({
   id, name, collection, description,
   ats: look.layout === 'two-col' && !ATS_SAFE_TWO_COL.includes(id) ? 'design' : 'safe',
@@ -94,7 +94,8 @@ const LIBRARY = [
   },
   {
     id: 'society_leader', name: 'Society Leader', collection: 'fresher', ats: 'safe', description: 'leadership and activities right after education',
-    look: { ...BASE, head: OUTFIT, nameAccent: true, h2x: 'underline-accent', accent: '#6D28D9', heading: '#111827', text: '#1F2937',
+    // line 1.32 (resume full fix): one page with the embedded fonts (tests/app/resume-templates-50.test.js)
+    look: { ...BASE, line: 1.32, head: OUTFIT, nameAccent: true, h2x: 'underline-accent', accent: '#6D28D9', heading: '#111827', text: '#1F2937',
       order: ['education', 'activities', 'volunteering', 'projects', 'skills', 'awards', 'certifications', 'languages', 'experience'] },
   },
   {
@@ -121,7 +122,7 @@ const LIBRARY = [
   },
   {
     id: 'clean_line', name: 'Clean Line', collection: 'ats', ats: 'safe', description: 'minimal sans, thin lines, lots of air',
-    look: { ...BASE, line: 1.36, gap: 8, nameSize: 22, h2x: 'thin-rule', accent: '#0F172A', heading: '#0F172A', text: '#334155', second: '#94A3B8', subPlain: true },
+    look: { ...BASE, line: 1.32, gap: 8, nameSize: 22, h2x: 'thin-rule', accent: '#0F172A', heading: '#0F172A', text: '#334155', second: '#94A3B8', subPlain: true }, // line 1.36 → 1.32: one page with the embedded fonts
   },
   {
     id: 'two_tone', name: 'Two-tone', collection: 'ats', ats: 'safe', description: 'name and headings in two calm colours',
@@ -133,7 +134,7 @@ const LIBRARY = [
   ]),
   ...lib('tech', [
     ['dev_stack', 'Dev Stack', 'projects and skills up top, for software roles', { body: stack('IBM Plex Sans'), head: stack('IBM Plex Sans'), h2x: 'thin-rule', dateAccent: true, accent: '#2563EB', heading: '#0F172A', text: '#1E293B', skillSep: ' · ', order: ['projects', 'skills', 'experience', 'education', 'activities', 'awards', 'certifications', 'volunteering', 'languages'] }, { fields: ['cs'], roles: 'developer|engineer|software|frontend|backend|mobile|web' }],
-    ['code_clean', 'Code Clean', 'quiet sans, thin rules, built to scan', { body: stack('Inter'), head: stack('Inter'), line: 1.36, h2x: 'thin-rule', accent: '#0F172A', heading: '#0F172A', text: '#334155', second: '#475569', subPlain: true, order: EXP_ORDER }, { fields: ['cs'], level: 'experienced' }],
+    ['code_clean', 'Code Clean', 'quiet sans, thin rules, built to scan', { body: stack('Inter'), head: stack('Inter'), line: 1.32, h2x: 'thin-rule', accent: '#0F172A', heading: '#0F172A', text: '#334155', second: '#475569', subPlain: true, order: EXP_ORDER }, { fields: ['cs'], level: 'experienced' }],
     ['data_lens', 'Data Lens', 'skills first, teal headings, for data and analytics', { body: stack('Source Sans 3'), head: stack('Source Sans 3'), h2x: 'underline-accent', accent: '#0F766E', heading: '#0F172A', text: '#1F2937', skillSep: ' · ', order: ['skills', 'projects', 'experience', 'education', 'certifications', 'activities', 'awards', 'volunteering', 'languages'] }, { fields: ['cs', 'business'], roles: 'data|analyst|analytics|bi|machine learning|ai' }],
     ['cloud_side', 'Cloud Side', 'two columns: skills and tools in a side panel', { ...TWO, body: stack('Inter'), head: stack('Inter'), accent: '#1E3A8A', heading: '#0F172A', text: '#1F2937', sideTint: '#EEF2FF' }, { fields: ['cs'] }],
   ]),
@@ -160,7 +161,7 @@ const LIBRARY = [
     ['medic_side', 'Rounds', 'two columns: licences and skills on the side', { ...TWO, body: stack('Source Sans 3'), head: stack('Source Sans 3'), accent: '#0F766E', heading: '#0F172A', text: '#1F2937', sideTint: '#F0FDFA', side: ['certifications', 'skills', 'languages', 'awards'] }, { fields: ['medical'] }],
   ]),
   ...lib('teaching', [
-    ['classroom', 'Classroom', 'friendly olive headings, activities near the top', { body: stack('Open Sans'), head: stack('Open Sans'), h2x: 'underline-accent', accent: '#4D7C0F', heading: '#1A2E05', text: '#1F2937', order: ['education', 'experience', 'activities', 'volunteering', 'projects', 'skills', 'certifications', 'awards', 'languages'] }, { fields: ['teaching'], roles: 'teach|tutor|lecturer|instructor|educat|trainer' }],
+    ['classroom', 'Classroom', 'friendly olive headings, activities near the top', { body: stack('Open Sans'), head: stack('Open Sans'), line: 1.3, h2x: 'underline-accent', accent: '#4D7C0F', heading: '#1A2E05', text: '#1F2937', order: ['education', 'experience', 'activities', 'volunteering', 'projects', 'skills', 'certifications', 'awards', 'languages'] }, { fields: ['teaching'], roles: 'teach|tutor|lecturer|instructor|educat|trainer' }],
     ['lecturer', 'Lecturer', 'serif, centred, ruled headings', { body: LIB_SERIF, head: LIB_SERIF, align: 'center', h2: 'full-rule', accent: '#1E3A8A', heading: '#111827', text: '#1F2937', headings: { projects: 'Research & Projects' } }, { fields: ['teaching'], level: 'experienced' }],
     ['mentor', 'Mentor', 'a plum bar on each heading', { head: OUTFIT, h2x: 'bar-left', accent: '#6D28D9', heading: '#111827', text: '#1F2937' }, { fields: ['teaching'] }],
   ]),
@@ -667,9 +668,10 @@ function measureScript(box) {
   return `(function(){var B=${JSON.stringify(box)};function run(){try{var m=document.querySelector('main.page');if(!m)return;` +
     `document.documentElement.style.background='#ffffff';document.body.style.padding='0';document.body.style.margin='0';` +
     `m.style.boxShadow='none';m.style.margin='0';m.style.width=B.width+'px';m.style.minHeight='0';m.style.padding=B.top+'px '+B.x+'px';` +
-    `var avail=B.height-2*B.top;var h=m.getBoundingClientRect().height-2*B.top;var over=0;var all=m.querySelectorAll('*');` +
-    `for(var i=0;i<all.length;i++){var e=all[i];if(e.scrollWidth>e.clientWidth+2&&e.clientWidth>0&&e.tagName!=='A'){over++;}}` +
-    `var res={type:'tdc-page',fill:Math.round(h/avail*1000)/1000,pages:Math.max(1,Math.ceil((h-2)/avail)),height:Math.round(h),overflow:over};` +
+    // the ink: from the top of the page's content to the bottom of its last visible box (a trailing margin prints nothing)
+    `var avail=B.height-2*B.top;var top=m.getBoundingClientRect().top+B.top;var bottom=top;var over=0;var all=m.querySelectorAll('*');` +
+    `for(var i=0;i<all.length;i++){var e=all[i];var r=e.getBoundingClientRect();if(r.height>0&&r.width>0&&r.bottom>bottom)bottom=r.bottom;if(e.scrollWidth>e.clientWidth+2&&e.clientWidth>0&&e.tagName!=='A'){over++;}}` +
+    `var h=bottom-top;var res={type:'tdc-page',fill:Math.round(h/avail*1000)/1000,pages:Math.max(1,Math.ceil((h-1)/avail)),height:Math.round(h),overflow:over};` +
     `window.__tdcPage=res;if(window.ReactNativeWebView&&window.ReactNativeWebView.postMessage)window.ReactNativeWebView.postMessage(JSON.stringify(res));}catch(e){}}` +
     `if(document.fonts&&document.fonts.ready){document.fonts.ready.then(function(){setTimeout(run,40);});}else{setTimeout(run,250);}})();true;`;
 }

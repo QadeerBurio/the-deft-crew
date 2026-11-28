@@ -72,6 +72,7 @@ const settle = () => new Promise((r) => setTimeout(r, 50));
   r = await call("GET", "/api/admin/resume-settings", { tok: T.ADM });
   // resume full fix: the shared registry offers 50 (the five + 10 + 35)
   check("admin: the 50 offered templates (the five + the library, from the shared registry), none hidden", r.status === 200 && r.json.data.templates.length === 50 && r.json.data.templates.includes("two_tone") && r.json.data.templates.includes("executive_side") && JSON.stringify(r.json.data.hiddenTemplates) === "[]");
+  check("…with each one's name and collection (the portal groups them; the ids list is unchanged)", r.json.data.catalog.length === 50 && r.json.data.catalog.find((t) => t.id === "executive_side").name === "Executive Side" && r.json.data.catalog.find((t) => t.id === "executive_side").collectionName === "Executive" && r.json.data.catalog.every((t, i) => t.id === r.json.data.templates[i]));
   r = await call("PUT", "/api/admin/resume-settings", { tok: T.ADM, body: { hiddenTemplates: ["two_tone", "made_up"] } });
   check("an unknown template id: 400, nothing saved", r.status === 400 && r.json?.error?.code === "BAD_SETTINGS");
   r = await call("PUT", "/api/admin/resume-settings", { tok: T.ADM, body: { hiddenTemplates: ["two_tone", "two_tone", "scholar"], reason: "spacing" } });
