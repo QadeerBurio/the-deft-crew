@@ -5,10 +5,13 @@
 //   TEMPLATE_IDS          the 13 older ids (the five today + their old aliases) + the library's ids
 //   cleanCustomStyles(x)  only the known keys, each checked (anything else dropped, never a failed save)
 
+// resume full fix: one registry (utils/resumeRender.js REGISTRY, shared byte for byte with the app) gives every id
+const REG = require("../utils/resumeRender");
 const OLD_IDS = ["modern", "classic", "creative", "minimal", "professional", "modern_ats", "stanford", "faang", "jakes", "rezi", "flowcv", "reactive", "canva"];
-// the app's services/templates/library.js (kept in step by tests/resume-templates-server)
-const LIBRARY_IDS = ["campus", "first_step", "fresh_start", "society_leader", "project_first", "internship_ready", "scholar", "harvard", "clean_line", "two_tone"];
-const TEMPLATE_IDS = Object.freeze([...OLD_IDS, ...LIBRARY_IDS]);
+const LIBRARY_IDS = REG.LIBRARY.map((t) => t.id);
+const TEMPLATE_IDS = Object.freeze([...OLD_IDS, ...LIBRARY_IDS.filter((id) => !OLD_IDS.includes(id))]);
+// what the gallery offers (approved, in gallery order): the admin's hide list shows exactly these
+const OFFERED_IDS = REG.OFFERED_IDS;
 
 const SECTIONS = ["summary", "experience", "education", "projects", "skills", "certifications", "languages", "activities", "volunteering", "awards", "achievements"];
 const CHOICES = {
@@ -55,4 +58,4 @@ function cleanCustomStyles(input) {
   return out;
 }
 
-module.exports = { TEMPLATE_IDS, OLD_IDS, LIBRARY_IDS, SECTIONS, CHOICES, cleanCustomStyles };
+module.exports = { TEMPLATE_IDS, OLD_IDS, LIBRARY_IDS, OFFERED_IDS, SECTIONS, CHOICES, cleanCustomStyles };

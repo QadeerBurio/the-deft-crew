@@ -598,12 +598,13 @@ router.get('/next-action', auth, async (req, res) => {
     const [profile, user, resume, dropDoc] = await Promise.all([
       EngagementProfile.findOne({ user: req.userId }).select('sorted').lean(),
       User.findById(req.userId).select('referralCount').lean(),
-      Resume.findOne({ user: req.userId }).sort({ updatedAt: -1 }).select('completionPercentage').lean(),
+      Resume.findOne({ user: req.userId }).sort({ updatedAt: -1 }).select('completionPercentage strength').lean(),
       drops.todayDrop(),
     ]);
     const drop = dropDoc ? await drops.dropForUser(dropDoc, req.userId) : null;
     const action = goalsSvc.nextAction({
-      resumePercent: resume ? Number(resume.completionPercentage || 0) : null,
+      // resume full fix: with resumeV2 the card reads "resume strength" v2 (content depth + page fill)
+      resumePercent: resume ? Number((isEnabled('resumeV2', { id: String(req.userId), role: req.userRole || 'student' }) ? resume.strength : resume.completionPercentage) || 0) : null,
       claimedEver: !!profile?.sorted?.discounts,
       dropOpenNotAnswered: !!drop && !drop.myChoice,
       referralCount: Number(user?.referralCount || 0),

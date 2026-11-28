@@ -80,7 +80,7 @@ check("fresher missing items have step keys too", empty.missing.every((m) => rul
 
 console.log("-- the shared file");
 const fs = require("fs");
-const app = path.join(SERVER, "..", "Testting", "app", "src", "utils", "resumeRules.js");
+const app = path.join(process.env.TDC_APP_DIR || path.join(SERVER, "..", "Testting"), "app", "src", "utils", "resumeRules.js"); // TDC_APP_DIR: the app repo (worktrees)
 if (fs.existsSync(app)) check("the app's copy is identical (also checked by the app's resume-pdf-save test)", fs.readFileSync(app, "utf8").replace(/\r\n/g, "\n") === fs.readFileSync(path.join(SERVER, "utils", "resumeRules.js"), "utf8").replace(/\r\n/g, "\n"));
 
 const failed = results.filter((x) => !x).length;
