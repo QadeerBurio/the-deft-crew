@@ -9,7 +9,7 @@
 //   check({ field, text, current, role }) → { issues: [{ code, message, fix? }] }   live checks for one field
 //   autofix(resume) → { changes: [{ rule, path, before, after }], patch }   P3-4b §5, previewed by the app (owner #12)
 //   transcribe(buffer, mime) → { text }   speak mode (flag resumeSpeak), never stored
-// English only (owner). Model: OPENAI_MODEL (default gpt-4o-mini); speech: OPENAI_TRANSCRIBE_MODEL (default whisper-1).
+// The resume text is English only (owner); speech is transcribed in whatever language was spoken. Model: OPENAI_MODEL (default gpt-4o-mini); speech: OPENAI_TRANSCRIBE_MODEL (default whisper-1).
 const crypto = require("crypto");
 const { checkText, numbersIn } = require("./resumeStudio/validator");
 const { SYNONYM_MAP } = require("../utils/skillNormalizer");
@@ -305,7 +305,8 @@ async function transcribe(buffer, mime = "audio/m4a") {
   if (!buffer?.length) throw new CoachError(400, "NO_AUDIO", "nothing was recorded. hold the button and talk.");
   const { toFile } = require("openai");
   const file = await toFile(buffer, /wav/.test(mime) ? "answer.wav" : /webm/.test(mime) ? "answer.webm" : "answer.m4a", { type: mime });
-  const r = await ai().audio.transcriptions.create({ file, model: process.env.OPENAI_TRANSCRIBE_MODEL || "whisper-1", language: "en" });
+  // resume full fix: no fixed language: the model detects English, Urdu or Roman Urdu; the chat translates before using it
+  const r = await ai().audio.transcriptions.create({ file, model: process.env.OPENAI_TRANSCRIBE_MODEL || "whisper-1" });
   return { text: str(r?.text, 2000) };
 }
 
