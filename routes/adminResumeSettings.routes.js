@@ -7,14 +7,14 @@ const auth = require("../middleware/auth.middleware");
 const adminOnly = require("../middleware/adminMiddleware");
 const settings = require("../services/resumeSettings");
 const actionLog = require("../services/adminActionLog");
-const { TEMPLATE_IDS, LIBRARY_IDS } = require("../config/resumeTemplates");
+const { TEMPLATE_IDS, OFFERED_IDS } = require("../config/resumeTemplates");
 
 const router = express.Router();
 router.use(auth, adminOnly);
 const ok = (res, data) => res.json({ ok: true, data });
 const fail = (res, status, code, message) => res.status(status).json({ ok: false, error: { code, message } });
-// the five shown today + the library (the older aliases aren't offered in the gallery)
-const OFFERED = ["modern_ats", "stanford", "jakes", "faang", "rezi", ...LIBRARY_IDS];
+// what the gallery offers, from the shared registry (the five + the library; the older aliases aren't offered)
+const OFFERED = OFFERED_IDS;
 
 router.get("/", async (req, res) => {
   try { ok(res, { ...(await settings.get()), templates: OFFERED.filter((id) => TEMPLATE_IDS.includes(id)) }); }

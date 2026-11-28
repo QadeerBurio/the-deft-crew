@@ -29,7 +29,8 @@ const P = reqS("./config/adminPermissions");
   const member = { _id: oid(), role: "admin", adminAccess: { level: "member", permissions: ["brands.*", "dashboard.view"], status: "active" } };
   const paused = { _id: oid(), role: "admin", adminAccess: { level: "member", permissions: ["brands.view"], status: "suspended" } };
   const student = { _id: oid(), role: "student" };
-  check("an admin today: legacy, every permission except team.manage", access.levelOf(legacy) === "legacy" && access.has(legacy, "students.delete") && !access.has(legacy, "team.manage") && access.permissionsOf(legacy).length === P.KEYS.length - 1);
+  // and never the restricted child-safety intake (designated responders only, 28 Nov)
+  check("an admin today: legacy, every permission except team.manage and the restricted safety intake", access.levelOf(legacy) === "legacy" && access.has(legacy, "students.delete") && !access.has(legacy, "team.manage") && !access.has(legacy, "safety.intake.view") && !access.has(legacy, "safety.intake.act") && access.permissionsOf(legacy).length === P.KEYS.length - 3);
   check("adminAccess.level super: everything incl. team.manage", access.levelOf(sup) === "super" && access.has(sup, "team.manage"));
   process.env.SUPER_ADMIN_IDS = String(legacy._id);
   check("SUPER_ADMIN_IDS (SEC-2): super", access.levelOf(legacy) === "super" && access.has(legacy, "team.manage"));

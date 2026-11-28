@@ -24,6 +24,37 @@ const { tailorResume }                   = require('../services/resumeTailorServ
 const { generateResumePDF }              = require('../services/pdfService');
 const { optimizeParsedResume, withoutVerdicts } = require('../services/resumeIntelligenceService');
 const { isEnabled: flagEnabled } = require('../config/featureFlags');
+
+// ---------- resume full fix (resumeV2): the gap check's inputs ----------
+const WAIVABLE = ['experience', 'projects', 'education_extra'];
+const SKILL_GROUP_IDS = ['', 'technical', 'tools', 'soft'];
+// settings the app may send: gate only turns on (a resume made or edited with the gap check), waived = known keys
+function cleanGateSettings(st) {
+  if (!st || typeof st !== 'object') return st;
+  if (st.gate !== undefined && st.gate !== true) delete st.gate;
+  if (st.waived !== undefined) st.waived = Array.isArray(st.waived) ? [...new Set(st.waived.filter((k) => WAIVABLE.includes(k)))] : [];
+  return st;
+}
+// skills: a group the app doesn't know becomes ungrouped (never a failed save); no level unless the student gave one
+function cleanSkills(items) {
+  if (!Array.isArray(items)) return items;
+  return items.filter((x) => x && (typeof x === 'string' ? x.trim() : true)).map((x) => {
+    if (typeof x === 'string') return { name: x.trim().slice(0, 80) };
+    const out = { ...x };
+    if (out.group !== undefined && !SKILL_GROUP_IDS.includes(String(out.group).toLowerCase())) out.group = '';
+    else if (out.group !== undefined) out.group = String(out.group).toLowerCase();
+    return out;
+  });
+}
+// the page as the app measured it on the real render (utils/resumeRender measureScript); anything odd: not stored
+function cleanLayout(l) {
+  if (!l || typeof l !== 'object') return null;
+  const fill = Number(l.fill);
+  const pages = Math.round(Number(l.pages));
+  if (typeof l.key !== 'string' || !l.key || l.key.length > 80 || !Number.isFinite(fill) || fill < 0 || fill > 10 || !Number.isFinite(pages) || pages < 1 || pages > 20) return null;
+  return { key: l.key, fill: Math.round(fill * 1000) / 1000, pages, template: typeof l.template === 'string' ? l.template.slice(0, 40) : undefined, at: new Date() };
+}
+const strengthOn = (req) => flagEnabled('resumeV2', { id: String(req.userId || (req.user && req.user._id) || ''), role: req.userRole || (req.user && req.user.role) || 'student' });
 const { perUser } = require('../utils/userRateLimit');
 const resumeAiLimit = perUser('resume_ai'); // one count for both AI helpers (P3 #7)
 const OpenAI = require('openai');
@@ -261,6 +292,10 @@ router.post('/', auth, rejectGuest, checkResumeLimit, async (req, res) => {
       };
       // P3-1: the track chosen at "start fresh" (missing = experienced, as before)
       if (['fresher', 'experienced'].includes(req.body.settings.track)) cleanData.settings.track = req.body.settings.track;
+      // resume full fix: made with the gap check (new start screen)
+      const gs = cleanGateSettings({ gate: req.body.settings.gate, waived: req.body.settings.waived });
+      if (gs.gate === true) cleanData.settings.gate = true;
+      if (Array.isArray(gs.waived) && gs.waived.length) cleanData.settings.waived = gs.waived;
     }
 
     // the resume's name: the student's own, or (empty) "<Full name> – <title>" from the model's pre-save
@@ -279,6 +314,8 @@ router.post('/', auth, rejectGuest, checkResumeLimit, async (req, res) => {
         cleanData[field] = [];
       }
     });
+    cleanData.skills = cleanSkills(cleanData.skills);
+    { const l = cleanLayout(req.body.layout); if (l) cleanData.layout = l; }
 
     cleanData.template = req.body.template || 'modern';
 
@@ -463,6 +500,12 @@ router.post('/upload',
       projects: f.projects,
       languages: f.languages,
       achievements: f.achievements,
+      // resume full fix: their own sections (were in otherNotes), the track asked before the upload, made with the gap check
+      activities: f.activities || [],
+      volunteering: f.volunteering || [],
+      awards: f.awards || [],
+      ...(['fresher', 'experienced'].includes(req.body && req.body.track) || (req.body && req.body.gate === 'true')
+        ? { settings: { ...(['fresher', 'experienced'].includes(req.body.track) ? { track: req.body.track } : {}), ...(req.body.gate === 'true' ? { gate: true } : {}) } } : {}),
       otherNotes: f.otherNotes,
       ...(f.professionalSummary.title ? { targetRole: f.professionalSummary.title } : {}),
       uploadedResume: {
@@ -570,6 +613,26 @@ function determineVersionTag(parsedData) {
 }
 
 // ========== GET SINGLE RESUME ==========
+// resume full fix: what tdc already knows for "build from my tdc profile": the account's education (with years), bio,
+// headline, skills, links, the professional profile, and verified hires via tdc (real experience, never guessed)
+router.get('/profile-facts', auth, rejectGuest, async (req, res) => {
+  try {
+    const User = require('../models/User');
+    const u = await User.findById(req.user._id).select('name email phone city location headline bio skills education universityName university').lean();
+    let profile = null;
+    try { profile = await require('../models/ProfessionalProfile').findOne({ userId: req.user._id }).select('fullName headline university fieldOfStudy bio skills portfolioLinks').lean(); } catch (e) { profile = null; }
+    let hires = [];
+    try {
+      const outs = await require('../models/CareerOutcome').find({ candidate: req.user._id, outcomeType: 'hired', verificationLevel: 'verified', revokedAt: null }).select('job employerConfirmedAt').populate({ path: 'job', select: 'title company companyName' }).lean();
+      hires = outs.filter((o) => o.job && o.job.title).map((o) => ({ role: String(o.job.title || '').slice(0, 120), company: String(o.job.companyName || o.job.company || '').slice(0, 120), startDate: o.employerConfirmedAt || null, verified: true }));
+    } catch (e) { hires = []; }
+    res.json({ success: true, data: { user: u || {}, profile, hires } });
+  } catch (error) {
+    console.error('Profile facts error:', error.message);
+    res.status(500).json({ success: false, error: 'Something went wrong' });
+  }
+});
+
 router.get('/:id', auth, async (req, res) => {
   try {
     const resume = await Resume.findOne({
@@ -680,6 +743,7 @@ router.put('/:id', auth, rejectGuest, async (req, res) => {
       if (req.body.settings.track !== undefined && !['fresher', 'experienced'].includes(req.body.settings.track)) delete req.body.settings.track;
       // P3d: the verified line is on or off, nothing else
       if (req.body.settings.verifiedLine !== undefined && typeof req.body.settings.verifiedLine !== 'boolean') delete req.body.settings.verifiedLine;
+      cleanGateSettings(req.body.settings); // resume full fix
       resume.settings = {
         ...resume.settings,
         ...req.body.settings
@@ -697,9 +761,11 @@ router.put('/:id', auth, rejectGuest, async (req, res) => {
     const arrayFields = ['education', 'skills', 'workExperience', 'certifications', 'projects', 'languages', 'references', 'interests', 'achievements', 'activities', 'volunteering', 'awards', 'coursework']; // P3-3: the last four
     arrayFields.forEach(field => {
       if (req.body[field] !== undefined) {
-        resume[field] = req.body[field];
+        resume[field] = field === 'skills' ? cleanSkills(req.body[field]) : req.body[field];
       }
     });
+    // resume full fix: a measurement sent with the edit (it only counts while it matches the render: models/Resume.js)
+    if (req.body.layout !== undefined) { const l = cleanLayout(req.body.layout); if (l) resume.layout = l; }
 
     if (req.body.template) {
       resume.template = req.body.template;
@@ -761,6 +827,24 @@ router.put('/:id', auth, rejectGuest, async (req, res) => {
 });
 
 // ========== DELETE RESUME ==========
+// resume full fix: the preview's measurement of the page (how full one page is), saved on its own so a measurement never
+// starts the AI enrichment an edit does. → { success, data: { layout, strength, gaps } }
+router.post('/:id/layout', auth, rejectGuest, async (req, res) => {
+  try {
+    const layout = cleanLayout(req.body);
+    if (!layout) return res.status(400).json({ success: false, error: 'Invalid measurement' });
+    const resume = await Resume.findOne({ _id: req.params.id, user: req.user._id });
+    if (!resume) return res.status(404).json({ success: false, error: 'Resume not found' });
+    resume.layout = layout;
+    await resume.save();
+    const report = resume.strengthReport();
+    res.json({ success: true, data: { layout: resume.layout, strength: resume.strength, gaps: report.gaps, page: report.page } });
+  } catch (error) {
+    console.error('Resume layout error:', error.message);
+    res.status(500).json({ success: false, error: 'Something went wrong' });
+  }
+});
+
 router.delete('/:id', auth, rejectGuest, async (req, res) => {
   try {
     const resume = await Resume.findOne({
@@ -1000,7 +1084,7 @@ router.get('/:id/analytics', auth, async (req, res) => {
       atsKeywords: resume.careerProfile?.atsKeywords?.slice(0, 10) || [],
       profileStrength: profileStrength,
       completeness: resume.completionPercentage || 0,
-      strength: resume.isComplete ? 90 : Math.min(50 + (resume.completionPercentage || 0) * 0.5, 85),
+      strength: strengthOn(req) ? (resume.strength || 0) : (resume.isComplete ? 90 : Math.min(50 + (resume.completionPercentage || 0) * 0.5, 85)),
       improvements: improvements,
       isEnriched: !!resume.careerProfile?.isEnriched
     };

@@ -1,6 +1,7 @@
 // models/Resume.js
 const mongoose = require('mongoose');
-const { resumeStrength, defaultResumeName } = require('../utils/resumeRules');
+const { resumeStrength, resumeStrengthV2, defaultResumeName } = require('../utils/resumeRules');
+const { layoutKey } = require('../utils/resumeRender');
 
 const resumeSchema = new mongoose.Schema({
   user: {
@@ -47,14 +48,14 @@ const resumeSchema = new mongoose.Schema({
   }],
   skills: [{
     name: { type: String, default: '' },
-    level: {
-      type: String,
-      default: 'Intermediate'
-    },
+    // resume full fix: never a level the student didn't give (it was 'Intermediate'); older resumes keep theirs
+    level: { type: String, default: '' },
     category: {
       type: String,
       default: 'Technical'
-    }
+    },
+    // resume full fix: the group the student put it in (shown on the resume as "Technical: …"); empty = ungrouped
+    group: { type: String, enum: ['', 'technical', 'tools', 'soft'], default: '' }
   }],
   workExperience: [{
     company: { type: String, default: '' },
@@ -86,10 +87,8 @@ const resumeSchema = new mongoose.Schema({
   }],
   languages: [{
     name: { type: String, default: '' },
-    proficiency: {
-      type: String,
-      default: 'Intermediate'
-    }
+    // resume full fix: only what the student said (it was 'Intermediate', printed as "(Intermediate)")
+    proficiency: { type: String, default: '' }
   }],
   interests: [String],
   achievements: [String],
@@ -273,8 +272,25 @@ const resumeSchema = new mongoose.Schema({
     // P3-1 / P3-2: "fresher" (no internship or job yet) or "experienced"; missing = experienced (old resumes unchanged)
     track: { type: String, enum: ['fresher', 'experienced'] },
     // P3d: the "verified by tdc" line on this resume (facts from the server, never typed); off until the student adds it
-    verifiedLine: { type: Boolean, default: false }
+    verifiedLine: { type: Boolean, default: false },
+    // resume full fix (resumeV2): gate = this resume was made or edited with the gap check, so "next" / "finish" wait for
+    // the minimums (older finished resumes: advice only). waived = "I really don't have this" (experience, projects,
+    // education_extra): the item counts once a fresher alternative is added, never by the waiver alone.
+    gate: { type: Boolean, default: undefined },
+    waived: { type: [String], default: undefined }
   },
+  // resume full fix: the page as the app measured it on the real render (preview WebView): fill 1 = one full page.
+  // key = utils/resumeRender layoutKey of the render it measured; a different key (content or template changed) = stale.
+  layout: {
+    key: { type: String },
+    fill: { type: Number, min: 0, max: 10 },
+    pages: { type: Number, min: 1, max: 20 },
+    template: { type: String },
+    at: { type: Date }
+  },
+  // resume full fix: "resume strength" v2 (content depth + page fill, utils/resumeRules resumeStrengthV2). The app shows it
+  // with resumeV2 on; completionPercentage stays the old score for older apps.
+  strength: { type: Number, default: 0 },
   // P3d public resume page (owner #1): off until the student turns it on; its own switch (never settings.visibility).
   // slug: the unguessable link (22 random characters, a new one on "new link"); selfKey: added to the student's own
   // "open my page" so their visits aren't counted. Both are never sent with the resume (select: false).
@@ -392,109 +408,29 @@ resumeSchema.pre('save', function () {
     // "resume strength": the same calculation the app shows (utils/resumeRules)
     this.completionPercentage = resumeStrength(this).score;
     this.isComplete = this.completionPercentage >= 85;
+    this.strength = strengthNow(this).score;
     if (!this.nameCustom || !String(this.name || '').trim()) { this.nameCustom = false; this.name = defaultResumeName(this); }
   } catch (error) {
     console.error('Error calculating completion:', error);
   }
 });
 
-// Calculate completion percentage
-resumeSchema.methods.calculateCompletionPercentage = function () {
-  try {
-    let total = 0;
-    let completed = 0;
+// resume full fix: strength v2 of a resume document, with the stored page measurement only while it matches the
+// resume as it is now (same render key)
+function strengthNow(doc) {
+  const plain = JSON.parse(JSON.stringify(typeof doc.toObject === 'function' ? doc.toObject({ depopulate: true }) : doc));
+  const l = plain.layout || {};
+  let page = null;
+  try { if (l.key && typeof l.fill === 'number' && l.key === layoutKey(plain, plain.template, plain.customStyles || {})) page = { fill: l.fill, pages: l.pages || 1 }; } catch (e) { page = null; }
+  return resumeStrengthV2(plain, page);
+}
+resumeSchema.statics.strengthNow = strengthNow;
+resumeSchema.methods.strengthReport = function () { return strengthNow(this); };
 
-    // Personal Info (15%)
-    if (this.personalInfo) {
-      const hasName = this.personalInfo.firstName && this.personalInfo.firstName.trim() !== '';
-      const hasEmail = this.personalInfo.email && this.personalInfo.email.trim() !== '';
-      const hasPhone = this.personalInfo.phone && this.personalInfo.phone.trim() !== '';
-      if (hasName) completed += 5;
-      if (hasEmail) completed += 5;
-      if (hasPhone) completed += 5;
-      total += 15;
-    }
-
-    // Professional Summary (10%)
-    if (this.professionalSummary && this.professionalSummary.summary && this.professionalSummary.summary.trim() !== '') {
-      completed += 10;
-    }
-    total += 10;
-
-    // Education (15%)
-    if (this.education && this.education.length > 0) {
-      const validEducation = this.education.filter(e => e.institution && e.institution.trim() !== '');
-      if (validEducation.length > 0) {
-        completed += Math.min(15, validEducation.length * 5);
-      }
-    }
-    total += 15;
-
-    // Skills (10%)
-    if (this.skills && this.skills.length > 0) {
-      const validSkills = this.skills.filter(s => s.name && s.name.trim() !== '');
-      if (validSkills.length > 0) {
-        completed += Math.min(10, validSkills.length * 2);
-      }
-    }
-    total += 10;
-
-    // Work Experience (20%)
-    if (this.workExperience && this.workExperience.length > 0) {
-      const validExperience = this.workExperience.filter(w => w.company && w.company.trim() !== '');
-      if (validExperience.length > 0) {
-        completed += Math.min(20, validExperience.length * 5);
-      }
-    }
-    total += 20;
-
-    // Certifications (5%)
-    if (this.certifications && this.certifications.length > 0) {
-      const validCerts = this.certifications.filter(c => c.name && c.name.trim() !== '');
-      if (validCerts.length > 0) {
-        completed += Math.min(5, validCerts.length * 2);
-      }
-    }
-    total += 5;
-
-    // Projects (5%)
-    if (this.projects && this.projects.length > 0) {
-      const validProjects = this.projects.filter(p => p.name && p.name.trim() !== '');
-      if (validProjects.length > 0) {
-        completed += Math.min(5, validProjects.length * 2);
-      }
-    }
-    total += 5;
-
-    // Languages (5%)
-    if (this.languages && this.languages.length > 0) {
-      const validLanguages = this.languages.filter(l => l.name && l.name.trim() !== '');
-      if (validLanguages.length > 0) {
-        completed += Math.min(5, validLanguages.length * 2);
-      }
-    }
-    total += 5;
-
-    // Target Jobs (15%)
-    if (this.targetJobs && this.targetJobs.length > 0) {
-      const validJobs = this.targetJobs.filter(j => j.jobTitle && j.jobTitle.trim() !== '');
-      if (validJobs.length > 0) {
-        completed += Math.min(15, validJobs.length * 5);
-      }
-    } else if (this.targetJob && this.targetJob.jobTitle && this.targetJob.jobTitle.trim() !== '') {
-      completed += 15;
-    }
-    total += 15;
-
-    return Math.min(Math.round((completed / total) * 100), 100);
-  } catch (error) {
-    console.error('Error calculating completion:', error);
-    return 0;
-  }
-};
+// (resume full fix) the old field-count calculateCompletionPercentage was removed: nothing called it; completionPercentage
+// is utils/resumeRules resumeStrength (pre-save above).
 
 // ============ METHODS FOR JOB RECOMMENDATIONS ============
-
 // Extract all skills from resume
 resumeSchema.methods.extractAllSkills = function () {
   const skillSet = new Set();

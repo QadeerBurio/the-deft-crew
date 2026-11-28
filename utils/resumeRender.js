@@ -62,6 +62,20 @@ const BASE = { body: DM, head: DM, size: 10, line: 1.35, nameSize: 22, align: 'l
 
 // a student leads with education, projects and activities; experience (optional) last
 const FRESHER_ORDER = ['education', 'projects', 'activities', 'volunteering', 'skills', 'awards', 'certifications', 'languages', 'experience'];
+// an experienced resume leads with work
+const EXP_ORDER = ['experience', 'projects', 'education', 'skills', 'certifications', 'awards', 'activities', 'volunteering', 'languages'];
+// two columns (resume full fix): the side panel holds skills, languages, certificates and awards; everything else in the
+// main column. The HTML is in the order the page is read (left column first), so text comes out of the PDF in order.
+const TWO = { layout: 'two-col', side: ['skills', 'languages', 'certifications', 'awards'], sidePos: 'left', size: 9.8, line: 1.33, nameSize: 22, gap: 8 };
+// rows: [id, name, description, look (on top of BASE), fit (what "recommended for you" reads: fields, level, roles)]
+// ats: two columns start as 'design' and only earn 'safe' when the PDF test reads them in order (ATS_SAFE_TWO_COL)
+const ATS_SAFE_TWO_COL = [];
+const lib = (collection, rows) => rows.map(([id, name, description, look, fit]) => ({
+  id, name, collection, description,
+  ats: look.layout === 'two-col' && !ATS_SAFE_TWO_COL.includes(id) ? 'design' : 'safe',
+  approved: true, fit: fit || {},
+  look: { ...BASE, ...look },
+}));
 
 // ats: what the ATS test (app tests/app/resume-ats.test.js) finds on the real PDF ('safe' | 'design')
 const LIBRARY = [
@@ -113,7 +127,76 @@ const LIBRARY = [
     id: 'two_tone', name: 'Two-tone', collection: 'ats', ats: 'safe', description: 'name and headings in two calm colours',
     look: { ...BASE, head: OUTFIT, nameAccent: true, second: '#0E7490', h2x: 'thin-rule', accent: '#1E3A8A', heading: '#0F172A', text: '#1F2937', dateAccent: true },
   },
+  // ---------- resume full fix: 35 more (each one page by default; ats = what tests/app/resume-ats.test.js finds) ----------
+  ...lib('ats', [
+    ['ats_plain', 'ATS Plain', 'the plainest layout portals read: one column, black text', { body: stack('Roboto'), head: stack('Roboto'), h2: 'accent-rule', accent: '#111111', heading: '#111111', text: '#222222', order: EXP_ORDER }, { level: 'any' }],
+  ]),
+  ...lib('tech', [
+    ['dev_stack', 'Dev Stack', 'projects and skills up top, for software roles', { body: stack('IBM Plex Sans'), head: stack('IBM Plex Sans'), h2x: 'thin-rule', dateAccent: true, accent: '#2563EB', heading: '#0F172A', text: '#1E293B', skillSep: ' · ', order: ['projects', 'skills', 'experience', 'education', 'activities', 'awards', 'certifications', 'volunteering', 'languages'] }, { fields: ['cs'], roles: 'developer|engineer|software|frontend|backend|mobile|web' }],
+    ['code_clean', 'Code Clean', 'quiet sans, thin rules, built to scan', { body: stack('Inter'), head: stack('Inter'), line: 1.36, h2x: 'thin-rule', accent: '#0F172A', heading: '#0F172A', text: '#334155', second: '#475569', subPlain: true, order: EXP_ORDER }, { fields: ['cs'], level: 'experienced' }],
+    ['data_lens', 'Data Lens', 'skills first, teal headings, for data and analytics', { body: stack('Source Sans 3'), head: stack('Source Sans 3'), h2x: 'underline-accent', accent: '#0F766E', heading: '#0F172A', text: '#1F2937', skillSep: ' · ', order: ['skills', 'projects', 'experience', 'education', 'certifications', 'activities', 'awards', 'volunteering', 'languages'] }, { fields: ['cs', 'business'], roles: 'data|analyst|analytics|bi|machine learning|ai' }],
+    ['cloud_side', 'Cloud Side', 'two columns: skills and tools in a side panel', { ...TWO, body: stack('Inter'), head: stack('Inter'), accent: '#1E3A8A', heading: '#0F172A', text: '#1F2937', sideTint: '#EEF2FF' }, { fields: ['cs'] }],
+  ]),
+  ...lib('business', [
+    ['banker', 'Banker', 'serif, small capitals, the look banks expect', { body: LIB_SERIF, head: LIB_SERIF, size: 10, line: 1.32, nameSize: 21, align: 'center', h2x: 'smallcaps-rule', accent: '#111111', heading: '#111111', text: '#1A1A1A', order: EXP_ORDER }, { fields: ['business'], roles: 'bank|finance|investment|account|audit' }],
+    ['analyst', 'Analyst', 'navy headings, numbers easy to find', { body: stack('Lato'), head: stack('Merriweather', true), h2x: 'thin-rule', dateAccent: true, accent: '#1E3A8A', heading: '#0F172A', text: '#1F2937', order: EXP_ORDER }, { fields: ['business'], roles: 'analyst|finance|consult|strategy' }],
+    ['consulting', 'Consulting', 'serif headings with a burgundy rule', { body: stack('Source Sans 3'), head: stack('Lora', true), h2: 'accent-rule', accent: '#7F1D1D', heading: '#111111', text: '#222222' }, { fields: ['business'], level: 'experienced', roles: 'consult|manager|strategy' }],
+    ['ledger', 'Ledger', 'two columns: numbers-first layout with a side panel', { ...TWO, sidePos: 'right', body: stack('Lato'), head: stack('Lato'), accent: '#475569', heading: '#0F172A', text: '#334155', sideTint: '#F1F5F9' }, { fields: ['business'] }],
+  ]),
+  ...lib('design', [
+    ['portfolio', 'Portfolio', 'two columns, a coloured side panel and room for a photo', { ...TWO, body: stack('Open Sans'), head: stack('Poppins'), accent: '#6D28D9', heading: '#111827', text: '#1F2937', sideTint: '#F5F3FF', photoDefault: true }, { fields: ['design'], roles: 'design|ui|ux|graphic|creative|artist|illustrat' }],
+    ['studio', 'Studio', 'a bold name and a coloured bar on each heading', { head: stack('Poppins'), body: stack('Open Sans'), nameSize: 26, h2x: 'bar-left', nameAccent: true, accent: '#C2410C', heading: '#111827', text: '#1F2937' }, { fields: ['design'] }],
+    ['canvas', 'Canvas', 'two columns in berry, photo on by default', { ...TWO, body: stack('DM Sans'), head: stack('DM Serif Display', true), accent: '#BE185D', heading: '#111827', text: '#1F2937', sideTint: '#FDF2F8', photoDefault: true }, { fields: ['design'], level: 'fresher' }],
+    ['gallery', 'Gallery', 'centred, spaced headings, calm teal', { head: OUTFIT, align: 'center', h2x: 'caps-spaced', accent: '#0F766E', heading: '#0F172A', text: '#1F2937', skillSep: ' · ' }, { fields: ['design'] }],
+  ]),
+  ...lib('engineering', [
+    ['blueprint', 'Blueprint', 'royal blue rules, projects right after experience', { body: stack('Roboto'), head: stack('Roboto'), h2x: 'thin-rule', second: '#1D4ED8', accent: '#1D4ED8', heading: '#0F172A', text: '#1E293B', order: ['experience', 'projects', 'education', 'skills', 'certifications', 'awards', 'activities', 'volunteering', 'languages'] }, { fields: ['engineering', 'cs'], roles: 'engineer|mechanical|electrical|civil|chemical' }],
+    ['mechanic', 'Workshop', 'compact and practical, green headings', { body: stack('Roboto'), head: stack('Bitter', true), size: 9.5, line: 1.3, gap: 7, h2: 'accent-rule', accent: '#15803D', heading: '#0F172A', text: '#1F2937' }, { fields: ['engineering'] }],
+    ['circuit', 'Circuit', 'two columns: tools and certificates on the side', { ...TWO, body: stack('IBM Plex Sans'), head: stack('IBM Plex Sans'), accent: '#0369A1', heading: '#0C1A2B', text: '#1E293B', sideTint: '#F0F9FF' }, { fields: ['engineering', 'cs'] }],
+  ]),
+  ...lib('medical', [
+    ['clinical', 'Clinical', 'clean teal, education and licences up front', { body: stack('Source Sans 3'), head: stack('Source Sans 3'), h2x: 'underline-accent', accent: '#0F766E', heading: '#0F172A', text: '#1F2937', order: ['education', 'experience', 'certifications', 'projects', 'skills', 'awards', 'activities', 'volunteering', 'languages'], headings: { certifications: 'Licences & Certifications' } }, { fields: ['medical'], roles: 'doctor|nurse|medical|clinic|pharm|health|dent|physio' }],
+    ['care', 'Care', 'centred and warm, a short green line under each heading', { body: stack('Lato'), head: stack('Lora', true), align: 'center', h2x: 'short-rule', accent: '#15803D', heading: '#111111', text: '#222222' }, { fields: ['medical'] }],
+    ['medic_side', 'Rounds', 'two columns: licences and skills on the side', { ...TWO, body: stack('Source Sans 3'), head: stack('Source Sans 3'), accent: '#0F766E', heading: '#0F172A', text: '#1F2937', sideTint: '#F0FDFA', side: ['certifications', 'skills', 'languages', 'awards'] }, { fields: ['medical'] }],
+  ]),
+  ...lib('teaching', [
+    ['classroom', 'Classroom', 'friendly olive headings, activities near the top', { body: stack('Open Sans'), head: stack('Open Sans'), h2x: 'underline-accent', accent: '#4D7C0F', heading: '#1A2E05', text: '#1F2937', order: ['education', 'experience', 'activities', 'volunteering', 'projects', 'skills', 'certifications', 'awards', 'languages'] }, { fields: ['teaching'], roles: 'teach|tutor|lecturer|instructor|educat|trainer' }],
+    ['lecturer', 'Lecturer', 'serif, centred, ruled headings', { body: LIB_SERIF, head: LIB_SERIF, align: 'center', h2: 'full-rule', accent: '#1E3A8A', heading: '#111827', text: '#1F2937', headings: { projects: 'Research & Projects' } }, { fields: ['teaching'], level: 'experienced' }],
+    ['mentor', 'Mentor', 'a plum bar on each heading', { head: OUTFIT, h2x: 'bar-left', accent: '#6D28D9', heading: '#111827', text: '#1F2937' }, { fields: ['teaching'] }],
+  ]),
+  ...lib('sales', [
+    ['pitch', 'Pitch', 'your name on a colour band, results up front', { head: stack('Poppins'), body: stack('Open Sans'), band: true, h2x: 'caps-spaced', accent: '#C2410C', heading: '#111827', text: '#1F2937', order: EXP_ORDER }, { fields: ['business'], roles: 'sales|business development|account|retail' }],
+    ['growth', 'Growth', 'berry name and spaced headings, for marketing', { head: OUTFIT, nameAccent: true, h2x: 'caps-spaced', accent: '#BE185D', heading: '#111827', text: '#1F2937', skillSep: ' · ' }, { fields: ['business'], roles: 'market|brand|social media|content|growth|digital' }],
+    ['brand_side', 'Brand Side', 'two columns: skills and tools beside your campaigns', { ...TWO, body: stack('DM Sans'), head: stack('Poppins'), accent: '#C2410C', heading: '#111827', text: '#1F2937', sideTint: '#FFF7ED' }, { fields: ['business'] }],
+  ]),
+  ...lib('minimal', [
+    ['mono', 'Mono', 'black and white, nothing else', { body: stack('Inter'), head: stack('Inter'), h2: 'plain', h2ls: '0.05em', accent: '#111111', heading: '#111111', text: '#222222', second: '#111111' }, {}],
+    ['whitespace', 'Whitespace', 'airy spacing, slate lines', { body: stack('Lato'), head: stack('Lato'), line: 1.36, gap: 8, h2x: 'thin-rule', accent: '#475569', heading: '#0F172A', text: '#334155', subPlain: true }, {}],
+    ['paper', 'Paper', 'serif and quiet: no rules, no colour', { body: stack('Merriweather', true), head: stack('Merriweather', true), size: 9.5, line: 1.36, h2x: 'none', accent: '#1A1A1A', heading: '#111111', text: '#222222', h2case: 'title' }, {}],
+  ]),
+  ...lib('twocol', [
+    ['split', 'Split', 'two columns: contact skills on the left, story on the right', { ...TWO, body: stack('Inter'), head: stack('Inter'), accent: '#475569', heading: '#0F172A', text: '#334155', sideTint: '#F8FAFC' }, {}],
+    ['sidebar_right', 'Sidebar Right', 'two columns with the side panel on the right', { ...TWO, sidePos: 'right', body: stack('Source Sans 3'), head: stack('Lora', true), accent: '#1E3A8A', heading: '#0F172A', text: '#1F2937', sideTint: '#EFF6FF' }, {}],
+    ['modern_split', 'Modern Split', 'two columns, ocean blue headings', { ...TWO, body: stack('DM Sans'), head: OUTFIT, accent: '#0369A1', heading: '#0C1A2B', text: '#1E293B', sideTint: '#E0F2FE' }, { level: 'fresher' }],
+    ['compact_split', 'Compact Split', 'two columns, tighter: fits more', { ...TWO, size: 9.5, line: 1.3, gap: 7, body: stack('Roboto'), head: stack('Roboto'), accent: '#111111', heading: '#111111', text: '#222222', sideTint: '#F4F4F5' }, { level: 'experienced' }],
+  ]),
+  ...lib('executive', [
+    ['boardroom', 'Boardroom', 'serif headings, a bold bar under your name', { body: stack('Source Sans 3'), head: stack('Lora', true), nameSize: 24, nameBar: true, h2: 'accent-rule', accent: '#1E3A8A', heading: '#0F172A', text: '#1F2937', order: EXP_ORDER }, { level: 'experienced', roles: 'manager|head|director|lead|senior' }],
+    ['director', 'Director', 'centred serif, small capitals', { body: LIB_SERIF, head: LIB_SERIF, nameSize: 23, align: 'center', h2x: 'smallcaps-rule', accent: '#1A1A1A', heading: '#111111', text: '#1A1A1A', order: EXP_ORDER }, { level: 'experienced' }],
+    ['executive_side', 'Executive Side', 'two columns in burgundy, achievements on the right', { ...TWO, sidePos: 'right', body: stack('Lato'), head: stack('Merriweather', true), accent: '#7F1D1D', heading: '#111111', text: '#222222', sideTint: '#FEF2F2' }, { level: 'experienced' }],
+  ]),
 ];
+
+// ---------- the registry: one list the app's gallery, the approval gate, the server's allowed ids and the admin's
+// hide list all read (resume full fix). Adding a template = one entry above (+ regenerated previews and tests). ----------
+const COLLECTIONS = Object.freeze({
+  ats: 'ATS Pro', fresher: 'Fresher & Student', tech: 'Tech / IT', business: 'Business & Finance', design: 'Design / Creative',
+  engineering: 'Engineering', medical: 'Medical / Healthcare', teaching: 'Teaching', sales: 'Sales & Marketing', minimal: 'Minimal',
+  twocol: 'Two-column', executive: 'Executive',
+});
+// the first ten (P3c): approved by the owner (25 Nov 2026), and what "recommended for you" reads
+const FIRST_FIT = { campus: { level: 'fresher' }, first_step: { level: 'fresher' }, fresh_start: { level: 'fresher' }, society_leader: { level: 'fresher' }, project_first: { level: 'fresher', fields: ['cs', 'engineering', 'design'] }, internship_ready: { level: 'fresher', roles: 'intern' }, scholar: { level: 'fresher', roles: 'ms|mphil|phd|research|scholarship|graduate school' }, harvard: { level: 'any' }, clean_line: { level: 'any' }, two_tone: { level: 'any' } };
+LIBRARY.forEach((t) => { if (t.approved === undefined) t.approved = true; if (!t.fit) t.fit = FIRST_FIT[t.id] || {}; });
 
 // ---------- the renderer ----------
 const TEMPLATES = [
@@ -247,6 +330,20 @@ const verifiedLine = (facts) => {
   return items.length ? `\n    <div class="verified" style="margin-top: 3px; font-size: 0.92em;">✓ verified by tdc: ${items.join(' · ')}</div>` : '';
 };
 
+// skills the student grouped (technical / tools / soft): [[label, names]] in that order, ungrouped ones first without a
+// label; null when none is grouped (then the line renders exactly as before)
+const SKILL_LABELS = [['technical', 'Technical'], ['tools', 'Tools'], ['soft', 'Soft skills']];
+function groupedSkills(items) {
+  const xs = list(items).filter((s) => s && str(typeof s === 'string' ? s : s.name));
+  const groupOf = (s) => (typeof s === 'object' ? str(s.group).toLowerCase() : '');
+  if (!xs.some((s) => SKILL_LABELS.some(([g]) => g === groupOf(s)))) return null;
+  const out = [];
+  const loose = xs.filter((s) => !SKILL_LABELS.some(([g]) => g === groupOf(s))).map((s) => str(typeof s === 'string' ? s : s.name));
+  if (loose.length) out.push(['', loose]);
+  for (const [g, lbl] of SKILL_LABELS) { const names = xs.filter((s) => groupOf(s) === g).map((s) => str(s.name)); if (names.length) out.push([lbl, names]); }
+  return out;
+}
+
 function body(resume, look = {}, verified) {
   let r = resume || {};
   for (const k of look.hidden || []) if (HIDE[k]) r = HIDE[k](r);
@@ -281,6 +378,8 @@ function body(resume, look = {}, verified) {
   )).join('');
 
   const skills = list(r.skills).map((s) => str(typeof s === 'string' ? s : s?.name)).filter(Boolean);
+  const skillGroups = groupedSkills(r.skills);
+  const skillsInner = skillGroups ? skillGroups.map(([g, xs]) => `<p class="skills" dir="auto">${g ? `<span style="font-weight: 700;">${g}:</span> ` : ''}${xs.map(esc).join(look.skillSep || ', ')}</p>`).join('') : skills.length ? `<p class="skills" dir="auto">${skills.map(esc).join(look.skillSep || ', ')}</p>` : '';
   const certs = list(r.certifications).filter((c) => c && str(c.name)).map((c) => entry(esc(str(c.name)), esc(str(c.organization)), formatDate(c.issueDate), str(c.credentialUrl) ? `<p>${link(c.credentialUrl)}</p>` : '')).join('');
   const langs = list(r.languages).filter((l) => l && str(l.name)).map((l) => esc(str(l.name)) + (str(l.proficiency) ? ` (${esc(str(l.proficiency))})` : ''));
   const achievements = list(r.achievements).map(str).filter(Boolean);
@@ -299,6 +398,37 @@ function body(resume, look = {}, verified) {
   const summary = str(r.professionalSummary?.summary);
 
   const workFirst = work.length > 0;
+  if (look.layout === 'two-col') {
+    const sectionsHtml = {
+      experience: section(H('experience', 'Experience'), work, iconOf(look, 'experience')),
+      education: section(H('education', 'Education'), eduWithCourses, iconOf(look, 'education')),
+      projects: section(H('projects', 'Projects'), projects, iconOf(look, 'projects')),
+      skills: section(H('skills', 'Skills'), skillGroups ? skillsInner : skills.length ? skills.map((x) => `<p class="skills" dir="auto">${esc(x)}</p>`).join('') : '', iconOf(look, 'skills')),
+      certifications: section(H('certifications', 'Certifications'), certs, iconOf(look, 'certifications')),
+      languages: section(H('languages', 'Languages'), langs.map((l) => `<p dir="auto">${l}</p>`).join(''), iconOf(look, 'languages')),
+      activities: section(H('activities', 'Leadership & Activities'), activities, iconOf(look, 'activities')),
+      volunteering: section(H('volunteering', 'Volunteering'), volunteering, iconOf(look, 'volunteering')),
+      awards: section(H('awards', 'Awards'), awards, iconOf(look, 'awards')),
+    };
+    const sideKeys = list(look.side).filter((k) => k in sectionsHtml);
+    const mainHtml = {};
+    for (const k of Object.keys(sectionsHtml)) if (!sideKeys.includes(k)) mainHtml[k] = sectionsHtml[k];
+    const chosen = Array.isArray(r.sectionOrder) ? r.sectionOrder.filter((k) => sideKeys.includes(k)) : [];
+    const sideOrder = [...chosen, ...sideKeys.filter((k) => !chosen.includes(k))];
+    const side = `<aside class="side">${sideOrder.map((k) => sectionsHtml[k]).join('')}</aside>`;
+    const main = `<div class="main">
+  ${section(H('summary', 'Summary'), summary ? `<p dir="auto">${esc(summary)}</p>` : '', iconOf(look, 'summary'))}
+  ${ordered(r, workFirst, mainHtml, look.order)}
+  ${section(H('achievements', 'Achievements'), achievements.length ? `<ul>${achievements.map((a) => `<li dir="auto">${esc(a)}</li>`).join('')}</ul>` : '', iconOf(look, 'achievements'))}
+  ${section('Additional information', str(r.otherNotes) ? lines(r.otherNotes) : '')}</div>`;
+    return `
+  <header>${look.photoUrl ? `<img class="photo" src="${esc(look.photoUrl)}" alt="">` : ''}
+    <h1 dir="auto">${esc(name || 'Your name')}</h1>
+    ${title ? `<div class="title" dir="auto">${esc(title)}</div>` : ''}
+    ${contact.length ? `<div class="contact">${contact.join('<span class="sep"> | </span>')}</div>` : ''}${verifiedLine(verified)}
+  </header>
+  <div class="cols${look.sidePos === 'right' ? ' cols-r' : ''}">${look.sidePos === 'right' ? main + side : side + main}</div>`;
+  }
   return `
   <header>${look.photoUrl ? `<img class="photo" src="${esc(look.photoUrl)}" alt="">` : ''}
     <h1 dir="auto">${esc(name || 'Your name')}</h1>
@@ -310,7 +440,7 @@ function body(resume, look = {}, verified) {
     experience: section(H('experience', 'Experience'), work, iconOf(look, 'experience')),
     education: section(H('education', 'Education'), eduWithCourses, iconOf(look, 'education')),
     projects: section(H('projects', 'Projects'), projects, iconOf(look, 'projects')),
-    skills: section(H('skills', 'Skills'), skills.length ? `<p class="skills" dir="auto">${skills.map(esc).join(look.skillSep || ', ')}</p>` : '', iconOf(look, 'skills')),
+    skills: section(H('skills', 'Skills'), skillsInner, iconOf(look, 'skills')),
     certifications: section(H('certifications', 'Certifications'), certs, iconOf(look, 'certifications')),
     languages: section(H('languages', 'Languages'), langs.length ? `<p dir="auto">${langs.join(', ')}</p>` : '', iconOf(look, 'languages')),
     activities: section(H('activities', 'Leadership & Activities'), activities, iconOf(look, 'activities')),
@@ -401,6 +531,15 @@ function extras(look, { accent, heading, text }) {
   if (look.photoUrl) out.push(`header .photo { float: right; width: 72px; height: 72px; object-fit: cover; margin: 0 0 6px 12px; border-radius: ${{ circle: '50%', rounded: '10px', square: '0' }[look.photoShape] || '50%'}; }`);
   if (look.dateAccent) out.push(`.d { color: ${accent}; font-weight: 600; }`);
   if (look.subPlain) out.push(`.sub { font-style: normal; color: ${text}; opacity: 0.85; }`);
+  if (look.layout === 'two-col') {
+    const right = look.sidePos === 'right';
+    out.push(`.cols { display: grid; grid-template-columns: ${right ? '1fr 30%' : '30% 1fr'}; column-gap: 16px; align-items: start; margin-top: ${look.gap}px; }`,
+      `.side { ${look.sideTint ? `background: ${look.sideTint}; padding: 8px 10px 10px; border-radius: 6px; ` : ''}font-size: ${look.size - 0.4}pt; overflow-wrap: anywhere; }`,
+      '.side section:first-child, .main section:first-child { margin-top: 0; }',
+      `.side h2 { font-size: ${look.size + 0.5}pt; }`,
+      '.side .row { display: block; } .side .d { display: block; white-space: normal; }',
+      '.main { min-width: 0; }');
+  }
   return out.length ? `\n  ${out.join('\n  ')}` : '';
 }
 
@@ -432,6 +571,7 @@ function customise(look, styles = {}, { library = false, resume } = {}) {
   if (st.headings && typeof st.headings === 'object') l.headings = { ...(look.headings || {}), ...st.headings };
   const photo = str(resume?.personalInfo?.photoUrl);
   if (st.photo && st.photo.on && /^https:\/\//i.test(photo)) { l.photoUrl = photo; l.photoShape = st.photo.shape; }
+  else if (!st.photo && look.photoDefault && /^https:\/\//i.test(photo)) { l.photoUrl = photo; l.photoShape = 'circle'; }
   if (st.dateFormat === 'mm/yyyy') l.dateFormat = 'mm/yyyy';
   if (st.pageSize === 'Letter') l.pageSize = 'Letter';
   if (st.linkStyle === 'short') l.linkStyle = 'short';
@@ -499,7 +639,52 @@ const renderCoverLetterHTML = (resume, templateId, customStyles = {}, letter = {
 </html>`;
 };
 
+// ---------- the registry (resume full fix) ----------
+// every template the app can offer, in gallery order: the five older ones, then the library
+const REGISTRY = Object.freeze([
+  ...TEMPLATES.map((t) => Object.freeze({ id: t.id, name: t.name, description: t.description, collection: 'ats', ats: 'safe', approved: true, older: true, layout: 'single', fit: {} })),
+  ...LIBRARY.map((t) => Object.freeze({ id: t.id, name: t.name, description: t.description, collection: t.collection, ats: t.ats, approved: t.approved !== false, older: false, layout: t.look.layout || 'single', fit: t.fit || {} })),
+]);
+// what a resume may store as its template: the old aliases (opened as their closest look) + every registry id
+const TEMPLATE_IDS = Object.freeze([...Object.keys(LEGACY), ...REGISTRY.map((t) => t.id)]);
+const OFFERED_IDS = Object.freeze(REGISTRY.filter((t) => t.approved).map((t) => t.id));
+
+// ---------- the page: measured on the real render (resume full fix) ----------
+// The printed page box of a template + the student's customisation, in CSS px (96 per inch): the PDF's @page.
+const MM = 96 / 25.4;
+function pageBox(templateId, customStyles, resume) {
+  const base = templateOf(templateId);
+  const library = LIBRARY.some((t) => t.id === base.id);
+  const { look } = customise(base.look, customStyles == null ? (resume && resume.customStyles) || {} : customStyles, { library, resume });
+  const m = /([\d.]+)mm\s+([\d.]+)mm/.exec(String(look.margin || '14mm 15mm')) || [0, 14, 15];
+  const letter = look.pageSize === 'Letter';
+  return { width: letter ? 816 : 794, height: letter ? 1056 : 1123, top: Math.round(Number(m[1]) * MM * 10) / 10, x: Math.round(Number(m[2]) * MM * 10) / 10 };
+}
+// Run inside the rendered page (the preview WebView, or Chrome in the tests): lays the page out exactly as it prints
+// (width and margins of the PDF) and reports how full one page is: { type: 'tdc-page', fill, pages, height, overflow }
+//   fill 1 = exactly one full page; pages = how many pages it prints on; overflow = text wider than its box
+function measureScript(box) {
+  return `(function(){var B=${JSON.stringify(box)};function run(){try{var m=document.querySelector('main.page');if(!m)return;` +
+    `document.documentElement.style.background='#ffffff';document.body.style.padding='0';document.body.style.margin='0';` +
+    `m.style.boxShadow='none';m.style.margin='0';m.style.width=B.width+'px';m.style.minHeight='0';m.style.padding=B.top+'px '+B.x+'px';` +
+    `var avail=B.height-2*B.top;var h=m.getBoundingClientRect().height-2*B.top;var over=0;var all=m.querySelectorAll('*');` +
+    `for(var i=0;i<all.length;i++){var e=all[i];if(e.scrollWidth>e.clientWidth+2&&e.clientWidth>0&&e.tagName!=='A'){over++;}}` +
+    `var res={type:'tdc-page',fill:Math.round(h/avail*1000)/1000,pages:Math.max(1,Math.ceil((h-2)/avail)),height:Math.round(h),overflow:over};` +
+    `window.__tdcPage=res;if(window.ReactNativeWebView&&window.ReactNativeWebView.postMessage)window.ReactNativeWebView.postMessage(JSON.stringify(res));}catch(e){}}` +
+    `if(document.fonts&&document.fonts.ready){document.fonts.ready.then(function(){setTimeout(run,40);});}else{setTimeout(run,250);}})();true;`;
+}
+// a short key for "this exact render" (resume content + template + customisation): a stored measurement only counts
+// while its key matches the resume as it is now (any content or template change makes it stale)
+function layoutKey(resume, templateId, customStyles) {
+  const r = resume || {};
+  const html = renderResumeHTML(r, templateId || r.template, customStyles == null ? r.customStyles || {} : customStyles);
+  let h = 5381;
+  for (let i = 0; i < html.length; i += 1) h = ((h * 33) ^ html.charCodeAt(i)) >>> 0;
+  return `${(templateOf(templateId || r.template).id)}:${h.toString(36)}`;
+}
+
 module.exports = {
+  REGISTRY, TEMPLATE_IDS, OFFERED_IDS, COLLECTIONS, pageBox, measureScript, layoutKey,
   PALETTES, FONT_PAIRS, SIZES, DENSITY, MARGINS, HEADING_STYLES, SECTION_KEYS, MODEL_DEFAULT_COLOURS,
   LIBRARY, TEMPLATES, canonicalTemplate, templateOf, getDisplayLocation, formatDate, formatDateRange, customise, renderResumeHTML, renderCoverLetterHTML,
 };

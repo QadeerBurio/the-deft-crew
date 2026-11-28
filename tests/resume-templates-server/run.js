@@ -25,7 +25,7 @@ const cfg = reqS("./config/resumeTemplates");
   const render = reqS("./utils/resumeRender");
   const libIds = render.LIBRARY.map((t) => t.id);
   check("the accepted library ids are the shared renderer's library ids", JSON.stringify(libIds) === JSON.stringify(cfg.LIBRARY_IDS), `${libIds} vs ${cfg.LIBRARY_IDS}`);
-  const appCopy = path.join(h.SERVER, "..", "Testting", "app", "src", "utils", "resumeRender.js");
+  const appCopy = path.join(process.env.TDC_APP_DIR || path.join(h.SERVER, "..", "Testting"), "app", "src", "utils", "resumeRender.js"); // TDC_APP_DIR: the app repo (worktrees)
   if (fs.existsSync(appCopy)) {
     const norm = (s) => s.replace(/\r\n/g, "\n");
     check("utils/resumeRender.js is the app's app/src/utils/resumeRender.js, byte for byte", norm(fs.readFileSync(appCopy, "utf8")) === norm(fs.readFileSync(path.join(h.SERVER, "utils", "resumeRender.js"), "utf8")));

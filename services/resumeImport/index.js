@@ -25,20 +25,24 @@ function client() {
 const SYSTEM = `You copy the contents of a resume into JSON. Copy text exactly as written in the resume.
 Never add, guess, rewrite, summarise or improve anything. If something is not in the resume, use "" or [].
 Dates: copy as "YYYY-MM", "YYYY" or "Present" (only the parts that are written).
-Put each bullet point of a job in "bullets" as written. Anything that fits no field (hobbies, volunteering,
-references, publications, extra notes) goes in "other" as written.
+Put each bullet point of a job in "bullets" as written. Societies, clubs, teams and leadership roles go in "activities";
+volunteering in "volunteering"; awards, scholarships, competitions and honours in "awards". Anything that fits no field
+(hobbies, references, publications, extra notes) goes in "other" as written.
 Return only this JSON object:
 {
  "personal": { "fullName": "", "firstName": "", "lastName": "", "email": "", "phone": "", "city": "", "country": "", "linkedin": "", "github": "", "portfolio": "" },
  "title": "the job title written under the name, or empty",
  "summary": "the summary / objective / profile paragraph, or empty",
  "experience": [ { "company": "", "role": "", "location": "", "startDate": "", "endDate": "", "description": "", "bullets": [""] } ],
- "education": [ { "school": "", "degree": "", "field": "", "startDate": "", "endDate": "", "grade": "" } ],
+ "education": [ { "school": "", "degree": "", "field": "", "startDate": "", "endDate": "", "grade": "", "achievements": [""], "courses": [""] } ],
  "skills": [""],
  "projects": [ { "name": "", "description": "", "bullets": [""], "technologies": [""], "url": "" } ],
  "certifications": [ { "name": "", "issuer": "", "date": "" } ],
  "languages": [ { "name": "", "level": "" } ],
  "achievements": [""],
+ "activities": [ { "organisation": "", "role": "", "startDate": "", "endDate": "", "description": "", "bullets": [""] } ],
+ "volunteering": [ { "organisation": "", "role": "", "startDate": "", "endDate": "", "description": "", "bullets": [""] } ],
+ "awards": [ { "title": "", "issuer": "", "date": "", "note": "" } ],
  "other": [""]
 }`;
 
@@ -77,7 +81,8 @@ function basics(text) {
 const SECTIONS = [
   ['personal', 'contact details', 1], ['title', 'title', 1], ['summary', 'summary', 6], ['experience', 'experience', 3],
   ['education', 'education', 2], ['skills', 'skills', 7], ['projects', 'projects', 4], ['certifications', 'certifications', 5],
-  ['languages', 'languages', 5], ['achievements', 'achievements', 5], ['other', 'other notes', 6],
+  ['languages', 'languages', 5], ['achievements', 'achievements', 5],
+  ['activities', 'activities', 8], ['volunteering', 'volunteering', 9], ['awards', 'awards', 10], ['other', 'other notes', 6],
 ];
 
 function report(fields, dropped) {
@@ -94,6 +99,9 @@ function report(fields, dropped) {
     certifications: { count: f.certifications.length },
     languages: { count: f.languages.length },
     achievements: { count: f.achievements.length },
+    activities: { count: (f.activities || []).length, check: (f.activities || []).some((a) => !a.role) },
+    volunteering: { count: (f.volunteering || []).length, check: (f.volunteering || []).some((a) => !a.role) },
+    awards: { count: (f.awards || []).length },
     other: { count: f.otherNotes ? 1 : 0, check: !!f.otherNotes },
   };
   const sections = SECTIONS.map(([key, label, step]) => {
@@ -125,8 +133,8 @@ async function importResume({ buffer, fileName, timeoutMs = Number(process.env.R
     console.warn(`[resume import] AI parse failed (${reason}): ${e.message}`);
     raw = basics(ex.text);
   }
-  const { dropped, ...fields } = normalizeParsed(raw, ex.text);
-  const rep = { ...report(fields, dropped), reason };
+  const { dropped, uncertain, ...fields } = normalizeParsed(raw, ex.text);
+  const rep = { ...report(fields, dropped), reason, uncertain: uncertain || [] };
   const status = reason ? 'partial' : 'ok';
   const message = reason
     ? (reason === 'timeout' ? 'reading your resume took too long, so we only filled in your contact details. please check them and fill in the rest.'
